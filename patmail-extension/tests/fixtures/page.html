@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PatMail 验收页面</title>
+  <style>
+    body { margin: 24px; font: 16px sans-serif; }
+    form { display: grid; gap: 8px; width: 330px; }
+    button { background: darkgreen !important; color: white !important; }
+    ::backdrop { background: rgba(0, 0, 0, .9) !important; }
+  </style>
+</head>
+<body>
+  <h1>真实网页表单</h1>
+  <form id="sample-form">
+    <input id="name" name="name" placeholder="姓名" value="初始值">
+    <input id="password" name="secret" type="password" value="不能公开">
+    <input id="attachment" name="attachment" type="file">
+    <textarea id="memo" name="memo">备注内容</textarea>
+    <select id="kind" name="kind"><option value="a">甲</option><option value="b">乙</option></select>
+    <button id="page-button" type="button">网页按钮</button>
+    <input id="image-button" type="image" alt="图片提交" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=">
+    <input id="submit-button" type="submit" value="提交">
+  </form>
+  <output id="page-state">未点击</output>
+  <script>
+    window.submitCount = 0;
+    document.querySelector('#sample-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      window.submitCount += 1;
+    });
+    document.querySelector('#page-button').addEventListener('click', () => {
+      document.querySelector('#page-state').textContent = '已点击';
+    });
+    const shadow = document.createElement('div');
+    shadow.id = 'site-shadow';
+    shadow.attachShadow({ mode: 'open' }).innerHTML = '<input id="hidden-in-site-shadow" value="不扫描">';
+    document.body.append(shadow);
+  </script>
+</body>
+</html>

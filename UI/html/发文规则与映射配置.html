@@ -1,10 +1,869 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <title>Title</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1440, initial-scale=1.0" />
+<title>PatMail - 发文规则与映射配置</title>
+<style>
+:root{
+  --bg:#fff8fb;
+  --pink:#ff6aa6;
+  --pink2:#ff8fbc;
+  --pink3:#ffdce9;
+  --pink4:#fff0f6;
+  --line:#f3dfe8;
+  --text:#2d3353;
+  --sub:#7f86a3;
+  --blue:#6aa8ff;
+  --green:#66d8ac;
+  --mint:#dff8ef;
+  --purple:#b587ff;
+  --orange:#ffbd77;
+  --shadow:0 10px 30px rgba(223,138,179,.08);
+}
+*{box-sizing:border-box}
+html,body{
+  margin:0;
+  background:#ffffff;
+  font-family:"Microsoft YaHei","PingFang SC","Helvetica Neue",Arial,sans-serif;
+  color:var(--text);
+}
+body{
+  display:flex;
+  justify-content:center;
+  padding:0;
+}
+.page{
+  width:1440px;
+  height:900px;
+  overflow:hidden;
+  background:
+    radial-gradient(circle at 8% 18%, rgba(255,188,214,.26) 0, rgba(255,188,214,0) 17%),
+    radial-gradient(circle at 87% 10%, rgba(255,217,230,.35) 0, rgba(255,217,230,0) 22%),
+    radial-gradient(circle at 10% 70%, rgba(255,220,234,.24) 0, rgba(255,220,234,0) 18%),
+    linear-gradient(180deg,#fffafc 0%, #fff7fb 100%);
+  position:relative;
+}
+.page::before{
+  content:"";
+  position:absolute;inset:0;
+  background-image:
+    radial-gradient(circle at 16% 11%, rgba(255,167,204,.35) 0 2px, transparent 2.3px),
+    radial-gradient(circle at 61% 18%, rgba(255,167,204,.22) 0 2px, transparent 2.3px),
+    radial-gradient(circle at 90% 18%, rgba(255,167,204,.25) 0 2px, transparent 2.3px),
+    radial-gradient(circle at 79% 76%, rgba(255,167,204,.18) 0 2px, transparent 2.3px);
+  pointer-events:none;
+}
+.sidebar{
+  position:absolute; left:0; top:0; bottom:0;
+  width:178px;
+  padding:18px 16px 18px 18px;
+  border-right:1px solid rgba(243,223,232,.75);
+}
+.logo{
+  display:flex; align-items:center; gap:10px;
+  margin-bottom:24px;
+}
+.logo .bunny{
+  width:52px;height:52px;border-radius:18px;
+  background:linear-gradient(180deg,#fff,#ffeef5);
+  border:2px solid #f1cadb;
+  display:flex;align-items:center;justify-content:center;
+  color:#f179a8;font-size:26px;
+  box-shadow:var(--shadow);
+}
+.logo .brand{
+  line-height:1.05;
+}
+.logo .brand .name{
+  font-size:18px;font-weight:800;color:#b94578;letter-spacing:.2px;
+}
+.logo .brand .sub{
+  font-size:12px;color:#5b6383;margin-top:5px;font-weight:700;
+}
+.menu{
+  margin-top:6px;
+  display:flex;flex-direction:column;gap:8px;
+}
+.menu-item{
+  height:44px;border-radius:12px;
+  display:flex;align-items:center;gap:12px;
+  padding:0 14px;
+  color:#4e5678;font-size:16px;font-weight:700;
+}
+.menu-item .ico{width:18px;text-align:center;opacity:.95}
+.menu-item.active{
+  background:linear-gradient(180deg,#ffe9f2,#ffdce9);
+  color:#ff4c8f;
+  box-shadow:0 6px 18px rgba(255,115,170,.15) inset, var(--shadow);
+  border:1px solid #ffc3da;
+}
+.sidebar-footer{
+  position:absolute; left:18px; bottom:22px;
+  color:#586184; font-size:16px; font-weight:700;
+  display:flex; align-items:center; gap:10px;
+}
+.sidebar-deco{
+  position:absolute; left:8px; bottom:130px;
+  width:146px; text-align:center;
+  color:#f07aa8; opacity:.93;
+}
+.sidebar-deco .cat{
+  font-size:66px; line-height:1;
+}
+.sidebar-deco .txt{
+  margin-top:6px; font-size:16px; line-height:1.55; font-weight:700;
+}
+.main{
+  position:absolute; left:178px; top:0; right:0; bottom:0;
+  padding:12px 16px 12px 12px;
+}
+.topbar{
+  height:58px;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:4px 2px 10px 10px;
+}
+.search{
+  width:520px;height:46px;border-radius:26px;
+  border:1px solid #f3ccd9;
+  background:rgba(255,255,255,.88);
+  display:flex;align-items:center;gap:10px;
+  padding:0 18px;
+  color:#9aa0b8;
+  box-shadow:var(--shadow);
+  margin-left:190px;
+}
+.search .icon{font-size:18px}
+.search .text{font-size:15px;font-weight:700;letter-spacing:.2px}
+.top-right{
+  display:flex;align-items:center;gap:18px;
+}
+.bell{
+  position:relative;font-size:24px;color:#566284;
+}
+.bell .dot{
+  position:absolute;right:-6px;top:-3px;
+  width:18px;height:18px;border-radius:999px;
+  background:#ff4e8d;color:#fff;font-size:11px;font-weight:800;
+  display:flex;align-items:center;justify-content:center;
+  border:2px solid #fff6fa;
+}
+.user{
+  display:flex;align-items:center;gap:10px;
+}
+.avatar{
+  width:46px;height:46px;border-radius:50%;
+  background:linear-gradient(180deg,#fff,#ffe0ec);
+  border:2px solid #f5d3e2;
+  box-shadow:var(--shadow);
+  display:flex;align-items:center;justify-content:center;
+  font-size:24px;
+}
+.user .meta .name{
+  font-size:16px;font-weight:800;color:#242947;
+}
+.user .meta .role{
+  margin-top:4px;font-size:12px;color:#8b91ad;font-weight:700;
+}
+.quote-pill{
+  height:48px;padding:0 20px;border-radius:24px;
+  display:flex;align-items:center;
+  border:1px solid #f4d5e1;
+  background:rgba(255,248,251,.82);
+  color:#f06f9f;font-size:14px;font-weight:800;
+}
+.content-wrap{
+  height:814px;
+  border-radius:22px;
+  background:rgba(255,255,255,.74);
+  border:1px solid #f4e3eb;
+  box-shadow:var(--shadow);
+  padding:12px;
+  position:relative;
+}
+.hero{
+  height:102px;
+  display:flex; align-items:flex-start; justify-content:space-between;
+  padding:4px 6px 6px 6px;
+}
+.hero-left{display:flex;gap:14px}
+.hero-bunny{
+  width:66px;height:66px;border-radius:18px;
+  display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(180deg,#fff,#fff2f7);
+  border:2px solid #f1d5e1;
+  color:#f37da8;font-size:38px;
+}
+.hero h1{
+  margin:2px 0 0;
+  font-size:28px; font-weight:900; letter-spacing:.2px;
+}
+.hero p{
+  margin:6px 0 0; font-size:15px; color:#7d83a1; font-weight:700;
+}
+.hero .flower{
+  color:#ff83b0;font-size:22px;margin-left:8px;
+}
+.hero-catbox{
+  width:280px; height:88px;
+  position:relative;
+  display:flex;align-items:flex-start;justify-content:flex-end;
+}
+.hero-balloon{
+  position:absolute; left:0; top:7px;
+  width:170px; height:58px; border-radius:28px;
+  border:1px solid #f4d5e1; color:#f07aa8;
+  background:rgba(255,252,253,.9);
+  font-size:14px;font-weight:800; line-height:1.35;
+  display:flex; align-items:center; justify-content:center;
+  text-align:center;
+}
+.hero-cat{
+  position:absolute; right:0; top:-2px;
+  font-size:68px; line-height:1;
+}
+.tab-row{
+  height:72px;
+  display:grid;
+  grid-template-columns:repeat(6,1fr);
+  gap:10px;
+  margin-bottom:12px;
+}
+.big-tab{
+  border-radius:16px;
+  border:1px solid #ecdfe8;
+  background:linear-gradient(180deg,#fff,#fffdfd);
+  display:flex;align-items:center;gap:12px;
+  padding:0 18px;
+  box-shadow:var(--shadow);
+}
+.big-tab.active{
+  border:2px solid #ff7db1;
+  background:linear-gradient(180deg,#fff7fb,#ffeef5);
+}
+.big-tab .ticon{
+  width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+  font-size:22px;font-weight:700;
+}
+.big-tab .tmeta .tt{
+  font-size:16px; font-weight:900;
+}
+.big-tab .tmeta .ts{
+  margin-top:5px; font-size:13px; color:#8a91ad; font-weight:700;
+}
+.pink{background:#ffe5f0;color:#ff4d92}
+.blue{background:#e7f1ff;color:#4f91ff}
+.green{background:#e8faef;color:#28bd78}
+.purple{background:#f0e8ff;color:#9a61ff}
+.orange{background:#fff2df;color:#ff9b2f}
+.cyan{background:#e8f6ff;color:#2c8ee9}
+
+.grid{
+  display:grid;
+  grid-template-columns:1fr 312px;
+  gap:12px;
+  height:604px;
+}
+.left-grid{
+  display:grid;
+  grid-template-columns:1.17fr .9fr;
+  grid-template-rows:322px 184px 1fr;
+  gap:12px;
+}
+.card{
+  background:rgba(255,255,255,.84);
+  border:1px solid var(--line);
+  border-radius:16px;
+  box-shadow:var(--shadow);
+  overflow:hidden;
+}
+.card-hd{
+  height:54px;padding:0 16px;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.card-hd .ttl{
+  display:flex;align-items:center;gap:10px;
+  font-size:16px;font-weight:900;
+}
+.mini-btn{
+  height:32px;padding:0 14px;border-radius:10px;border:1px solid #ffc6da;
+  background:linear-gradient(180deg,#ffeff5,#ffdbe8);
+  color:#ff4e8f;font-size:14px;font-weight:800;
+  display:flex;align-items:center;gap:6px;
+}
+.body-pad{padding:0 14px 14px}
+.search-mini{
+  height:40px;border-radius:10px;border:1px solid #eedfe8;background:#fff;
+  display:flex;align-items:center;gap:10px;padding:0 12px;color:#a4abc0;
+  font-weight:700;
+}
+table{width:100%;border-collapse:collapse}
+th{
+  height:38px; background:#f7f7fb; color:#7d83a2; font-size:12px; font-weight:900;
+  border-bottom:1px solid #eef0f6;
+}
+td{
+  height:42px; font-size:12px; color:#566081; font-weight:700;
+  border-bottom:1px solid #f3eff4;
+}
+td,th{text-align:left;padding:0 10px}
+.logo-mini{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:24px;height:24px;border-radius:6px;margin-right:6px;
+  font-size:12px;color:#fff;font-weight:900;
+}
+.td-op a{color:#5b9dff;text-decoration:none;margin-right:10px}
+.switch{
+  width:34px;height:18px;border-radius:999px;background:#d7dbe8;position:relative;display:inline-block
+}
+.switch::after{
+  content:""; width:14px;height:14px;border-radius:50%;background:#fff;position:absolute;left:2px;top:2px;
+  box-shadow:0 2px 5px rgba(0,0,0,.08);
+}
+.switch.on{background:#ff77ab}
+.switch.on::after{left:18px}
+.dot-tag{
+  display:inline-flex;align-items:center;gap:6px;color:#48bc7d;font-weight:800;
+}
+.dot-tag::before{
+  content:""; width:8px;height:8px;border-radius:50%; background:#48bc7d; display:block;
+}
+.pill{
+  display:inline-flex;align-items:center;justify-content:center;
+  height:24px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:900;
+}
+.pill.p1{background:#dff8ef;color:#1db46e}
+.pill.p2{background:#e7f1ff;color:#3984ee}
+.pill.p3{background:#fff1df;color:#f38b1a}
+.pill.p4{background:#efe6ff;color:#9b5cff}
+.pill.p5{background:#ffe6ef;color:#ff4d8f}
+.twocol-head{
+  display:grid; grid-template-columns:1fr auto auto;
+  gap:8px; align-items:center;
+}
+.template-grid{
+  display:grid; grid-template-columns:repeat(3,1fr); gap:10px;
+}
+.template-card{
+  height:74px; border:1px solid #edf0f6; border-radius:12px;
+  background:linear-gradient(180deg,#fff,#fcfcff); padding:10px 12px;
+}
+.template-card .r1{display:flex;align-items:center;justify-content:space-between}
+.template-card .name{font-size:14px;font-weight:900}
+.template-card .sub{margin-top:4px;font-size:12px;color:#9097b2;font-weight:700}
+.template-card .foot{margin-top:8px;font-size:12px;color:#6b7495;font-weight:800}
+.template-card .nicon{
+  width:24px;height:24px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+  font-size:14px;
+}
+.rule-box{
+  display:grid; grid-template-columns:1.35fr .9fr; gap:12px; height:100%;
+}
+.rule-preview{
+  border:1px solid #edf0f6; border-radius:12px; overflow:hidden; background:#fff;
+}
+.rule-preview .row{
+  display:grid; grid-template-columns:92px 1fr 74px;
+  min-height:34px; align-items:center; border-bottom:1px solid #f2eef3;
+  font-size:12px; font-weight:800; color:#5b6484;
+}
+.rule-preview .row .c1{padding-left:12px;color:#7b82a0}
+.rule-preview .row .c2{padding:6px 10px}
+.rule-preview .row .c3{text-align:center}
+.tokens{
+  display:flex; flex-wrap:wrap; gap:8px;
+}
+.token{
+  padding:6px 10px; border-radius:8px; background:#ffeaf2; color:#ff5a96; font-size:12px; font-weight:900;
+}
+.signature{
+  height:100%; display:grid; grid-template-columns:1fr 180px;
+  gap:14px;
+}
+.sig-card{
+  border:1px solid #edf0f6; border-radius:12px; background:#fff; padding:14px;
+  font-size:13px; font-weight:800; color:#4e5779; line-height:1.65;
+}
+.sig-side{
+  border:1px dashed #eccfe0; border-radius:12px; background:linear-gradient(180deg,#fffafc,#fff2f8);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  color:#f0659a;
+}
+.sig-side .cat{font-size:54px; line-height:1}
+.sig-side .txt{text-align:center;font-size:16px;font-weight:900;margin-top:6px}
+.right-grid{
+  display:grid;
+  grid-template-rows:262px 242px 1fr;
+  gap:12px;
+}
+.list-box{
+  padding:8px 14px 12px;
+}
+.simple-item{
+  height:42px; border:1px solid #eef0f6; border-radius:12px; background:#fff;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 12px; margin-top:10px;
+}
+.simple-item .l{
+  display:flex; align-items:center; gap:10px;
+}
+.simple-item .ic{
+  width:28px;height:28px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+  font-size:15px;
+}
+.chev{color:#959cb8;font-size:18px;font-weight:900}
+.log-item{
+  display:grid; grid-template-columns:40px 1fr; gap:10px;
+  padding:10px 0; border-bottom:1px solid #f2eef3;
+}
+.log-avatar{
+  width:36px;height:36px;border-radius:50%;background:linear-gradient(180deg,#fff,#ffe3ee);
+  border:1px solid #f0d2df; display:flex; align-items:center; justify-content:center; font-size:20px;
+}
+.log-name{font-size:14px;font-weight:900}
+.log-sub{margin-top:4px;font-size:12px;color:#8c93af;font-weight:700}
+.log-time{margin-top:4px;font-size:12px;color:#a8aec3;font-weight:700}
+.quote-box{
+  height:100%;
+  display:flex; flex-direction:column; justify-content:center; align-items:center;
+  text-align:center; padding:10px 12px; color:#f06d9d;
+  background:linear-gradient(180deg,#fffafc,#fff2f8);
+}
+.quote-box .t1{font-size:22px; line-height:1}
+.quote-box .t2{font-size:20px; line-height:1}
+.quote-box .msg{font-weight:900; font-size:18px; line-height:1.65; margin:6px 0 10px}
+.quote-box .small{font-size:14px; line-height:1.7; font-weight:700}
+.footer-note{
+  position:absolute; left:14px; right:14px; bottom:7px;
+  display:flex; justify-content:space-between; color:#9ea4bc; font-size:12px; font-weight:700;
+}
+small.mute{color:#a6acc2;font-weight:800}
+</style>
 </head>
 <body>
+<div class="page">
+  <aside class="sidebar">
+    <div class="logo">
+      <div class="bunny">🐰</div>
+      <div class="brand">
+        <div class="name">PatMail💌</div>
+        <div class="sub">专利发文自动化</div>
+      </div>
+    </div>
 
+    <nav class="menu">
+      <div class="menu-item"><span class="ico">⌂</span><span>首页</span></div>
+      <div class="menu-item"><span class="ico">☑</span><span>发文任务</span></div>
+      <div class="menu-item active"><span class="ico">⚙</span><span>发文规则与映射配置</span></div>
+      <div class="menu-item"><span class="ico">♟</span><span>客户管理</span></div>
+      <div class="menu-item"><span class="ico">▣</span><span>文件管理</span></div>
+      <div class="menu-item"><span class="ico">▤</span><span>发文记录</span></div>
+      <div class="menu-item"><span class="ico">▥</span><span>统计报表</span></div>
+    </nav>
+
+    <div class="sidebar-deco">
+      <div class="cat">🐱</div>
+      <div class="txt">专注细节<br>守护创新<br>让知识更有力量</div>
+    </div>
+
+    <div class="sidebar-footer">⚙ <span>系统设置</span></div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span class="icon">🔍</span><span class="text">搜索客户、任务、文件、模板...</span></div>
+      <div class="top-right">
+        <div class="bell">🔔<span class="dot">3</span></div>
+        <div class="user">
+          <div class="avatar">👩🏻</div>
+          <div class="meta">
+            <div class="name">林小樱 ▾</div>
+            <div class="role">知识产权部</div>
+          </div>
+        </div>
+        <div class="quote-pill">“ 今天也要高效发文呀！♡ ”</div>
+      </div>
+    </div>
+
+    <section class="content-wrap">
+      <div class="hero">
+        <div class="hero-left">
+          <div class="hero-bunny">🐰</div>
+          <div>
+            <h1>发文规则与映射配置<span class="flower">🌸</span></h1>
+            <p>配置企业个性化发文规则，让自动化更贴合您的业务场景。 <span style="color:#ff8fb7">♥</span></p>
+          </div>
+        </div>
+        <div class="hero-catbox">
+          <div class="hero-balloon">“ 规则配置好，<br>发文更轻松！♡ ”</div>
+          <div class="hero-cat">🐱</div>
+        </div>
+      </div>
+
+      <div class="tab-row">
+        <div class="big-tab active">
+          <div class="ticon pink">👥</div>
+          <div class="tmeta">
+            <div class="tt" style="color:#ff4d92">客户发文方式</div>
+            <div class="ts">按客户设置发文策略</div>
+          </div>
+        </div>
+        <div class="big-tab">
+          <div class="ticon blue">🗂</div>
+          <div class="tmeta">
+            <div class="tt">文件描述→发文类型映射</div>
+            <div class="ts">智能匹配发文类型</div>
+          </div>
+        </div>
+        <div class="big-tab">
+          <div class="ticon green">📄</div>
+          <div class="tmeta">
+            <div class="tt">收件人模板</div>
+            <div class="ts">快速配置收件人</div>
+          </div>
+        </div>
+        <div class="big-tab">
+          <div class="ticon purple">🔐</div>
+          <div class="tmeta">
+            <div class="tt">抄送模板</div>
+            <div class="ts">常用抄送组合</div>
+          </div>
+        </div>
+        <div class="big-tab">
+          <div class="ticon orange">📝</div>
+          <div class="tmeta">
+            <div class="tt">标题注入规则</div>
+            <div class="ts">自动生成邮件标题</div>
+          </div>
+        </div>
+        <div class="big-tab">
+          <div class="ticon cyan">🖊</div>
+          <div class="tmeta">
+            <div class="tt">全局签名</div>
+            <div class="ts">统一邮件签名</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="left-grid">
+          <!-- 客户发文方式 -->
+          <div class="card">
+            <div class="card-hd">
+              <div class="ttl"><span style="color:#ff5f98;font-size:22px">👥</span><span>客户发文方式</span><small class="mute">ⓘ</small></div>
+              <div class="mini-btn">＋ 新增客户规则</div>
+            </div>
+            <div class="body-pad">
+              <div style="margin-bottom:10px;color:#8b91ac;font-size:13px;font-weight:700;">为不同客户配置默认的发文方式、审批设置等规则。</div>
+              <div class="search-mini">🔍 搜索客户名称、公司简称...</div>
+              <div style="margin-top:10px">
+                <table>
+                  <thead>
+                    <tr>
+                      <th style="width:29%">客户名称</th>
+                      <th style="width:14%">公司简称</th>
+                      <th style="width:22%">默认发文方式</th>
+                      <th style="width:12%">需审批</th>
+                      <th style="width:12%">状态</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><span class="logo-mini" style="background:#e93030">H</span>华为技术有限公司</td>
+                      <td>华为</td>
+                      <td>✈ 系统自动发文</td>
+                      <td><span class="switch"></span></td>
+                      <td><span class="dot-tag">启用</span></td>
+                      <td class="td-op"><a href="#">编辑</a>•••</td>
+                    </tr>
+                    <tr>
+                      <td><span class="logo-mini" style="background:#1f5fff">T</span>腾讯科技（深圳）有限公司</td>
+                      <td>腾讯</td>
+                      <td>✉ 人工审核后发文</td>
+                      <td><span class="switch on"></span></td>
+                      <td><span class="dot-tag">启用</span></td>
+                      <td class="td-op"><a href="#">编辑</a>•••</td>
+                    </tr>
+                    <tr>
+                      <td><span class="logo-mini" style="background:#ff7a00">A</span>阿里巴巴（中国）</td>
+                      <td>阿里</td>
+                      <td>✈ 系统自动发文</td>
+                      <td><span class="switch"></span></td>
+                      <td><span class="dot-tag">启用</span></td>
+                      <td class="td-op"><a href="#">编辑</a>•••</td>
+                    </tr>
+                    <tr>
+                      <td><span class="logo-mini" style="background:#3a8bff">B</span>北京字节跳动科技有限公司</td>
+                      <td>字节</td>
+                      <td>✉ 仅生成草稿</td>
+                      <td><span class="switch on"></span></td>
+                      <td><span class="dot-tag">启用</span></td>
+                      <td class="td-op"><a href="#">编辑</a>•••</td>
+                    </tr>
+                    <tr>
+                      <td><span class="logo-mini" style="background:#225bff">C</span>宁德时代新能源科技股份...</td>
+                      <td>宁德时代</td>
+                      <td>✈ 系统自动发文</td>
+                      <td><span class="switch"></span></td>
+                      <td><span class="dot-tag">启用</span></td>
+                      <td class="td-op"><a href="#">编辑</a>•••</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- 文件描述映射 -->
+          <div class="card">
+            <div class="card-hd">
+              <div class="ttl"><span style="color:#4fa4ff;font-size:22px">📄</span><span>文件描述 → 发文类型映射</span><small class="mute">ⓘ</small></div>
+              <div class="mini-btn">＋ 新增映射</div>
+            </div>
+            <div class="body-pad">
+              <div style="margin-bottom:12px;color:#8b91ac;font-size:13px;font-weight:700;">根据文件描述关键词，自动匹配发文类型。</div>
+              <table>
+                <thead>
+                  <tr><th style="width:45%">关键词（文件描述包含）</th><th style="width:35%">匹配的发文类型</th><th>操作</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td><span class="pill p1">授权</span></td><td><span class="pill p5">• 授权通知书</span></td><td class="td-op"><a href="#">编辑</a>•••</td></tr>
+                  <tr><td><span class="pill p2">审查意见</span></td><td><span class="pill p2">• 审查意见答复</span></td><td class="td-op"><a href="#">编辑</a>•••</td></tr>
+                  <tr><td><span class="pill p3">缴费</span></td><td><span class="pill p3">• 缴费通知</span></td><td class="td-op"><a href="#">编辑</a>•••</td></tr>
+                  <tr><td><span class="pill p1" style="background:#e7f1ff;color:#4f91ff">变更</span></td><td><span class="pill p1" style="background:#dff8ef;color:#23b56f">• 变更请求</span></td><td class="td-op"><a href="#">编辑</a>•••</td></tr>
+                  <tr><td><span class="pill p4">恢复</span></td><td><span class="pill p4">• 恢复权利请求</span></td><td class="td-op"><a href="#">编辑</a>•••</td></tr>
+                  <tr><td><span class="pill p5">放弃</span></td><td><span class="pill p5">• 放弃专利权请求</span></td><td class="td-op"><a href="#">编辑</a>•••</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 常用模板左 -->
+          <div class="card">
+            <div class="card-hd">
+              <div class="ttl"><span style="color:#25c087;font-size:22px">✉</span><span>收件人模板</span><small class="mute">ⓘ</small></div>
+              <div class="mini-btn">＋ 新增模板</div>
+            </div>
+            <div class="body-pad">
+              <div style="margin-bottom:10px;color:#8b91ac;font-size:13px;font-weight:700;">预设常用收件人组合，一键应用到发文任务。</div>
+              <div class="template-grid">
+                <div class="template-card">
+                  <div class="r1"><div class="name">默认收件人</div><div class="nicon orange">👤</div></div>
+                  <div class="sub">客户联系人 + 代理师</div><div class="foot">👥 3　 ✎  ⋯</div>
+                </div>
+                <div class="template-card">
+                  <div class="r1"><div class="name">国内申请</div><div class="nicon blue">👤</div></div>
+                  <div class="sub">客户专利部</div><div class="foot">👥 2　 ✎  ⋯</div>
+                </div>
+                <div class="template-card">
+                  <div class="r1"><div class="name">外国申请</div><div class="nicon purple">👤</div></div>
+                  <div class="sub">客户海外代理</div><div class="foot">👥 4　 ✎  ⋯</div>
+                </div>
+                <div class="template-card">
+                  <div class="r1"><div class="name">审查意见答复</div><div class="nicon blue">👤</div></div>
+                  <div class="sub">审查员 + 客户 + 代理师</div><div class="foot">👥 5　 ✎  ⋯</div>
+                </div>
+                <div class="template-card">
+                  <div class="r1"><div class="name">缴费通知</div><div class="nicon orange">👤</div></div>
+                  <div class="sub">财务联系人</div><div class="foot">👥 2　 ✎  ⋯</div>
+                </div>
+                <div class="template-card">
+                  <div class="r1"><div class="name">变更请求</div><div class="nicon green">👤</div></div>
+                  <div class="sub">客户联系人 + 审查员</div><div class="foot">👥 3　 ✎  ⋯</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 抄送模板 -->
+          <div class="card">
+            <div class="card-hd">
+              <div class="ttl"><span style="color:#b264ff;font-size:22px">👥</span><span>抄送模板</span><small class="mute">ⓘ</small></div>
+              <div class="mini-btn">＋ 新增模板</div>
+            </div>
+            <div class="body-pad">
+              <div style="margin-bottom:10px;color:#8b91ac;font-size:13px;font-weight:700;">配置常用抄送人组合，支持部门、角色快速选择。</div>
+              <div class="template-grid">
+                <div class="template-card">
+                  <div class="r1"><div class="name">内部团队</div><div class="nicon purple">👥</div></div>
+                  <div class="sub">项目团队成员</div><div class="foot">👥 6　 ✎  ⋯</div>
+                </div>
+                <div class="template-card">
+                  <div class="r1"><div class="name">法务抄送</div><div class="nicon purple">🛡</div></div>
+                  <div class="sub">法务部</div><div class="foot">👥 3　 ✎  ⋯</div>
+                </div>
+                <div class="template-card">
+                  <div class="r1"><div class="name">财务抄送</div><div class="nicon orange">📋</div></div>
+                  <div class="sub">财务部</div><div class="foot">👥 2　 ✎  ⋯</div>
+                </div>
+                <div class="template-card">
+                  <div class="r1"><div class="name">管理层</div><div class="nicon purple">👤</div></div>
+                  <div class="sub">总经理 + 运营负责人</div><div class="foot">👥 2　 ✎  ⋯</div>
+                </div>
+                <div class="template-card">
+                  <div class="r1"><div class="name">客户抄送</div><div class="nicon blue">👥</div></div>
+                  <div class="sub">客户指定抄送人</div><div class="foot">👥 4　 ✎  ⋯</div>
+                </div>
+                <div class="template-card">
+                  <div class="r1"><div class="name">不抄送</div><div class="nicon pink">🚫</div></div>
+                  <div class="sub">无抄送人</div><div class="foot">—</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 标题规则 -->
+          <div class="card">
+            <div class="card-hd">
+              <div class="ttl"><span style="color:#ff9d2f;font-size:22px">🏷</span><span>标题注入规则</span><small class="mute">ⓘ</small></div>
+              <div class="mini-btn">＋ 新增规则</div>
+            </div>
+            <div class="body-pad" style="height:170px">
+              <div style="margin-bottom:10px;color:#8b91ac;font-size:13px;font-weight:700;">自动在邮件标题中注入关键信息，支持自定义规则。</div>
+              <div class="rule-box">
+                <div class="rule-preview">
+                  <div class="row" style="background:#f8f8fb;font-weight:900;color:#7c83a1"><div class="c1">标题格式预览</div><div class="c2"></div><div class="c3"></div></div>
+                  <div class="row"><div class="c1"></div><div class="c2">【客户简称】{发文类型} - {申请号} - {文件日期}</div><div class="c3"></div></div>
+                  <div class="row"><div class="c1"><span class="switch on"></span></div><div class="c2">默认规则　　　【客户简称】{发文类型} - {申请号} - {文件日期}</div><div class="c3"><a href="#" style="color:#5b9dff;text-decoration:none">编辑</a>　•••</div></div>
+                  <div class="row"><div class="c1"><span class="switch"></span></div><div class="c2">仅发文类型　　{发文类型} - {申请号}</div><div class="c3"><a href="#" style="color:#5b9dff;text-decoration:none">编辑</a>　•••</div></div>
+                  <div class="row"><div class="c1"><span class="switch on"></span></div><div class="c2">客户 + 类型　　【客户名称】{发文类型}</div><div class="c3"><a href="#" style="color:#5b9dff;text-decoration:none">编辑</a>　•••</div></div>
+                </div>
+                <div>
+                  <div style="font-size:13px;font-weight:900;color:#7d83a2;margin-bottom:10px">可用变量：</div>
+                  <div class="tokens">
+                    <span class="token">{客户名称}</span>
+                    <span class="token">{客户简称}</span>
+                    <span class="token">{发文类型}</span>
+                    <span class="token">{申请号}</span>
+                    <span class="token">{文件日期}</span>
+                    <span class="token">{官方期限}</span>
+                    <span class="token">{自定义文本}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 全局签名 -->
+          <div class="card">
+            <div class="card-hd">
+              <div class="ttl"><span style="color:#4d91ff;font-size:22px">🖊</span><span>全局签名</span><small class="mute">ⓘ</small></div>
+              <div class="mini-btn">✎ 编辑签名</div>
+            </div>
+            <div class="body-pad" style="height:170px">
+              <div style="margin-bottom:10px;color:#8b91ac;font-size:13px;font-weight:700;">所有发文邮件自动添加的统一签名。</div>
+              <div class="signature">
+                <div class="sig-card">
+                  此致<br>
+                  敬礼！<br>
+                  <strong>林小樱</strong><br>
+                  专利代理师<br><br>
+                  <strong>PatMail 知识产权代理有限公司</strong><br>
+                  ☎ +86 10 1234 5678<br>
+                  ✉ linxiaoying@patmail.com<br>
+                  📍 北京市海淀区中关村大街1号
+                </div>
+                <div class="sig-side">
+                  <div class="cat">🐱</div>
+                  <div class="txt">创新路上<br>我们与您同行</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="right-grid">
+          <!-- 常用配置 -->
+          <div class="card">
+            <div class="card-hd">
+              <div class="ttl"><span style="color:#f9b33a;font-size:21px">⭐</span><span>常用配置</span></div>
+            </div>
+            <div class="list-box">
+              <div class="simple-item">
+                <div class="l"><div class="ic purple">🗃</div><div><div style="font-size:14px;font-weight:900">从历史数据生成规则</div><div style="font-size:12px;color:#949ab3;font-weight:700">基于已发文记录智能推荐</div></div></div><div class="chev">›</div>
+              </div>
+              <div class="simple-item">
+                <div class="l"><div class="ic blue">📥</div><div><div style="font-size:14px;font-weight:900">导入配置</div><div style="font-size:12px;color:#949ab3;font-weight:700">支持 Excel 批量导入</div></div></div><div class="chev">›</div>
+              </div>
+              <div class="simple-item">
+                <div class="l"><div class="ic pink">📤</div><div><div style="font-size:14px;font-weight:900">导出配置</div><div style="font-size:12px;color:#949ab3;font-weight:700">备份当前所有规则</div></div></div><div class="chev">›</div>
+              </div>
+              <div class="simple-item">
+                <div class="l"><div class="ic orange">❗</div><div><div style="font-size:14px;font-weight:900">规则冲突检测</div><div style="font-size:12px;color:#949ab3;font-weight:700">检测重复或冲突的规则</div></div></div><div class="chev">›</div>
+              </div>
+              <div class="simple-item">
+                <div class="l"><div class="ic purple">↻</div><div><div style="font-size:14px;font-weight:900">恢复默认配置</div><div style="font-size:12px;color:#949ab3;font-weight:700">一键恢复系统默认设置</div></div></div><div class="chev">›</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 最近修改记录 -->
+          <div class="card">
+            <div class="card-hd">
+              <div class="ttl"><span style="color:#ff7ca8;font-size:21px">🕘</span><span>最近修改记录</span></div>
+              <div style="color:#6f8fdc;font-size:13px;font-weight:800">查看更多 ›</div>
+            </div>
+            <div class="list-box" style="padding-top:2px">
+              <div class="log-item">
+                <div class="log-avatar">👩🏻</div>
+                <div>
+                  <div class="log-name">林小樱 <span style="color:#7f87a4;font-size:12px;font-weight:700">修改了客户【腾讯】的发文方式</span></div>
+                  <div class="log-time">2024-04-22 14:30</div>
+                </div>
+              </div>
+              <div class="log-item">
+                <div class="log-avatar">👩🏻</div>
+                <div>
+                  <div class="log-name">张小美 <span style="color:#7f87a4;font-size:12px;font-weight:700">新增了文件描述映射规则</span></div>
+                  <div class="log-time">2024-04-22 11:15</div>
+                </div>
+              </div>
+              <div class="log-item">
+                <div class="log-avatar">👩🏻</div>
+                <div>
+                  <div class="log-name">王大明 <span style="color:#7f87a4;font-size:12px;font-weight:700">更新了收件人模板【外部申请】</span></div>
+                  <div class="log-time">2024-04-21 19:42</div>
+                </div>
+              </div>
+              <div class="log-item">
+                <div class="log-avatar">👩🏻</div>
+                <div>
+                  <div class="log-name">林小樱 <span style="color:#7f87a4;font-size:12px;font-weight:700">修改了全局签名</span></div>
+                  <div class="log-time">2024-04-21 16:20</div>
+                </div>
+              </div>
+              <div class="log-item" style="border-bottom:none">
+                <div class="log-avatar">👩🏻</div>
+                <div>
+                  <div class="log-name">陈老师 <span style="color:#7f87a4;font-size:12px;font-weight:700">新增了抄送模板【管理层】</span></div>
+                  <div class="log-time">2024-04-21 10:08</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 右下文案 -->
+          <div class="card">
+            <div class="quote-box">
+              <div class="t1">“</div>
+              <div class="msg">好的规则，<br>是高效发文的开始！</div>
+              <div class="small">“ 把重复的工作交给自动化<br>把创造的时间留给更重要的事！ ”</div>
+              <div style="display:flex;gap:26px;align-items:center;margin-top:8px">
+                <div style="font-size:18px;color:#f39ab9">♥ ♥</div>
+                <div style="font-size:62px;line-height:1">🐰</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer-note">
+        <div>© 2024 PatMail　专利发文自动化系统 V1.2.0 ｜ 让知识产权服务更简单、更温暖、更高效 ♡</div>
+        <div>Innovation for a Brighter Tomorrow. ♡</div>
+      </div>
+    </section>
+  </main>
+</div>
 </body>
 </html>
