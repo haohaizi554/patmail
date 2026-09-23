@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>PatMail 浮窗 UI</title>
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;
+  height:100vh;
+  background:#eee;
+  font-family:"Microsoft YaHei",sans-serif;
+}
+.float{
+  width:620px;
+  min-height:1050px;
+  position:absolute;
+  right:40px;
+  top:40px;
+  border-radius:28px;
+  background:linear-gradient(180deg,#fff7fb,#fff);
+  border:1px solid #ffd7e8;
+  box-shadow:0 20px 50px rgba(255,120,170,.22);
+  overflow:hidden;
+  color:#30345c;
+}
+.header{
+  height:105px;
+  padding:25px 35px;
+  display:flex;
+  align-items:center;
+  gap:18px;
+  background:linear-gradient(135deg,#fff0f7,#fff);
+}
+.logo{
+  font-size:36px;
+}
+.brand{
+  font-size:34px;
+  font-weight:800;
+  color:#d62c78;
+}
+.sub{
+  font-size:20px;
+}
+.close{
+  margin-left:auto;
+  font-size:30px;
+}
+.card{
+  margin:18px 22px;
+  padding:20px;
+  background:#fff;
+  border:1px solid #ffdbe9;
+  border-radius:22px;
+}
+.row{
+  display:flex;
+  align-items:center;
+  margin:14px 0;
+  font-size:22px;
+}
+.label{
+  width:130px;
+  color:#7b7fa5;
+}
+.value{
+  flex:1;
+  border:1px solid #eee;
+  padding:10px 18px;
+  border-radius:12px;
+}
+.btn{
+  padding:8px 20px;
+  border-radius:18px;
+  background:#fff0f7;
+  color:#ff4f98;
+  border:1px solid #ffc5df;
+}
+.title{
+  font-size:25px;
+  font-weight:bold;
+  margin-bottom:18px;
+}
+.grid{
+ display:grid;
+ grid-template-columns:repeat(4,1fr);
+ gap:12px;
+}
+.item{
+ height:130px;
+ border-radius:18px;
+ display:flex;
+ flex-direction:column;
+ justify-content:center;
+ align-items:center;
+ font-size:20px;
+ border:1px solid #eee;
+ background:#faf8ff;
+}
+.pink{color:#ff5598}
+.blue{color:#4285ff}
+.green{color:#15bd91}
+.purple{color:#9b55ed}
+table{
+ width:100%;
+ border-collapse:collapse;
+ font-size:17px;
+}
+td,th{
+ padding:12px 8px;
+ border-bottom:1px solid #eee;
+ text-align:left;
+}
+.ok{color:#13b981}
+.match{
+ display:grid;
+ grid-template-columns:1fr 1fr;
+ gap:12px;
+}
+.match div{
+ padding:18px;
+ border-radius:18px;
+ border:1px solid #eee;
+ background:#fffafd;
+}
+.bottom{
+ display:flex;
+ gap:15px;
+ padding:20px 22px;
+}
+.run{
+ flex:1;
+ background:#ff5598;
+ color:white;
+ border-radius:20px;
+ padding:22px;
+ text-align:center;
+ font-size:25px;
+}
+.manual{
+ flex:1;
+ border:2px solid #ffd1e2;
+ border-radius:20px;
+ text-align:center;
+ padding:22px;
+ font-size:25px;
+}
+.footer{
+ padding:0 30px 25px;
+ color:#ff6da6;
+ display:flex;
+ justify-content:space-between;
+}
+.cat{
+ position:absolute;
+ right:30px;
+ top:20px;
+ font-size:65px;
+}
+</style>
+</head>
+<body>
+<div class="float">
+<div class="header">
+<div class="logo">🐰</div>
+<div>
+<div class="brand">PatMail ✉</div>
+<div class="sub">发文助手浮窗</div>
+</div>
+<div class="close">×</div>
+</div>
+<div class="cat">🐱</div>
+
+<div class="card">
+<div class="row"><div class="label">🏢 当前客户</div><div class="value">华为技术有限公司</div><button class="btn">切换</button></div>
+<div class="row"><div class="label">📄 当前模板</div><div class="value">发明专利-实审意见答复</div><button class="btn">切换</button></div>
+<div class="row"><div class="label">🍪 登录状态</div><div class="value"><span class="ok">●</span> Cookie 已复用（已登录 2小时）</div><button class="btn">正常</button></div>
+</div>
+
+<div class="card">
+<div class="title">⚡ 快速操作</div>
+<div class="grid">
+<div class="item pink">▣<br>扫描页面</div>
+<div class="item purple">▤<br>读取模板</div>
+<div class="item blue">✎<br>自动填表</div>
+<div class="item green">➤<br>提交发文</div>
+</div>
+</div>
+
+<div class="card">
+<div class="title">▣ 查询结果预览　<small>共4条匹配结果</small></div>
+<table>
+<tr><th>客户</th><th>文件描述</th><th>发文方式</th><th>状态</th></tr>
+<tr><td>🔴 华为技术有限公司</td><td>实审意见通知书</td><td>同客户合并发文</td><td class="ok">● 已匹配</td></tr>
+<tr><td>🔵 腾讯科技</td><td>补正通知书</td><td>单个来文发文</td><td class="ok">● 已匹配</td></tr>
+<tr><td>🟠 阿里巴巴</td><td>审查意见通知书</td><td>同客户合并发文</td><td class="ok">● 已匹配</td></tr>
+<tr><td>🟡 小米</td><td>授权通知书</td><td>单个来文发文</td><td>待确认</td></tr>
+</table>
+</div>
+
+<div class="card">
+<div class="title">🌸 规则命中结果</div>
+<div class="match">
+<div>📨 发文方式<br><b>同客户合并发文</b></div>
+<div>📄 发文类型映射<br><b>审查意见通知书 → 意见答复</b></div>
+<div>👥 收件人模板<br><b>华为-标准收件人 v3</b></div>
+<div>Ｔ 标题规则<br><b>[申请号]+文件类型+客户简称</b></div>
+</div>
+</div>
+
+<div class="bottom">
+<div class="run">▶ 一键执行<br><small>按规则自动完成所有发文</small></div>
+<div class="manual">♙ 人工接管<br><small>跳转页面手动操作</small></div>
+</div>
+
+<div class="footer">
+<span>⚙ 设置</span>
+<span>♡ 专注细节，让知识更有力量</span>
+<span>PatMail v1.2.0</span>
+</div>
+
+</div>
+</body>
+</html>

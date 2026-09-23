@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>PatMail 发文任务</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;
+ background:#fff7fb;
+ font-family:"Microsoft YaHei","PingFang SC",sans-serif;
+ color:#25304d;
+}
+.app{
+ width:1440px;
+ height:900px;
+ margin:auto;
+ display:flex;
+ overflow:hidden;
+ background:
+ radial-gradient(circle at 5% 20%,#ffd9e9,transparent 25%),
+ radial-gradient(circle at 90% 10%,#ffe7f3,transparent 30%),
+ linear-gradient(#fff8fb,#fff);
+}
+.sidebar{
+ width:200px;
+ padding:25px 18px;
+ background:rgba(255,255,255,.55);
+ border-right:1px solid #f5dbe8;
+}
+.logo{
+ font-size:28px;
+ font-weight:800;
+ color:#b93472;
+}
+.logo small{
+ display:block;
+ font-size:13px;
+ color:#777;
+}
+.menu{margin-top:35px}
+.menu div{
+ height:46px;
+ padding:13px 18px;
+ margin:8px 0;
+ border-radius:12px;
+}
+.menu .active{
+ background:#ffd8e8;
+ color:#ed4b88;
+}
+.main{
+ flex:1;
+ padding:18px;
+}
+.header{
+ height:65px;
+ display:flex;
+ justify-content:space-between;
+ align-items:center;
+}
+.search{
+ width:460px;
+ height:42px;
+ border-radius:25px;
+ background:#fff;
+ border:1px solid #f5cade;
+ padding:12px 25px;
+ color:#999;
+}
+.hero{
+ height:100px;
+ border-radius:22px;
+ padding:22px 35px;
+ background:rgba(255,255,255,.65);
+}
+.hero h1{margin:0;font-size:30px}
+.filters{
+ display:flex;
+ gap:14px;
+ margin:18px 0;
+}
+.filter{
+ height:42px;
+ padding:12px 22px;
+ background:#fff;
+ border:1px solid #f0dfeb;
+ border-radius:12px;
+ color:#67708b;
+}
+.layout{
+ display:grid;
+ grid-template-columns:1fr 270px;
+ gap:16px;
+}
+.cards{
+ display:grid;
+ grid-template-columns:repeat(4,1fr);
+ gap:14px;
+}
+.card{
+ background:rgba(255,255,255,.88);
+ border:1px solid #f3dfeb;
+ border-radius:18px;
+ box-shadow:0 8px 20px rgba(220,150,190,.08);
+}
+.stat{
+ height:150px;
+ padding:20px;
+}
+.icon{
+ font-size:28px;
+}
+.num{
+ font-size:35px;
+ font-weight:800;
+ margin-top:15px;
+}
+.status{
+ color:#ff5590;
+}
+.panel{
+ margin-top:18px;
+ padding:18px;
+}
+.tabs{
+ display:flex;
+ gap:10px;
+}
+.tab{
+ padding:10px 22px;
+ border-radius:12px;
+ background:#f7f7fc;
+}
+.tab.active{
+ color:#ff4e91;
+ background:#ffe0ec;
+ border:1px solid #ff7eaf;
+}
+table{
+ width:100%;
+ border-collapse:collapse;
+ margin-top:15px;
+}
+th,td{
+ padding:13px 8px;
+ border-bottom:1px solid #f4e6ef;
+ font-size:14px;
+}
+.tag{
+ border-radius:20px;
+ padding:5px 12px;
+ background:#e2fff1;
+ color:#13ae76;
+}
+.side .box{
+ padding:18px;
+ margin-bottom:15px;
+}
+.action{
+ height:65px;
+ margin:10px 0;
+ border-radius:12px;
+ padding:20px;
+ background:#fff0f7;
+ color:#df4f89;
+}
+.footer{
+ margin-top:10px;
+ color:#aaa;
+}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+<div class="logo">🐰 PatMail 💌<small>专利发文自动化</small></div>
+<div class="menu">
+<div>⌂ 首页</div>
+<div class="active">☑ 发文任务</div>
+<div>⚙ 发文规则与映射配置</div>
+<div>♙ 客户管理</div>
+<div>▣ 文件管理</div>
+<div>▤ 发文记录</div>
+<div>▥ 统计报表</div>
+</div>
+</aside>
+
+<main class="main">
+<div class="header">
+<div class="search">🔍 搜索客户、任务、文件、模板...</div>
+<div>🔔　👩 林小樱　♡</div>
+</div>
+
+<div class="hero">
+<h1>✈ 发文任务</h1>
+<div>高效执行专利发文任务，让重要文件准时送达！</div>
+</div>
+
+<div class="filters">
+<div class="filter">全部客户⌄</div>
+<div class="filter">全部状态⌄</div>
+<div class="filter">全部发文方式⌄</div>
+<div class="filter">2024-04-01 ～ 2024-04-30</div>
+<div class="filter">搜索任务名称...</div>
+</div>
+
+<div class="layout">
+<section>
+<div class="cards">
+<div class="card stat">✈<br>待发任务<div class="num">16</div></div>
+<div class="card stat">◷<br>处理中<div class="num">12</div></div>
+<div class="card stat">▤<br>待审核<div class="num">9</div></div>
+<div class="card stat">✓<br>已完成<div class="num">48</div></div>
+</div>
+
+<div class="card panel">
+<h2>☷ 任务列表</h2>
+<div class="tabs">
+<div class="tab active">全部(85)</div>
+<div class="tab">待发(16)</div>
+<div class="tab">处理中(12)</div>
+<div class="tab">待审核(9)</div>
+<div class="tab">已完成(48)</div>
+</div>
+
+<table>
+<tr><th>客户名称</th><th>发文方式</th><th>文件数</th><th>优先级</th><th>状态</th><th>创建时间</th></tr>
+<tr><td>🔴 华为技术有限公司</td><td>向客户端发文</td><td>12</td><td>高</td><td><span class="tag">待发</span></td><td>2024-04-22 14:30</td></tr>
+<tr><td>🔵 腾讯科技</td><td>邮箱发文</td><td>8</td><td>中</td><td><span class="tag">处理中</span></td><td>2024-04-22 13:15</td></tr>
+<tr><td>🟠 阿里巴巴</td><td>向客户端发文</td><td>25</td><td>高</td><td><span class="tag">待审核</span></td><td>2024-04-22 11:20</td></tr>
+<tr><td>🟢 字节跳动</td><td>邮箱发文</td><td>6</td><td>中</td><td><span class="tag">已完成</span></td><td>2024-04-22 10:05</td></tr>
+</table>
+</div>
+</section>
+
+<aside class="side">
+<div class="card box">
+<h3>⚡ 快捷操作</h3>
+<div class="action">＋ 新建发文任务</div>
+<div class="action">▶ 批量执行</div>
+<div class="action">▣ 导入历史模板</div>
+<div class="action">◉ 预览邮件内容</div>
+</div>
+<div class="card box">
+<h3>💡 今日小贴士</h3>
+<p>发送前预览一次，让专业更安心</p>
+</div>
+<div class="card box">
+<h3>最近执行记录</h3>
+<p>腾讯科技 · 8个文件</p>
+<p>阿里巴巴 · 25个文件</p>
+<p>华为技术 · 12个文件</p>
+</div>
+</aside>
+</div>
+</div>
+</main>
+</div>
+</body>
+</html>

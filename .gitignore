@@ -1,0 +1,8 @@
+.idea/
+*.iml
+Thumbs.db
+Desktop.ini
+.env
+.env.*
+*.key
+credentials.json

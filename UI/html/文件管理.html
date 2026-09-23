@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PatMail - 文件管理</title>
+  <style>
+    :root{
+      --bg1:#fff8fb;
+      --bg2:#fdeef5;
+      --panel:#ffffff;
+      --border:#f4dbe6;
+      --shadow:0 10px 28px rgba(244, 173, 198, .12);
+      --text:#25305a;
+      --muted:#8a92b2;
+      --pink:#ff6fa8;
+      --pink2:#ff8fbd;
+      --pink3:#ffd4e5;
+      --blue:#4e8dfd;
+      --blue2:#e9f1ff;
+      --green:#23c383;
+      --green2:#e8fff5;
+      --orange:#ff9f34;
+      --orange2:#fff3e5;
+      --red:#ff637f;
+      --red2:#ffe8ee;
+      --tagPink:#ffe5ef;
+      --tagBlue:#e8f1ff;
+      --tagPurple:#f0e6ff;
+      --line:#edf0fa;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family:"Microsoft YaHei","PingFang SC","Segoe UI",Arial,sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(circle at 9% 16%, rgba(255,189,214,.18) 0 90px, transparent 91px),
+        radial-gradient(circle at 92% 7%, rgba(255,199,220,.22) 0 90px, transparent 91px),
+        radial-gradient(circle at 88% 92%, rgba(255,211,230,.22) 0 160px, transparent 161px),
+        linear-gradient(180deg,#fffafc 0%,#fff5f9 100%);
+    }
+    .app{
+      width: 100%;
+      min-height:100vh;
+      display:flex;
+      gap:24px;
+      padding:20px 24px 16px 18px;
+      position:relative;
+      overflow:hidden;
+    }
+    .hearts, .hearts:before, .hearts:after{
+      content:"";
+      position:absolute;
+      width:10px;height:10px;
+      background:rgba(255,187,212,.35);
+      transform:rotate(45deg);
+      border-radius:2px;
+    }
+    .hearts:before,.hearts:after{content:"";background:inherit;border-radius:50%}
+    .hearts:before{left:-5px;top:0;width:10px;height:10px}
+    .hearts:after{top:-5px;left:0;width:10px;height:10px}
+    .h1{left:180px;top:190px}.h2{left:770px;top:110px}.h3{left:1380px;top:20px}.h4{left:1540px;top:136px}.h5{left:218px;top:660px}.h6{left:1650px;top:970px}.h7{left:350px;top:34px}.h8{left:1452px;top:790px}
+
+    .sidebar{
+      width:226px;
+      flex:0 0 226px;
+      display:flex;
+      flex-direction:column;
+      gap:18px;
+    }
+    .brand{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      padding:4px 10px 2px 8px;
+    }
+    .logo-bunny{
+      width:58px;height:58px;border-radius:22px;
+      background:linear-gradient(180deg,#fff,#ffeef5);
+      border:2px solid #f5c7d8;
+      position:relative; box-shadow:0 4px 10px rgba(255,143,189,.12) inset;
+    }
+    .logo-bunny:before,.logo-bunny:after{content:"";position:absolute;background:#fff;border:2px solid #f5c7d8;border-radius:18px 18px 12px 12px;width:15px;height:28px;top:-17px}
+    .logo-bunny:before{left:10px;transform:rotate(-8deg)}
+    .logo-bunny:after{right:10px;transform:rotate(8deg)}
+    .logo-face{position:absolute;left:50%;top:50%;transform:translate(-50%,-45%);font-size:21px;opacity:.86}
+    .brand h1{margin:0;font-size:25px;line-height:1;color:#944671;font-weight:800;letter-spacing:.2px}
+    .brand .sub{font-size:12px;color:#5f6484;margin-top:3px;font-weight:700}
+    .brand .tick{color:#ff6fa8;font-size:17px;margin-left:4px}
+
+    .nav{
+      background:rgba(255,255,255,.55);
+      border:1px solid rgba(244,219,230,.75);
+      border-radius:24px;
+      padding:14px 12px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      flex:1;
+      display:flex;
+      flex-direction:column;
+    }
+    .menu{display:flex;flex-direction:column;gap:10px;margin-top:10px}
+    .menu-item{
+      height:58px;border-radius:16px;padding:0 18px;display:flex;align-items:center;gap:14px;
+      color:#4e5a82;font-size:17px;font-weight:700;cursor:default;
+    }
+    .menu-item .ico{width:26px;height:26px;display:grid;place-items:center;color:#5a6a92;opacity:.95}
+    .menu-item.active{
+      background:linear-gradient(180deg,#ffd5e5 0%,#ffc8dc 100%);
+      color:#ff3d8d; box-shadow: inset 0 0 0 1px rgba(255,99,149,.16);
+      position:relative;
+    }
+    .menu-item.active:before{
+      content:"";position:absolute;left:-12px;top:10px;bottom:10px;width:5px;border-radius:5px;background:#ff4795;
+    }
+    .settings{
+      margin-top:auto;display:flex;align-items:center;gap:12px;padding:16px 14px;color:#5d678f;font-weight:700;font-size:16px
+    }
+
+    .main{flex:1;min-width:0;display:flex;flex-direction:column;gap:18px}
+    .topbar{
+      height:74px;display:flex;align-items:center;gap:16px;padding:0 8px 0 12px;
+    }
+    .topbar .slogan{
+      font-size:18px;line-height:1.35;color:#ff689f;font-weight:800;white-space:pre-line; width:220px;
+    }
+    .search-wrap{flex:1;display:flex;justify-content:center}
+    .search{
+      width:100%;max-width:640px;height:58px;border-radius:999px;border:2px solid #f7d6e3;
+      background:rgba(255,255,255,.72);display:flex;align-items:center;padding:0 22px;gap:14px;color:#a3abc6;
+      box-shadow: inset 0 2px 6px rgba(255,255,255,.9);
+    }
+    .search .mag{font-size:22px;color:#d39ab2}
+    .search .txt{font-size:18px;font-weight:600;letter-spacing:.2px}
+    .top-actions{display:flex;align-items:center;gap:20px;margin-left:auto}
+    .bell{position:relative;font-size:28px;color:#546084}
+    .badge{position:absolute;right:-4px;top:-6px;background:#ff407e;color:#fff;border-radius:999px;width:22px;height:22px;font-size:13px;display:grid;place-items:center;font-weight:800;border:3px solid #fff}
+    .user{display:flex;align-items:center;gap:14px}
+    .avatar{
+      width:56px;height:56px;border-radius:50%;
+      background: radial-gradient(circle at 35% 30%, #fff 0 18%, #ffe3ee 19% 60%, #f1bccf 61% 100%);
+      border:3px solid #fff; box-shadow:0 6px 18px rgba(243, 165, 197, .24);
+      position:relative; overflow:hidden;
+    }
+    .avatar:before{content:"👧";position:absolute;inset:0;display:grid;place-items:center;font-size:34px}
+    .user .name{font-size:17px;font-weight:900;color:#243057}
+    .user .dept{font-size:12px;color:#9098b8;margin-top:2px;font-weight:700}
+    .user-bubble{
+      min-width:136px;height:62px;padding:8px 18px;border-radius:28px;border:1px solid #f6d7e4;
+      background:linear-gradient(180deg,#fff7fb,#fff);color:#ff6b9a;display:flex;align-items:center;justify-content:center;
+      text-align:center;font-size:14px;font-weight:900;line-height:1.35;
+    }
+
+    .content{
+      background:rgba(255,255,255,.50);
+      border:1px solid rgba(244,219,230,.88);
+      border-radius:30px;
+      box-shadow: var(--shadow);
+      padding:18px 18px 18px 18px;
+      backdrop-filter: blur(10px);
+      display:grid;grid-template-columns:minmax(0,1fr) 350px;gap:18px;
+      min-height:calc(100vh - 128px);
+      position:relative;
+    }
+    .left-area{display:flex;flex-direction:column;gap:16px;min-width:0}
+    .right-area{display:flex;flex-direction:column;gap:16px}
+
+    .hero{display:flex;justify-content:space-between;align-items:flex-start;padding:6px 8px 2px}
+    .hero-left{display:flex;gap:18px;align-items:flex-start}
+    .page-bunny{
+      width:86px;height:86px;border-radius:28px;border:2px solid #f6c7d8;background:linear-gradient(180deg,#fff,#fff2f7);position:relative;box-shadow: inset 0 6px 12px rgba(255,255,255,.8)
+    }
+    .page-bunny:before,.page-bunny:after{content:"";position:absolute;width:18px;height:34px;border:2px solid #f6c7d8;background:#fff;border-radius:16px 16px 12px 12px;top:-18px}
+    .page-bunny:before{left:16px}.page-bunny:after{right:16px}
+    .page-bunny .face{position:absolute;inset:0;display:grid;place-items:center;font-size:34px;transform:translateY(2px)}
+    .page-title{padding-top:6px}
+    .page-title h2{margin:0;font-size:56px;line-height:1;font-weight:900;color:#1f2b57;letter-spacing:.6px}
+    .page-title p{margin:12px 0 0;font-size:17px;color:#7e87a8;font-weight:700}
+
+    .hero-right{display:flex;align-items:flex-start;gap:18px;padding-right:6px}
+    .speech{
+      border:2px solid #f7d8e5;border-radius:26px;padding:16px 22px;background:rgba(255,255,255,.56);color:#ff6a99;
+      font-size:17px;font-weight:900;line-height:1.45;position:relative;min-width:250px;text-align:center;
+    }
+    .speech:after{content:"";position:absolute;right:48px;bottom:-12px;border:12px solid transparent;border-top-color:#f7d8e5;transform:skewX(20deg)}
+    .speech:before{content:"";position:absolute;right:50px;bottom:-8px;border:10px solid transparent;border-top-color:#fff;z-index:2;transform:skewX(20deg)}
+    .cat{
+      width:150px;height:118px;position:relative;border-radius:26px;
+      background:radial-gradient(circle at 50% 65%, #fff 0 52px, transparent 53px);
+    }
+    .cat .emoji{position:absolute;right:0;top:10px;font-size:96px;filter:saturate(1.08)}
+    .cat .heart1,.cat .heart2{position:absolute;color:#ff8bb7;font-size:28px}
+    .cat .heart1{right:18px;top:2px}.cat .heart2{right:-2px;top:54px}
+
+    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+    .stat-card{
+      background:rgba(255,255,255,.85);border:1px solid var(--border);border-radius:20px;padding:18px 20px;display:flex;gap:18px;align-items:center;min-height:118px;box-shadow:0 8px 16px rgba(238,221,230,.18)
+    }
+    .stat-ico{width:72px;height:72px;border-radius:18px;display:grid;place-items:center;font-size:34px;font-weight:700}
+    .pink-bg{background:#ffe7f1;color:#ff5f95}
+    .blue-bg{background:#eaf2ff;color:#3479ff}
+    .green-bg{background:#e9fff2;color:#25c67f}
+    .orange-bg{background:#fff2e4;color:#ff941e}
+    .stat-title{font-size:18px;font-weight:900;margin-bottom:6px;color:#2b3762}
+    .stat-num{font-size:58px;line-height:1;font-weight:900;color:#17244d;letter-spacing:.3px}
+    .stat-foot{font-size:14px;color:#97a0be;font-weight:700;margin-top:9px}
+    .up{color:#ff5a8d}.down{color:#19bd75}
+
+    .panel{
+      background:rgba(255,255,255,.88);border:1px solid var(--border);border-radius:22px;box-shadow:0 10px 22px rgba(241,226,234,.22);
+    }
+    .filter-panel{padding:18px 18px 16px}
+    .filter-grid{display:grid;grid-template-columns:1.3fr 1.45fr 1.45fr;gap:16px 18px;align-items:end}
+    .field label{display:block;font-size:14px;color:#3e4773;font-weight:900;margin:0 0 10px 4px}
+    .input, .select{
+      height:54px;border:2px solid #eef0f8;border-radius:14px;background:#fff;display:flex;align-items:center;
+      padding:0 16px;color:#a0a7c3;font-size:17px;font-weight:700;justify-content:space-between;
+      box-shadow: inset 0 1px 3px rgba(245,247,252,.9);
+    }
+    .range{display:flex;align-items:center;gap:10px}
+    .range .input{flex:1}
+    .dash{color:#b5bccf;font-size:24px;font-weight:700;padding:0 3px}
+    .button-row{display:flex;align-items:flex-end;justify-content:flex-end;gap:14px}
+    .btn{
+      height:54px;border-radius:14px;padding:0 30px;border:0;cursor:default;display:inline-flex;align-items:center;justify-content:center;gap:10px;
+      font-size:18px;font-weight:900;letter-spacing:.2px
+    }
+    .btn-light{background:#fff;border:2px solid #edf0f8;color:#7f88a8}
+    .btn-pink{background:linear-gradient(180deg,#ff77ac,#ff5598);color:#fff;box-shadow:0 10px 20px rgba(255,109,165,.28)}
+
+    .toolbar{display:flex;align-items:center;justify-content:space-between;padding:8px 0 0}
+    .left-tools,.right-tools{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .toolbtn{
+      height:48px;padding:0 22px;border-radius:12px;border:0;display:flex;align-items:center;gap:10px;font-size:16px;font-weight:900;box-shadow:0 6px 15px rgba(242,227,236,.18)
+    }
+    .tb-pink{background:#ff5f9c;color:#fff}
+    .tb-white{background:#fff;color:#3c70d8;border:1px solid #edf0fa}
+    .tb-green{background:#effff7;color:#2aba79;border:1px solid #dbf7ea}
+    .selected-txt{font-size:16px;color:#8790b0;font-weight:700;margin-right:6px}
+
+    .table-panel{padding:0 0 8px;overflow:hidden}
+    table{width:100%;border-collapse:separate;border-spacing:0}
+    thead th{
+      background:#fff4f8;color:#5a6489;font-size:15px;font-weight:900;padding:15px 12px;border-bottom:1px solid #f3e5ec; text-align:left
+    }
+    thead th:first-child{padding-left:16px}
+    tbody td{
+      padding:15px 12px;border-bottom:1px solid #f3f5fb;font-size:15px;color:#536089;font-weight:700;vertical-align:middle
+    }
+    tbody tr:hover{background:#fffafd}
+    .cb{width:20px;height:20px;border-radius:6px;border:2px solid #dfe4f1;background:#fff;display:inline-block}
+    .file-cell{display:flex;align-items:center;gap:12px;min-width:0}
+    .ficon{width:34px;height:34px;border-radius:8px;display:grid;place-items:center;color:#fff;font-size:14px;font-weight:900}
+    .pdf{background:#ff595f}.doc{background:#4b83ff}.xls{background:#24b16c}.ppt{background:#ffa52c}
+    .filename{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
+    .company{max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .desc{max-width:190px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .tag{
+      display:inline-flex;align-items:center;justify-content:center;padding:7px 16px;border-radius:999px;font-size:14px;font-weight:900;min-width:84px
+    }
+    .tag-official{background:var(--tagPink);color:#ff6a9c}
+    .tag-customer{background:var(--tagBlue);color:#4b8fff}
+    .tag-inner{background:var(--tagPurple);color:#8e6cff}
+    .status{
+      display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border-radius:999px;font-size:14px;font-weight:900;min-width:92px;justify-content:center
+    }
+    .status .dot{width:10px;height:10px;border-radius:50%}
+    .done{background:#e7fff2;color:#20bb74}.done .dot{background:#20bb74}
+    .wait{background:#fff3e6;color:#ffa334}.wait .dot{background:#ffa334}
+    .error{background:#ffe9ef;color:#ff577c}.error .dot{background:#ff577c}
+    .eye{font-size:20px;color:#7482a8}
+    .more{font-size:24px;color:#7482a8;font-weight:900;letter-spacing:2px}
+
+    .side-card{padding:18px 18px 16px}
+    .side-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+    .side-title{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:900;color:#26325c}
+    .view-link{font-size:14px;color:#7380ac;font-weight:900}
+
+    .preview-box{
+      background:#fff;border:1px solid #f1e6ec;border-radius:18px;padding:24px 18px 18px;text-align:center;
+    }
+    .pdf-big{
+      width:82px;height:104px;border-radius:18px;background:linear-gradient(180deg,#ff6c86,#ff4f77);color:#fff;margin:0 auto 16px;
+      display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:900;position:relative;box-shadow:0 10px 18px rgba(255,96,134,.24)
+    }
+    .pdf-big:after{content:"";position:absolute;right:0;top:0;border-left:18px solid transparent;border-top:18px solid rgba(255,255,255,.28)}
+    .pv-name{font-size:20px;font-weight:900;color:#243058;margin-bottom:6px}
+    .pv-size{font-size:15px;color:#98a0bc;font-weight:800;margin-bottom:18px}
+    .preview-btn{height:48px;border-radius:12px;background:linear-gradient(180deg,#ff79ad,#ff5d99);color:#fff;font-size:19px;font-weight:900;display:flex;align-items:center;justify-content:center;gap:10px;border:0;width:100%;box-shadow:0 10px 20px rgba(255,99,149,.22)}
+    .meta{margin-top:16px;display:grid;grid-template-columns:26px 1fr 1fr;row-gap:12px;column-gap:10px;align-items:center}
+    .meta .micon{color:#8d98b8;text-align:center}
+    .meta .mkey{font-size:15px;color:#7c86a8;font-weight:800}
+    .meta .mval{font-size:15px;color:#667294;font-weight:900;text-align:left}
+
+    .recent-list{display:flex;flex-direction:column;gap:16px;margin-top:8px}
+    .recent-item{display:grid;grid-template-columns:34px 1fr 20px;gap:12px;align-items:center}
+    .ri-main{min-width:0}
+    .ri-name{font-size:15px;color:#28335d;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ri-sub{font-size:13px;color:#9aa3be;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px}
+    .ri-more{color:#7d87a5;font-size:22px;line-height:1;text-align:center}
+
+    .quote-card{
+      min-height:184px;background:linear-gradient(180deg,#fff8fb,#fff1f6);position:relative;overflow:hidden
+    }
+    .quote-card .qtxt{
+      position:absolute;left:22px;top:30px;right:140px;color:#ff6a9a;font-size:18px;line-height:1.55;font-weight:900
+    }
+    .quote-card .qcat{position:absolute;right:10px;bottom:6px;font-size:108px}
+    .quote-card .heartsm{position:absolute;right:78px;bottom:62px;color:#ff86b2;font-size:26px}
+
+    .footer{padding:4px 8px 0;color:#98a1bf;font-size:14px;font-weight:700}
+
+    @media (max-width: 1600px){
+      .content{grid-template-columns:1fr 320px}
+      .stats{grid-template-columns:repeat(2,1fr)}
+      .page-title h2{font-size:48px}
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <span class="hearts h1"></span><span class="hearts h2"></span><span class="hearts h3"></span><span class="hearts h4"></span>
+    <span class="hearts h5"></span><span class="hearts h6"></span><span class="hearts h7"></span><span class="hearts h8"></span>
+
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo-bunny"><div class="logo-face">🐰</div></div>
+        <div>
+          <h1>PatMail<span class="tick">☑</span></h1>
+          <div class="sub">专利发文自动化</div>
+        </div>
+      </div>
+
+      <div class="nav">
+        <div class="menu">
+          <div class="menu-item"><div class="ico">🏠</div><div>首页</div></div>
+          <div class="menu-item"><div class="ico">📝</div><div>发文任务</div></div>
+          <div class="menu-item"><div class="ico">⚙️</div><div>发文规则与映射配置</div></div>
+          <div class="menu-item"><div class="ico">👥</div><div>客户管理</div></div>
+          <div class="menu-item active"><div class="ico">📄</div><div>文件管理</div></div>
+          <div class="menu-item"><div class="ico">🧾</div><div>发文记录</div></div>
+          <div class="menu-item"><div class="ico">📊</div><div>统计报表</div></div>
+        </div>
+        <div style="margin-top:auto; padding:14px 10px 0; color:#ff7aa8; font-size:17px; font-weight:900; text-align:center; line-height:1.55;">
+          <div style="font-size:82px; line-height:1; margin-bottom:10px;">🐱</div>
+          专注细节<br/>守护创新<br/>让知识更有力量
+          <div style="font-size:22px; margin-top:6px;">♡</div>
+        </div>
+        <div class="settings"><span>⚙️</span><span>系统设置</span></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div class="slogan">让每一封专业邮件<br/>都温柔且高效！ ♡</div>
+        <div class="search-wrap">
+          <div class="search"><span class="mag">🔍</span><span class="txt">搜索客户、任务、文件、模板...</span></div>
+        </div>
+        <div class="top-actions">
+          <div class="bell">🔔<span class="badge">3</span></div>
+          <div class="user">
+            <div class="avatar"></div>
+            <div>
+              <div class="name">林小樱 <span style="font-size:14px">▼</span></div>
+              <div class="dept">知识产权部</div>
+            </div>
+          </div>
+          <div class="user-bubble">“ 今天也要<br/>高效发文呀！ ♡ ”</div>
+        </div>
+      </div>
+
+      <section class="content">
+        <div class="left-area">
+          <div class="hero">
+            <div class="hero-left">
+              <div class="page-bunny"><div class="face">🐰</div></div>
+              <div class="page-title">
+                <h2>文件管理</h2>
+                <p>集中管理专利发文相关文件，安全、规范、高效。 💗</p>
+              </div>
+            </div>
+            <div class="hero-right">
+              <div class="speech">“ 文件有序，<br/>灵感不迷路！ ”</div>
+              <div class="cat"><div class="emoji">🐱</div><div class="heart1">♡</div><div class="heart2">♡</div></div>
+            </div>
+          </div>
+
+          <div class="stats">
+            <div class="stat-card">
+              <div class="stat-ico pink-bg">📄</div>
+              <div>
+                <div class="stat-title">文件总数</div>
+                <div class="stat-num">1,326</div>
+                <div class="stat-foot">较上月 <span class="up">+12% ↗</span></div>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-ico blue-bg">🕒</div>
+              <div>
+                <div class="stat-title">待处理</div>
+                <div class="stat-num">168</div>
+                <div class="stat-foot">较上月 <span class="down">-8% ↗</span></div>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-ico green-bg">✅</div>
+              <div>
+                <div class="stat-title">已归档</div>
+                <div class="stat-num">1,089</div>
+                <div class="stat-foot">较上月 <span class="up">+15% ↗</span></div>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-ico orange-bg">⚠️</div>
+              <div>
+                <div class="stat-title">异常文件</div>
+                <div class="stat-num">69</div>
+                <div class="stat-foot">较上月 <span class="down">-20% ↘</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel filter-panel">
+            <div class="filter-grid">
+              <div class="field">
+                <label>客户</label>
+                <div class="select"><span>请选择客户</span><span>▾</span></div>
+              </div>
+              <div class="field">
+                <label>文件描述</label>
+                <div class="input"><span>请输入文件描述关键词</span></div>
+              </div>
+              <div class="field">
+                <label>发文类型</label>
+                <div class="select"><span>全部类型</span><span>▾</span></div>
+              </div>
+
+              <div class="field">
+                <label>上传日期</label>
+                <div class="range">
+                  <div class="input"><span>📅　开始日期</span></div>
+                  <span class="dash">~</span>
+                  <div class="input"><span>结束日期</span></div>
+                </div>
+              </div>
+              <div class="field">
+                <label>状态</label>
+                <div class="select"><span>全部状态</span><span>▾</span></div>
+              </div>
+              <div class="button-row">
+                <button class="btn btn-light">重置</button>
+                <button class="btn btn-pink">🔍 查询</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="toolbar">
+            <div class="left-tools">
+              <button class="toolbtn tb-pink">＋ 上传文件</button>
+              <button class="toolbtn tb-white">⬇ 批量下载</button>
+              <button class="toolbtn tb-green">🗂 批量归档</button>
+              <button class="toolbtn tb-white">👁 预览附件</button>
+              <button class="toolbtn tb-white">🔄 同步查询结果</button>
+            </div>
+            <div class="right-tools">
+              <span class="selected-txt">已选择 0 项</span>
+              <button class="toolbtn btn-light" style="height:46px;padding:0 18px;font-size:16px;color:#afb7cd;">批量操作 ▾</button>
+            </div>
+          </div>
+
+          <div class="panel table-panel">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:46px;"><span class="cb"></span></th>
+                  <th style="width:270px;">附件名称</th>
+                  <th style="width:210px;">客户名称</th>
+                  <th style="width:230px;">文件描述</th>
+                  <th style="width:140px;">发文类型</th>
+                  <th style="width:170px;">上传时间</th>
+                  <th style="width:120px;">状态</th>
+                  <th style="width:80px;">预览</th>
+                  <th style="width:70px;">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="cb"></span></td>
+                  <td><div class="file-cell"><span class="ficon pdf">PDF</span><span class="filename">答复意见通知书.pdf</span></div></td>
+                  <td><span class="company">华为技术有限公司</span></td>
+                  <td><span class="desc">OA答复意见通知书</span></td>
+                  <td><span class="tag tag-official">官方来文</span></td>
+                  <td>2024-04-22 14:30</td>
+                  <td><span class="status done"><span class="dot"></span>已归档</span></td>
+                  <td><span class="eye">👁</span></td>
+                  <td><span class="more">···</span></td>
+                </tr>
+                <tr>
+                  <td><span class="cb"></span></td>
+                  <td><div class="file-cell"><span class="ficon doc">W</span><span class="filename">权利要求书.docx</span></div></td>
+                  <td><span class="company">腾讯科技（深圳）...</span></td>
+                  <td><span class="desc">修改后的权利要求书</span></td>
+                  <td><span class="tag tag-customer">客户发文</span></td>
+                  <td>2024-04-22 13:15</td>
+                  <td><span class="status wait"><span class="dot"></span>待处理</span></td>
+                  <td><span class="eye">👁</span></td>
+                  <td><span class="more">···</span></td>
+                </tr>
+                <tr>
+                  <td><span class="cb"></span></td>
+                  <td><div class="file-cell"><span class="ficon pdf">PDF</span><span class="filename">审查意见通知书.pdf</span></div></td>
+                  <td><span class="company">阿里巴巴（中国）...</span></td>
+                  <td><span class="desc">第二次审查意见</span></td>
+                  <td><span class="tag tag-official">官方来文</span></td>
+                  <td>2024-04-22 11:20</td>
+                  <td><span class="status done"><span class="dot"></span>已归档</span></td>
+                  <td><span class="eye">👁</span></td>
+                  <td><span class="more">···</span></td>
+                </tr>
+                <tr>
+                  <td><span class="cb"></span></td>
+                  <td><div class="file-cell"><span class="ficon xls">XLS</span><span class="filename">费用缴纳通知单.xlsx</span></div></td>
+                  <td><span class="company">北京字节跳动科技...</span></td>
+                  <td><span class="desc">年费缴纳清单</span></td>
+                  <td><span class="tag tag-official">官方来文</span></td>
+                  <td>2024-04-22 10:05</td>
+                  <td><span class="status error"><span class="dot"></span>异常</span></td>
+                  <td><span class="eye">👁</span></td>
+                  <td><span class="more">···</span></td>
+                </tr>
+                <tr>
+                  <td><span class="cb"></span></td>
+                  <td><div class="file-cell"><span class="ficon pdf">PDF</span><span class="filename">授权通知书.pdf</span></div></td>
+                  <td><span class="company">宁德时代新能源科...</span></td>
+                  <td><span class="desc">发明专利授权通知</span></td>
+                  <td><span class="tag tag-official">官方来文</span></td>
+                  <td>2024-04-22 09:40</td>
+                  <td><span class="status done"><span class="dot"></span>已归档</span></td>
+                  <td><span class="eye">👁</span></td>
+                  <td><span class="more">···</span></td>
+                </tr>
+                <tr>
+                  <td><span class="cb"></span></td>
+                  <td><div class="file-cell"><span class="ficon ppt">PPT</span><span class="filename">技术方案说明.pptx</span></div></td>
+                  <td><span class="company">网易（杭州）网络...</span></td>
+                  <td><span class="desc">技术交底书</span></td>
+                  <td><span class="tag tag-customer">客户发文</span></td>
+                  <td>2024-04-21 17:22</td>
+                  <td><span class="status wait"><span class="dot"></span>待处理</span></td>
+                  <td><span class="eye">👁</span></td>
+                  <td><span class="more">···</span></td>
+                </tr>
+                <tr>
+                  <td><span class="cb"></span></td>
+                  <td><div class="file-cell"><span class="ficon pdf">PDF</span><span class="filename">检索报告.pdf</span></div></td>
+                  <td><span class="company">中国平安保险（集...</span></td>
+                  <td><span class="desc">专利检索报告</span></td>
+                  <td><span class="tag tag-inner">内部文件</span></td>
+                  <td>2024-04-21 16:08</td>
+                  <td><span class="status done"><span class="dot"></span>已归档</span></td>
+                  <td><span class="eye">👁</span></td>
+                  <td><span class="more">···</span></td>
+                </tr>
+                <tr>
+                  <td><span class="cb"></span></td>
+                  <td><div class="file-cell"><span class="ficon doc">W</span><span class="filename">审查意见答复.docx</span></div></td>
+                  <td><span class="company">小米科技有限责任...</span></td>
+                  <td><span class="desc">审查意见答复</span></td>
+                  <td><span class="tag tag-customer">客户发文</span></td>
+                  <td>2024-04-21 15:36</td>
+                  <td><span class="status wait"><span class="dot"></span>待处理</span></td>
+                  <td><span class="eye">👁</span></td>
+                  <td><span class="more">···</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="footer">© 2024 PatMail　专利发文自动化系统 v1.2.0 ｜ 让知识产权服务更简单、更温暖、更高效　♡</div>
+        </div>
+
+        <div class="right-area">
+          <div class="panel side-card">
+            <div class="side-head">
+              <div class="side-title"><span style="color:#ff508f">⚡</span><span>文件预览</span></div>
+              <div class="view-link">↗</div>
+            </div>
+            <div class="preview-box">
+              <div class="pdf-big">PDF</div>
+              <div class="pv-name">答复意见通知书.pdf</div>
+              <div class="pv-size">1.2 MB</div>
+              <button class="preview-btn">🔎 预览文件</button>
+              <div class="meta">
+                <div class="micon">👥</div><div class="mkey">客户名称</div><div class="mval">华为技术有限公司</div>
+                <div class="micon">📝</div><div class="mkey">文件描述</div><div class="mval">OA答复意见通知书</div>
+                <div class="micon">📩</div><div class="mkey">发文类型</div><div class="mval">官方来文</div>
+                <div class="micon">🕒</div><div class="mkey">上传时间</div><div class="mval">2024-04-22 14:30</div>
+                <div class="micon">📦</div><div class="mkey">文件大小</div><div class="mval">1.2 MB</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel side-card">
+            <div class="side-head">
+              <div class="side-title"><span style="color:#ff6299">🗂</span><span>最近上传的文件</span></div>
+              <div class="view-link">查看更多 ＞</div>
+            </div>
+            <div class="recent-list">
+              <div class="recent-item"><span class="ficon pdf">PDF</span><div class="ri-main"><div class="ri-name">答复意见通知书.pdf</div><div class="ri-sub">华为技术有限公司 · 2小时前</div></div><div class="ri-more">⋮</div></div>
+              <div class="recent-item"><span class="ficon doc">W</span><div class="ri-main"><div class="ri-name">权利要求书.docx</div><div class="ri-sub">腾讯科技（深圳）有限公司 · 4小时前</div></div><div class="ri-more">⋮</div></div>
+              <div class="recent-item"><span class="ficon pdf">PDF</span><div class="ri-main"><div class="ri-name">审查意见通知书.pdf</div><div class="ri-sub">阿里巴巴（中国）有限公司 · 6小时前</div></div><div class="ri-more">⋮</div></div>
+              <div class="recent-item"><span class="ficon xls">XLS</span><div class="ri-main"><div class="ri-name">费用缴纳通知单.xlsx</div><div class="ri-sub">北京字节跳动科技有限公司 · 8小时前</div></div><div class="ri-more">⋮</div></div>
+              <div class="recent-item"><span class="ficon pdf">PDF</span><div class="ri-main"><div class="ri-name">授权通知书.pdf</div><div class="ri-sub">宁德时代新能源科技有限公司 · 1天前</div></div><div class="ri-more">⋮</div></div>
+            </div>
+          </div>
+
+          <div class="panel side-card quote-card">
+            <div class="qtxt">好好管理每一份文件，<br/>让创新的路更顺畅！</div>
+            <div class="heartsm">♡</div>
+            <div class="qcat">🐱</div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
