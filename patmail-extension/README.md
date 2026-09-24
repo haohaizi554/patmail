@@ -99,4 +99,4 @@ patmail-extension/
 
 浮窗 DOM/CSS 在独立 ShadowRoot 内，宿主以手动 Popover 放入顶层，避免目标页面 `transform`、`filter` 等影响固定定位。消息在扩展上下文中传递，Background Service Worker 负责连通性响应；没有向网页全局变量暴露消息总线。
 
-Phase 2.1 的只读 Call 仍是 `GetUserModel` 和 `GetSearchFiles`。Phase 2.2 只额外放行 `SearchQueryHisList`，固定同源 `POST`，通过浏览器原生凭据复用登录态；不读取、打印或保存 Cookie，也不调用 `SearchQueryHisSave` 或 `SearchQueryHisDelete`。本地模板和客户配置写在 `chrome.storage.local`。参数契约、架构和验收记录见 [Phase 2.1 架构](docs/phase2-1-architecture.md) 与 [Phase 2.2 报告](docs/phase2-2-report.md)。2026-09-24 已用授权测试账号在 Chromium 中核对登录态、手工文件查询、分页、空结果和会话失效。历史模板这条新链路尚未在真实 EASY 会话里点过。自动填写、审批、下载和发文未实现。
+只读 Call 现为 `GetUserModel`、`GetSearchFiles`、`SearchQueryHisList`、`IPGetBasicData`、`GetFlowdirection`、`LoadFileTypeByCaseType`、`GetFieldColumn` 和 `LoadListColumn`。没有任意 Call 入口，也不调用保存、删除、发文或下载。本地模板和客户配置写在 `chrome.storage.local`。见 [Phase 2.3 报告](docs/phase2-3-report.md)。2026-09-24 已核对登录态和手工文件查询。历史模板与字典树尚未在真实 EASY 会话里点过。审批、下载和发文未实现。

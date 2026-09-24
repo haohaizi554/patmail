@@ -1,7 +1,9 @@
 import { trustedOrigin } from './config'
 import { apiError, type ApiResult } from './types'
 
-export type EasyOperation = 'session' | 'fileSearch' | 'historyQuery'
+export type EasyOperation =
+  | 'session' | 'fileSearch' | 'historyQuery'
+  | 'basicData' | 'flowDirection' | 'fileTypeTree' | 'fieldColumn' | 'listColumn'
 
 export interface TransportOptions {
   fetcher?: typeof fetch
@@ -11,7 +13,12 @@ export interface TransportOptions {
 const ROUTES: Record<EasyOperation, { path: string; call: string }> = {
   session: { path: '/AjaxServers/Login.ashx', call: 'GetUserModel' },
   fileSearch: { path: '/AjaxServers/CaseInfo.ashx', call: 'GetSearchFiles' },
-  historyQuery: { path: '/AjaxServers/CaseInfo.ashx', call: 'SearchQueryHisList' }
+  historyQuery: { path: '/AjaxServers/CaseInfo.ashx', call: 'SearchQueryHisList' },
+  basicData: { path: '/AjaxServers/CaseInfo.ashx', call: 'IPGetBasicData' },
+  flowDirection: { path: '/AjaxServers/CaseInfo.ashx', call: 'GetFlowdirection' },
+  fileTypeTree: { path: '/AjaxServers/Common.ashx', call: 'LoadFileTypeByCaseType' },
+  fieldColumn: { path: '/AjaxServers/PatentAction.ashx', call: 'GetFieldColumn' },
+  listColumn: { path: '/AjaxServers/Common.ashx', call: 'LoadListColumn' }
 }
 
 function loginRedirect(response: Response, origin: string): boolean {

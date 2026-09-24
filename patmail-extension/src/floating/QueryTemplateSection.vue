@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { hasExplicitFileSearchFilter, isFileSearchBusinessField, FILE_SEARCH_REQUEST_FIELDS, FILE_SEARCH_SYSTEM_FIELDS, type FileSearchQuery } from '../api/file-search-params'
+import type { NormalizedDictionary } from '../api/dictionaries'
 import type { HistoryQueryOption } from '../api/query-history'
 import { CustomerQueryService, BundleCustomerRepository, type CustomerQueryProfile } from '../customer'
 import { fieldLabel, parseQueryXml, resolveQueryTemplate } from '../query'
+import { TemplateLoadCoordinator } from '../query/load-coordinator'
+import { optionsForCaseType, resolveInternalIdDisplay } from '../schema'
 import { BundleTemplateRepository } from '../query/repository'
 import type { QueryTemplate } from '../query/query-types'
 import { ChromeBundleRepository, MemoryBundleRepository, storageKey, type QueryBundleRepository } from '../storage/query-bundle'
@@ -46,6 +49,10 @@ const draftEasyId = ref('')
 const draftCustomerId = ref('')
 const editingTemplateId = ref('')
 const loadingHistory = ref(false)
+const basicDictionaries = ref<Record<string, NormalizedDictionary>>({})
+const flowDictionaries = ref<Record<string, NormalizedDictionary>>({})
+const loads = new TemplateLoadCoordinator()
+onBeforeUnmount(() => loads.dispose())
 
 const TEMP_FIELDS = [
   ['case_volume', '我方文号'],
@@ -98,10 +105,27 @@ function sourceLabel(source: string | undefined): string {
   if (source === 'base') return '基础模板'
   return '未设置'
 }
+function dictionaryFor(key: string): { name: string; dictionary: NormalizedDictionary } | undefined {
+  const flowKey = key === 'file_status' ? 'fileStatus' : key === 'flow_direction' ? 'caseDirection' : key === 'proc_status' ? 'procStatus' : ''
+  if (flowKey && flowDictionaries.value[flowKey]) return { name: flowKey, dictionary: flowDictionaries.value[flowKey] }
+  const basicKey = key === 'case_type' ? 'caseType' : key === 'apply_type' ? 'applyType' : key === 'case_status' ? 'caseStatus'
+    : key === 'business_type_id' ? 'bussType' : key === 'country' ? 'country' : ''
+  if (basicKey && basicDictionaries.value[basicKey]) return { name: basicKey, dictionary: basicDictionaries.value[basicKey] }
+  return undefined
+}
 function previewText(key: string): string {
   if (!Object.prototype.hasOwnProperty.call(resolved.value.fields, key)) return '未设置'
-  const value = resolved.value.fields[key]
+  const value = resolved.value.fields[key] ?? ''
   if (!value) return '（空）'
+  const dictionary = dictionaryFor(key)
+  if (dictionary) {
+    const options = dictionary.dictionary.options[0]?.metadata?.caseTypeId
+      ? optionsForCaseType(dictionary.name, dictionary.dictionary.options, resolved.value.fields.case_type ?? '')
+      : dictionary.dictionary.options
+    const display = resolveInternalIdDisplay(value, options, key === 'filetype')
+    if (!display.unresolved) return display.text
+    return '未识别的历史 ID'
+  }
   if (resolved.value.sources[key] === 'base' && displayValues.value[key]) return displayValues.value[key]
   return value
 }
@@ -120,7 +144,20 @@ async function reloadLocal(): Promise<void> {
   }
 }
 
+async function loadDictionaries(ticketId: number, signal: AbortSignal): Promise<void> {
+  if (!props.bridge) return
+  const responses = await Promise.all((['basic', 'flow'] as const).map(kind => props.bridge!.request({
+    type: MessageType.LoadDictionary, payload: { kind, force: false }
+  }, signal)))
+  if (!loads.isCurrent(ticketId)) return
+  for (const response of responses) {
+    if (response.type !== MessageType.DictionaryResult || !response.payload.ok) continue
+    if (response.payload.data.kind === 'basic') basicDictionaries.value = response.payload.data.dictionaries
+    if (response.payload.data.kind === 'flow') flowDictionaries.value = response.payload.data.dictionaries
+  }
+}
 async function loadHistory(force: boolean): Promise<void> {
+  const ticket = loads.begin()
   if (!props.bridge || !props.canSearch) {
     historyMessage.value = '请先确认 EASY 已登录。'
     return
@@ -128,7 +165,8 @@ async function loadHistory(force: boolean): Promise<void> {
   loadingHistory.value = true
   historyMessage.value = ''
   try {
-    const response = await props.bridge.request({ type: MessageType.ListHistoryQueries, payload: { force } })
+    const response = await props.bridge.request({ type: MessageType.ListHistoryQueries, payload: { force } }, ticket.signal)
+    if (!loads.isCurrent(ticket.id)) return
     if (response.type !== MessageType.HistoryQueriesResult) {
       historyMessage.value = '历史模板返回了意外结果。'
       return
@@ -140,24 +178,32 @@ async function loadHistory(force: boolean): Promise<void> {
     }
     historyOptions.value = response.payload.data
     if (response.payload.data.length === 0) historyMessage.value = '原网站没有已保存的文件查询模板。'
-    if (props.mode === 'customer' && selectedCustomer.value) await applyBase(selectedCustomer.value.baseTemplateId)
-    else if (selectedBaseId.value) await applyBase(selectedBaseId.value)
+    await loadDictionaries(ticket.id, ticket.signal)
+    if (!loads.isCurrent(ticket.id)) return
+    if (props.mode === 'customer' && selectedCustomer.value) await applyBase(selectedCustomer.value.baseTemplateId, ticket)
+    else if (selectedBaseId.value) await applyBase(selectedBaseId.value, ticket)
   } catch {
-    historyMessage.value = '读取历史模板失败。'
+    if (loads.isCurrent(ticket.id)) historyMessage.value = '读取历史模板失败。'
   } finally {
-    loadingHistory.value = false
+    if (loads.isCurrent(ticket.id)) loadingHistory.value = false
   }
 }
 
-async function applyBase(id: string): Promise<void> {
-  selectedBaseId.value = id
+function resetBase(): void {
   baseMissing.value = false
   parseWarnings.value = []
   unknownFields.value = {}
   displayValues.value = {}
   baseFields.value = {}
   baseName.value = ''
-  if (!id) return
+}
+function startApply(id: string): void {
+  void applyBase(id, loads.begin())
+}
+async function applyBase(id: string, ticket: { id: number; signal: AbortSignal } = loads.begin()): Promise<void> {
+  selectedBaseId.value = id
+  resetBase()
+  if (!loads.isCurrent(ticket.id) || !id) return
   const local = localTemplates.value.find(item => item.id === id)
   if (local) {
     baseFields.value = { ...local.fields }
@@ -172,7 +218,8 @@ async function applyBase(id: string): Promise<void> {
     baseName.value = '基础模板不存在'
     return
   }
-  const response = await props.bridge.request({ type: MessageType.GetHistoryQuery, payload: { queryId: id } })
+  const response = await props.bridge.request({ type: MessageType.GetHistoryQuery, payload: { queryId: id } }, ticket.signal)
+  if (!loads.isCurrent(ticket.id)) return
   if (response.type !== MessageType.HistoryQueryResult || !response.payload.ok) {
     baseMissing.value = true
     historyMessage.value = response.type === MessageType.HistoryQueryResult && !response.payload.ok
@@ -180,6 +227,7 @@ async function applyBase(id: string): Promise<void> {
     return
   }
   const parsed = parseQueryXml(response.payload.data.queryXml, response.payload.data.name)
+  if (!loads.isCurrent(ticket.id)) return
   if (!parsed.ok) {
     baseMissing.value = true
     historyMessage.value = parsed.error.message
@@ -331,11 +379,17 @@ function search(): void {
 }
 
 watch(() => [props.userId, props.canSearch, props.mode] as const, () => {
+  historyOptions.value = []
+  basicDictionaries.value = {}
+  flowDictionaries.value = {}
+  resetBase()
+  selectedBaseId.value = ''
   void reloadLocal()
   if (props.canSearch) void loadHistory(false)
 }, { immediate: true })
 watch(selectedCustomerId, () => {
   const profile = selectedCustomer.value
+  resetBase()
   if (!profile) return
   void applyBase(profile.baseTemplateId)
 })
@@ -351,7 +405,7 @@ watch(selectedCustomerId, () => {
     <p v-if="storageMessage" class="hint">{{ storageMessage }}</p>
 
     <label v-if="mode === 'history'">历史或本地模板
-      <select v-model="selectedBaseId" @change="applyBase(selectedBaseId)">
+      <select v-model="selectedBaseId" @change="startApply(selectedBaseId)">
         <option value="">请选择</option>
         <optgroup label="EASY">
           <option v-for="item in historyOptions" :key="item.id" :value="item.id">{{ item.name }}</option>

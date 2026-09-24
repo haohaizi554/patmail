@@ -1,6 +1,7 @@
 import type { PageInfo, PageSnapshot } from './types'
 import { isPageInfo, isPageSnapshot, isRecord } from './guards'
-import { isFileSearchApiResult, isFileSearchQuery, isHistoryDetailResult, isHistoryListResult, isSessionResult } from '../api/message-guards'
+import { isDictionaryResult, isFileSearchApiResult, isFileSearchQuery, isHistoryDetailResult, isHistoryListResult, isSessionResult } from '../api/message-guards'
+import type { DictionaryLoadRequest, DictionarySnapshot } from '../api/dictionaries'
 import type { FileSearchQuery } from '../api/file-search-params'
 import type { FileSearchResult } from '../api/file-search-types'
 import type { HistoryQueryDetail, HistoryQueryOption } from '../api/query-history'
@@ -34,6 +35,8 @@ export const MessageType = {
   HistoryQueriesResult: 'HISTORY_QUERIES_RESULT',
   GetHistoryQuery: 'GET_HISTORY_QUERY',
   HistoryQueryResult: 'HISTORY_QUERY_RESULT',
+  LoadDictionary: 'LOAD_DICTIONARY',
+  DictionaryResult: 'DICTIONARY_RESULT',
   Error: 'ERROR'
 } as const
 
@@ -46,6 +49,7 @@ export type ContentRequest =
   | Request<'CANCEL_FILE_SEARCH'> | Response<'SEARCH_FILES', { query: FileSearchQuery }>
   | Response<'LIST_HISTORY_QUERIES', { force: boolean }>
   | Response<'GET_HISTORY_QUERY', { queryId: string }>
+  | Response<'LOAD_DICTIONARY', DictionaryLoadRequest>
 export type ErrorMessage = Response<'ERROR', { message: string }>
 export type BackgroundRequest = Request<'PING'>
 export type BackgroundResponse = Response<'PONG', { ok: true }> | ErrorMessage
@@ -59,6 +63,7 @@ export type ContentResponse =
   | Response<'FILE_SEARCH_CANCELLED', { ok: true }>
   | Response<'HISTORY_QUERIES_RESULT', ApiResult<HistoryQueryOption[]>>
   | Response<'HISTORY_QUERY_RESULT', ApiResult<HistoryQueryDetail>>
+  | Response<'DICTIONARY_RESULT', ApiResult<DictionarySnapshot>>
   | BackgroundResponse
 export type AppMessage = ContentRequest | ContentResponse
 
@@ -79,6 +84,8 @@ export function isMessage(value: unknown): value is AppMessage {
         Object.keys(value.payload).length === 1
     case MessageType.GetHistoryQuery:
       return isRecord(value.payload) && typeof value.payload.queryId === 'string' && Object.keys(value.payload).length === 1
+    case MessageType.LoadDictionary:
+      return isDictionaryRequest(value.payload)
     case MessageType.SearchFiles:
       return isRecord(value.payload) && isFileSearchQuery(value.payload.query) &&
         Object.keys(value.payload).length === 1
@@ -99,6 +106,8 @@ export function isMessage(value: unknown): value is AppMessage {
       return isHistoryListResult(value.payload)
     case MessageType.HistoryQueryResult:
       return isHistoryDetailResult(value.payload)
+    case MessageType.DictionaryResult:
+      return isDictionaryResult(value.payload)
     case MessageType.Error:
       return isRecord(value.payload) && typeof value.payload.message === 'string'
     default:
@@ -112,12 +121,27 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.ShowPanel || value.type === MessageType.Ping ||
     value.type === MessageType.CheckSession || value.type === MessageType.CancelSessionCheck ||
     value.type === MessageType.SearchFiles || value.type === MessageType.CancelFileSearch ||
-    value.type === MessageType.ListHistoryQueries || value.type === MessageType.GetHistoryQuery
+    value.type === MessageType.ListHistoryQueries || value.type === MessageType.GetHistoryQuery ||
+    value.type === MessageType.LoadDictionary
   )
+}
+
+const DICTIONARY_KINDS = new Set(['basic', 'flow', 'fieldColumn', 'listColumn', 'fileType'])
+
+function isDictionaryRequest(value: unknown): value is DictionaryLoadRequest {
+  if (!isRecord(value) || (value.force !== true && value.force !== false) || typeof value.kind !== 'string' || !DICTIONARY_KINDS.has(value.kind)) {
+    return false
+  }
+  if (value.kind === 'fileType') {
+    return typeof value.caseTypeId === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.caseTypeId) &&
+      Object.keys(value).length === 3
+  }
+  return Object.keys(value).length === 2
 }
 
 /** 浮窗和 Content Script 同处隔离环境，通过依赖注入收发消息。 */
 export interface MessageBridge {
-  request(message: ContentRequest): Promise<ContentResponse>
+  request(message: ContentRequest, signal?: AbortSignal): Promise<ContentResponse>
 }
 

@@ -1,5 +1,6 @@
 import { isRecord } from '../shared/guards'
 import { isFileSearchBusinessField, type FileSearchQuery } from './file-search-params'
+import type { DictionarySnapshot } from './dictionaries'
 import type { HistoryQueryDetail, HistoryQueryOption } from './query-history'
 import type { FileSearchResult, PatentFile } from './file-search-types'
 import type { SessionSummary } from './session'
@@ -97,4 +98,13 @@ export function isHistoryListResult(value: unknown): value is ApiResult<HistoryQ
 
 export function isHistoryDetailResult(value: unknown): value is ApiResult<HistoryQueryDetail> {
   return isApiResult(value, isHistoryDetail)
+}
+
+function isDictionarySnapshot(value: unknown): value is DictionarySnapshot {
+  return isRecord(value) && (value.kind === 'basic' || value.kind === 'flow' || value.kind === 'fileType' ||
+    value.kind === 'fieldColumn' || value.kind === 'listColumn')
+}
+
+export function isDictionaryResult(value: unknown): value is ApiResult<DictionarySnapshot> {
+  return isApiResult(value, isDictionarySnapshot)
 }

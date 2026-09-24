@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { FileSearchQuery } from '../api/file-search-params'
+import { assessQueryScope, type FileSearchQuery } from '../api/file-search-params'
 import type { FileSearchResult } from '../api/file-search-types'
 import type { SessionStatus } from '../api/session'
 import QueryTemplateSection from './QueryTemplateSection.vue'
+import SchemaQueryForm from './SchemaQueryForm.vue'
 import { MessageType, type MessageBridge } from '../shared/message'
 
 const bridge = inject<MessageBridge>('bridge')
@@ -110,7 +111,8 @@ function formQuery(): FileSearchQuery {
 
 async function executeSearch(query: FileSearchQuery): Promise<void> {
   if (!bridge || !canSearch.value) return
-  if (!query.resolvedFields && ![query.caseVolume, query.applicationNo, query.customerName, query.fileName, query.fileDescriptionId].some(value => value?.trim())) {
+  const resolvedEnough = query.resolvedFields ? assessQueryScope(query.resolvedFields).sufficient : false
+  if (!resolvedEnough && ![query.caseVolume, query.applicationNo, query.customerName, query.fileName, query.fileDescriptionId].some(value => value?.trim())) {
     searchState.value = 'error'
     searchMessage.value = '请输入查询条件。'
     result.value = null
@@ -192,14 +194,7 @@ onBeforeUnmount(() => {
         </select>
       </label>
     </section>
-    <form v-if="querySource === 'manual'" class="card search-form" aria-label="查询条件" @submit.prevent="search">
-      <strong>查询条件</strong>
-      <label>我方文号<input v-model="caseVolume" type="text" autocomplete="off" /></label>
-      <label>申请号<input v-model="applicationNo" type="text" autocomplete="off" /></label>
-      <label>客户名称<input v-model="customerName" type="text" autocomplete="off" /></label>
-      <label>附件名称<input v-model="fileName" type="text" autocomplete="off" /></label>
-      <button type="submit" class="search-submit" :disabled="!canSearch">{{ searchState === 'loading' ? '重新查询' : '查询文件' }}</button>
-    </form>
+    <SchemaQueryForm v-if="querySource === 'manual'" :bridge="bridge" :can-search="canSearch" :page-size="pageSize" @search="executeSearch" />
     <QueryTemplateSection v-else :bridge="bridge" :can-search="canSearch" :user-id="sessionUserId" :mode="querySource === 'customer' ? 'customer' : 'history'" :page-size="pageSize" @search="executeSearch" />
 
     <section ref="resultsSection" class="card file-results" aria-label="查询结果">

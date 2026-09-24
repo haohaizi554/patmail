@@ -120,11 +120,46 @@ export function buildGetSearchFilesParams(
 
 const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor'])
 
-/** 环境默认的案件类型和文件来源不能单独构成筛选，避免只靠默认值打出全库查询。 */
+const PRECISE_FILTERS = new Set([
+  'case_volume', 'app_no', 'file_name', 'file_name_batch', 'case_volume_customer',
+  'pub_no', 'issue_no', 'inventor_name', 'case_name', 'contact_name_zf',
+  'column1', 'column2', 'column3', 'column4', 'column5'
+])
+const BUSINESS_FILTERS = new Set([
+  'customer_name_vague', 'customer', 'customer_code', 'filetype', 'applicant',
+  'apply_type', 'country', 'i_ctrl_proc', 'business_type_id', 'agency_id'
+])
+const DEFAULT_ONLY = new Set(['case_type', 'fileclass'])
+const DATE_FILTER = /(?:_s|_e|_start|_end)$/
+
+export type QueryScopeClass = 'precise' | 'business' | 'date' | 'status' | 'system'
+
+export interface QueryScopeAssessment {
+  sufficient: boolean
+  classes: Record<string, QueryScopeClass>
+}
+
+/** 区分精确定位、业务筛选、日期、状态布尔和系统默认值。后两类不能单独放行查询。 */
+export function assessQueryScope(fields: Record<string, string>): QueryScopeAssessment {
+  const classes = Object.create(null) as Record<string, QueryScopeClass>
+  let sufficient = false
+  for (const key of Object.keys(fields)) {
+    if (!Object.prototype.hasOwnProperty.call(fields, key) || !isFileSearchBusinessField(key)) continue
+    const value = fields[key]
+    if (typeof value !== 'string') continue
+    const scope: QueryScopeClass = DEFAULT_ONLY.has(key) ? 'system'
+      : PRECISE_FILTERS.has(key) ? 'precise'
+        : BUSINESS_FILTERS.has(key) ? 'business'
+          : DATE_FILTER.test(key) ? 'date'
+            : 'status'
+    classes[key] = scope
+    if (value.trim() && (scope === 'precise' || scope === 'business' || scope === 'date')) sufficient = true
+  }
+  return { sufficient, classes }
+}
+
 export function hasExplicitFileSearchFilter(fields: Record<string, string>): boolean {
-  return Object.keys(fields).some(key =>
-    key !== 'case_type' && key !== 'fileclass' &&
-    isFileSearchBusinessField(key) && typeof fields[key] === 'string' && fields[key].trim() !== '')
+  return assessQueryScope(fields).sufficient
 }
 
 /**

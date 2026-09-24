@@ -93,7 +93,11 @@
 .preview dl div { display: grid; grid-template-columns: 78px 1fr; gap: 4px; font-size: 11px; }
 .preview dt { color: #a38ca5; }
 .preview dd { margin: 0; color: #65536d; overflow-wrap: anywhere; }
-.search-form label { display: grid; gap: 3px; color: #8d7693; font-size: 11px; }
+.search-form label, .file-tree { display: grid; gap: 3px; color: #8d7693; font-size: 11px; }
+.date-range { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.tree-list { display: grid; gap: 4px; max-height: 160px; overflow: auto; }
+.tree-children { display: grid; gap: 4px; margin-left: 14px; }
+.tree-row { display: flex; gap: 4px; align-items: center; }
 .search-form input { width: 100%; min-height: 31px; padding: 5px 8px; border: 1px solid #e9d9e9; border-radius: 8px; background: #fff; color: #4e4056; font-family: inherit; font-size: 12px; }
 .search-form input:focus-visible { outline: 2px solid #db9cbd; outline-offset: 1px; }
 .search-submit { min-height: 34px; margin-top: 3px; border: 1px solid #dd78a8; border-radius: 9px; background: #df83b0; color: #fff; font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }

@@ -161,7 +161,7 @@ describe('本地模板和客户配置', () => {
     })).rejects.toThrow('GUID')
     await service.delete(saved.id)
     expect(await service.list()).toEqual([])
-    expect(readBundle({ version: 1, templates: [{ id: 1 }], customers: [] }).warning).toContain('跳过')
+    expect(readBundle({ version: 1, templates: [{ id: 1 }], customers: [] }).writable).toBe(false)
     expect(readBundle({ version: 9, templates: [], customers: [] }).warning).toContain('版本')
   })
 })

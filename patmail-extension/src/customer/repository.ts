@@ -1,4 +1,4 @@
-import type { QueryBundleRepository } from '../storage/query-bundle'
+import { updateBundle, type QueryBundleRepository } from '../storage/query-bundle'
 import type { CustomerQueryProfile } from './types'
 
 export interface CustomerRepository {
@@ -27,17 +27,17 @@ export class BundleCustomerRepository implements CustomerRepository {
   }
 
   async save(profile: CustomerQueryProfile): Promise<void> {
-    const { bundle } = await this.bundles.load()
     const next = clone(profile)
-    const index = bundle.customers.findIndex(item => item.id === next.id)
-    if (index >= 0) bundle.customers.splice(index, 1, next)
-    else bundle.customers.push(next)
-    await this.bundles.save(bundle)
+    await updateBundle(this.bundles, bundle => {
+      const index = bundle.customers.findIndex(item => item.id === next.id)
+      if (index >= 0) bundle.customers.splice(index, 1, next)
+      else bundle.customers.push(next)
+    })
   }
 
   async delete(id: string): Promise<void> {
-    const { bundle } = await this.bundles.load()
-    bundle.customers = bundle.customers.filter(item => item.id !== id)
-    await this.bundles.save(bundle)
+    await updateBundle(this.bundles, bundle => {
+      bundle.customers = bundle.customers.filter(item => item.id !== id)
+    })
   }
 }

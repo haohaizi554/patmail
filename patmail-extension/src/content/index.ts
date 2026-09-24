@@ -8,7 +8,7 @@ import { EasyRuntime } from '../api/client'
 const easyRuntime = new EasyRuntime(location.origin)
 
 const bridge: MessageBridge = {
-  async request(message): Promise<ContentResponse> {
+  async request(message, signal): Promise<ContentResponse> {
     switch (message.type) {
       case MessageType.ScanPage:
         return { type: MessageType.ScanResult, payload: scanPage(document) }
@@ -31,10 +31,13 @@ const bridge: MessageBridge = {
           payload: await easyRuntime.searchFiles(message.payload.query) }
       case MessageType.ListHistoryQueries:
         return { type: MessageType.HistoryQueriesResult,
-          payload: await easyRuntime.listHistoryQueries(message.payload.force) }
+          payload: await easyRuntime.listHistoryQueries(message.payload.force, signal) }
       case MessageType.GetHistoryQuery:
         return { type: MessageType.HistoryQueryResult,
-          payload: await easyRuntime.getHistoryQuery(message.payload.queryId) }
+          payload: await easyRuntime.getHistoryQuery(message.payload.queryId, signal) }
+      case MessageType.LoadDictionary:
+        return { type: MessageType.DictionaryResult,
+          payload: await easyRuntime.loadDictionary(message.payload, signal) }
       case MessageType.CancelFileSearch:
         easyRuntime.cancelFileSearch()
         return { type: MessageType.FileSearchCancelled, payload: { ok: true } }
