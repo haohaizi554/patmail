@@ -4,7 +4,7 @@
 
 ## 文件边界
 
-- `src/api/config.ts`：固定目标 origin、当前环境查询配置。loopback 只用于本地验收。
+- `src/api/config.ts`：固定 EASY API Origin、当前环境查询配置；本地页面仅验收 Scanner。
 - `src/api/{types,transport,response-guards,message-guards}.ts`：API 结果/错误、两项操作白名单、同源表单 POST、超时/取消、HTML/JSON 与消息校验。
 - `src/api/{session,file-search-types,file-search-params,file-search-normalizer,client}.ts`：会话摘要、116 个有依据参数及 `_doneCallback` 例外、文件结果标准化与运行时生命周期。
 - `src/content/index.ts`：复用 MessageBridge，按会话状态门控查询、分别管理会话和文件请求。

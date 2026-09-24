@@ -7,6 +7,8 @@ export interface FileSearchQuery {
   customerName?: string
   fileName?: string
   fileDescriptionId?: string
+  /** 模板合并后的已注册字段。存在时不再使用上面的手工五项。 */
+  resolvedFields?: Record<string, string>
   pageIndex: number
   pageSize: number
 }
@@ -22,7 +24,7 @@ export interface FileSearchEnvironment {
  * API/04-文件查询.md 的 117 项顺序。_doneCallback 是旧前端回调序列化产物，
  * 不参与独立业务请求，因此实际提交 116 项。
  */
-const DOCUMENTED_FIELDS = [
+export const FILE_SEARCH_REQUEST_FIELDS = [
   'pageIndex', 'pageSize', 'Call', 'customer', 'filetype', 'update_s', 'update_e',
   'update_isnull', 'post_s', 'post_e', 'post_isnull', 'case_volume', 'fileclass',
   'applicant', 'case_volume_customer', 'app_no', 'flow_direction', 'sales', 'upuser',
@@ -52,6 +54,21 @@ const DOCUMENTED_FIELDS = [
   'column4', 'column5', 'inventor_name', 'contact_name_zf', 'IsFirst', 'is_pat',
   'colsel', '_t', 'log_pagename'
 ] as const
+
+export type FileSearchRequestField = (typeof FILE_SEARCH_REQUEST_FIELDS)[number]
+
+/** 分页和传输元数据由 Builder 写入，不能从模板或页面消息覆盖。 */
+export const FILE_SEARCH_SYSTEM_FIELDS = new Set<FileSearchRequestField>([
+  'pageIndex', 'pageSize', 'Call', 'IsFirst', 'is_pat', 'colsel', '_t', 'log_pagename'
+])
+
+const BUSINESS_FIELDS = new Set<string>(
+  FILE_SEARCH_REQUEST_FIELDS.filter(field => !FILE_SEARCH_SYSTEM_FIELDS.has(field))
+)
+
+export function isFileSearchBusinessField(name: string): boolean {
+  return BUSINESS_FIELDS.has(name)
+}
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -97,6 +114,68 @@ export function buildGetSearchFilesParams(
     log_pagename: 'FileSearch.aspx'
   }
   const params = new URLSearchParams()
-  for (const field of DOCUMENTED_FIELDS) params.append(field, values[field] ?? '')
+  for (const field of FILE_SEARCH_REQUEST_FIELDS) params.append(field, values[field] ?? '')
+  return { ok: true, data: params }
+}
+
+const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor'])
+
+/** 环境默认的案件类型和文件来源不能单独构成筛选，避免只靠默认值打出全库查询。 */
+export function hasExplicitFileSearchFilter(fields: Record<string, string>): boolean {
+  return Object.keys(fields).some(key =>
+    key !== 'case_type' && key !== 'fileclass' &&
+    isFileSearchBusinessField(key) && typeof fields[key] === 'string' && fields[key].trim() !== '')
+}
+
+/**
+ * 把已经合并好的模板字段交给同一份 116 项注册表。
+ * 字段缺失才回落环境默认值；显式空字符串会覆盖默认值。
+ */
+export function buildGetSearchFilesFromFields(
+  fields: Record<string, string>,
+  page: Pick<FileSearchQuery, 'pageIndex' | 'pageSize'>,
+  environment: FileSearchEnvironment = CURRENT_ENVIRONMENT,
+  now: () => number = Date.now
+): ApiResult<URLSearchParams> {
+  if (!Number.isSafeInteger(page.pageIndex) || page.pageIndex < 1 ||
+      !Number.isSafeInteger(page.pageSize) || page.pageSize < 1 || page.pageSize > 100) {
+    return apiError('INVALID_QUERY', '页码或每页数量无效。')
+  }
+  const explicit = Object.create(null) as Record<string, string>
+  for (const key of Object.keys(fields)) {
+    if (FORBIDDEN_KEYS.has(key) || !Object.prototype.hasOwnProperty.call(fields, key)) {
+      return apiError('INVALID_QUERY', '查询字段名无效。')
+    }
+    if (!isFileSearchBusinessField(key) || typeof fields[key] !== 'string') {
+      return apiError('INVALID_QUERY', '查询包含未注册字段。')
+    }
+    explicit[key] = fields[key]
+  }
+  if (explicit.filetype?.trim() && !validInternalIds(explicit.filetype)) {
+    return apiError('INVALID_QUERY', '文件描述必须使用内部 ID。')
+  }
+  if (!hasExplicitFileSearchFilter(explicit)) {
+    return apiError('INVALID_QUERY', '请提供有效筛选条件，不能进行全库查询。')
+  }
+  const values: Record<string, string> = {}
+  for (const field of FILE_SEARCH_REQUEST_FIELDS) {
+    if (FILE_SEARCH_SYSTEM_FIELDS.has(field)) continue
+    const specified = Object.prototype.hasOwnProperty.call(explicit, field)
+    let value = specified ? explicit[field] : ''
+    if (!specified && field === 'fileclass') value = environment.fileClass
+    if (!specified && field === 'case_type') value = environment.caseTypeId
+    if (field === 'app_no') value = value.trim().replace(/\./g, '')
+    values[field] = value
+  }
+  values.pageIndex = String(page.pageIndex)
+  values.pageSize = String(page.pageSize)
+  values.Call = 'GetSearchFiles'
+  values.IsFirst = 'false'
+  values.is_pat = String(environment.isPatent)
+  values.colsel = environment.colsel
+  values._t = String(now())
+  values.log_pagename = 'FileSearch.aspx'
+  const params = new URLSearchParams()
+  for (const field of FILE_SEARCH_REQUEST_FIELDS) params.append(field, values[field] ?? '')
   return { ok: true, data: params }
 }

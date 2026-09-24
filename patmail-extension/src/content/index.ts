@@ -29,6 +29,12 @@ const bridge: MessageBridge = {
       case MessageType.SearchFiles:
         return { type: MessageType.SearchFilesResult,
           payload: await easyRuntime.searchFiles(message.payload.query) }
+      case MessageType.ListHistoryQueries:
+        return { type: MessageType.HistoryQueriesResult,
+          payload: await easyRuntime.listHistoryQueries(message.payload.force) }
+      case MessageType.GetHistoryQuery:
+        return { type: MessageType.HistoryQueryResult,
+          payload: await easyRuntime.getHistoryQuery(message.payload.queryId) }
       case MessageType.CancelFileSearch:
         easyRuntime.cancelFileSearch()
         return { type: MessageType.FileSearchCancelled, payload: { ok: true } }

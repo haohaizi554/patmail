@@ -1,4 +1,6 @@
-import { buildGetSearchFilesParams, type FileSearchQuery } from './file-search-params'
+import { buildGetSearchFilesFromFields, buildGetSearchFilesParams, type FileSearchQuery } from './file-search-params'
+import { HistoryQueryService } from './query-history'
+import type { HistoryQueryDetail, HistoryQueryOption } from './query-history'
 import type { FileSearchResult } from './file-search-types'
 import { normalizeFileSearch } from './file-search-normalizer'
 import { SessionService, type SessionStatus, type SessionSummary } from './session'
@@ -12,10 +14,13 @@ export class EasyRuntime {
   private searchController: AbortController | null = null
   private searchSequence = 0
   private activeSearch: { signature: string; promise: Promise<ApiResult<FileSearchResult>> } | null = null
+  private readonly history: HistoryQueryService
+  private historyUserKey = ''
 
   constructor(pageOrigin: string, options: TransportOptions = {}) {
     this.transport = new EasyTransport(pageOrigin, options)
     this.session = new SessionService(this.transport)
+    this.history = new HistoryQueryService(this.transport)
   }
 
   get sessionStatus(): SessionStatus { return this.session.status }
@@ -28,6 +33,9 @@ export class EasyRuntime {
     if (this.sessionController === controller) this.sessionController = null
     if (result.ok && result.data.status !== 'authenticated') this.cancelFileSearch()
     if (!result.ok && result.error.code === 'SESSION_EXPIRED') this.cancelFileSearch()
+    const nextKey = result.ok && result.data.status === 'authenticated' ? result.data.userId ?? '' : ''
+    if (nextKey !== this.historyUserKey) this.history.invalidate()
+    this.historyUserKey = nextKey
     return result
   }
 
@@ -43,13 +51,19 @@ export class EasyRuntime {
         '请先在 EASY 原网站登录并检测登录状态。'
       ))
     }
-    const signature = JSON.stringify([
+    const signature = JSON.stringify(query.resolvedFields ? [
+      'resolved',
+      Object.keys(query.resolvedFields).sort().map(key => [key, query.resolvedFields?.[key] ?? '']),
+      query.pageIndex, query.pageSize
+    ] : [
       query.caseVolume?.trim() ?? '', query.applicationNo?.trim() ?? '',
       query.customerName?.trim() ?? '', query.fileName?.trim() ?? '',
       query.fileDescriptionId?.trim() ?? '', query.pageIndex, query.pageSize
     ])
     if (this.activeSearch?.signature === signature) return this.activeSearch.promise
-    const params = buildGetSearchFilesParams(query)
+    const params = query.resolvedFields
+      ? buildGetSearchFilesFromFields(query.resolvedFields, query)
+      : buildGetSearchFilesParams(query)
     if (!params.ok) return Promise.resolve(params)
     this.cancelFileSearch()
     const controller = new AbortController()
@@ -75,6 +89,20 @@ export class EasyRuntime {
     return promise
   }
 
+  listHistoryQueries(force = false): Promise<ApiResult<HistoryQueryOption[]>> {
+    if (this.session.status !== 'authenticated') {
+      return Promise.resolve(apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。'))
+    }
+    return this.history.list(this.historyUserKey, force)
+  }
+
+  getHistoryQuery(queryId: string): Promise<ApiResult<HistoryQueryDetail>> {
+    if (this.session.status !== 'authenticated') {
+      return Promise.resolve(apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。'))
+    }
+    return this.history.detail(this.historyUserKey, queryId)
+  }
+
   cancelFileSearch(): void {
     this.searchSequence++
     this.searchController?.abort()
@@ -85,6 +113,8 @@ export class EasyRuntime {
   dispose(): void {
     this.cancelSessionCheck()
     this.cancelFileSearch()
+    this.history.invalidate()
+    this.historyUserKey = ''
     this.session.clear()
   }
 }

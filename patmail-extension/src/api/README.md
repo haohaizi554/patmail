@@ -4,4 +4,4 @@
 
 请求由 Content Script 在 EASY 同源页面发起，`credentials: 'same-origin'` 复用浏览器会话。模块不读取 Cookie，也不提供任意 URL/Call 的请求接口。当前租户配置见 `config.ts`，现场变化须在此处核实；不得把内置 ID 当作所有租户的通用值。
 
-协议细节及待验证字段见 `docs/phase2-1-api-contract.md`。
+`GetUserModel` 的现场响应里 `Result` 可以为 false，登录判断以 `IsLogin` 和 `Status` 为准。摘要只保留已确认的显示名和用户 ID。协议见 `docs/phase2-1-api-contract.md`。

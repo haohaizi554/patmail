@@ -2,32 +2,32 @@
 
 ## 现有架构审计与保留范围
 
-项目实际位于 `patmail-extension/`，已有 Manifest V3、Vue 3/TypeScript/Vite、顶层 Content Script、Background PING、Popup、Shadow DOM + 手动 Popover 浮窗、拖拽/收缩/关闭、统一消息、L2 DOM Scanner、Vitest 和 Chromium E2E。稳定的注入器、扫描器、Popup 与构建配置保持原结构；本次只在浮窗增加文件查询视图，并扩展消息协议和 Content Script 分发。API、rules、automation、services 原有预留位置未被搬迁。
+项目实际位于 `patmail-extension/`。Phase 1 已有 Manifest V3、Vue 3/TypeScript/Vite、Content Script、Background PING、Popup、Shadow DOM 浮窗和 L2 DOM Scanner。Phase 2.1 没有另起工程，也没有第二套消息系统或第二个浮窗。本次在已有 API Runtime 上按现场响应修正会话判断，并完成真实会话验收。
 
-## 修改与新增
+## 本次相对上一版的修改
 
-修改：`src/content/index.ts`、`src/shared/message.ts`、`src/floating/App.vue`、`src/floating/style.css`、`src/api/README.md`、`src/services/api.ts`、`tests/message.test.ts`、`tests/extension.e2e.mjs`、`README.md`。
+修改：`src/api/session.ts`、`src/api/transport.ts`、`src/api/README.md`、`src/floating/FileSearchPanel.vue`、`tests/easy-session.test.ts`、`tests/easy-transport.test.ts`、`tests/extension.e2e.mjs`、`manifest.json`、`README.md`、`docs/phase2-1-{architecture,api-contract,acceptance,report}.md`。
 
-新增：`src/api/{config,types,transport,response-guards,session,file-search-params,file-search-types,file-search-normalizer,client,message-guards}.ts`、`src/floating/FileSearchPanel.vue`、`tests/{easy-transport,easy-session,easy-runtime,file-search-params,file-search-normalizer}.test.ts`、`docs/phase2-1-{plan,architecture,api-contract,acceptance,report}.md`。
+原因：HAR 没有 `GetUserModel` 正文。现场已登录响应是 `IsLogin=true`、`Status=true`、`Result=false`。旧逻辑把 `Result=false` 当成业务失败，登录后无法查询。无 Cookie 时接口返回短 HTML「出错了!」，不是登录页。
 
 ## 已实现能力
 
-- 固定 Origin/Handler/Call/POST 的只读 API Runtime；Content Script 同源请求复用浏览器会话，不读取或存储 Cookie。
-- `GetUserModel` 明确状态检查；未知真实响应结构安全失败，不编造用户名。
-- `GetSearchFiles` 文档字段 Builder、参数校验、无条件查询拦截、当前环境配置隔离、运行时响应校验与 `PatentFile` 标准化。
-- 文件查询视图：登录状态、四项文本筛选、文件卡片、分页、刷新、空结果和错误提示；请求超时、取消、重复查询合并与旧结果竞态防护。
-- 原 Phase 1 页面扫描、Popup、浮窗交互及重复注入控制通过回归；没有业务写操作。
+- 固定 Origin/Handler/Call/POST 的只读 API Runtime。Content Script 同源请求复用浏览器会话，不读取或存储 Cookie，也不保留 `SessionId` 和 `UserMenu`。
+- 已登录时提取 `UserModel.Name`（空则 `user_name`）和 GUID 形式的 `user_id`。未确认字段不编造。
+- `GetSearchFiles` 文档字段 Builder、无条件查询拦截、响应校验和 `PatentFile` 标准化。
+- 浮窗：登录状态与显示名、四项筛选、文件卡片、20/50/100 分页、刷新、空结果和错误提示；超时、取消和竞态防护保持原样。
+- 原页面扫描、Popup 和浮窗交互仍由 E2E 覆盖。没有业务写操作。
 
 ## 验证状态
 
 | 类别 | 结果 |
 |---|---|
-| A. 自动化 | `pnpm test`、`pnpm typecheck`、`pnpm build` 和 `pnpm test:e2e` 通过；本地 Chromium 使用 HttpOnly Mock Cookie 验证同源会话、文件查询、分页、刷新、空结果、失效及 Scanner 共存。具体最新数量以命令输出为准。 |
-| B. 真实 EASY 会话 | **未验证**。本机未取得获授权的真实登录会话；没有声称真实列表已读取。 |
-| C. 待现场验证 | `GetUserModel` 正文结构、真实 `GetSearchFiles` 行形状、当前租户默认配置、真实 Cookie/登录失效行为、Chrome 手动加载和原站兼容。步骤见 `phase2-1-acceptance.md`。 |
+| A. 自动化 | 2026-09-24 复核：`pnpm test` 62 项通过、`pnpm typecheck` 通过、`pnpm build` 通过、`pnpm test:e2e` 13 项通过。Mock 覆盖表单编码、超时、502/503、登录 HTML、未登录短 HTML、`Result=false` 的已登录用户模型、文件参数、空结果和竞态。 |
+| B. 真实 EASY 会话 | 2026-09-24 用授权账号完成。直接请求确认用户模型、24 条文件、第二页 4 条、空结果 `TableRows=null`。加载 `dist` 的 Chromium 在原站登录后，浮窗显示已登录，查出 20 张卡片，下一页、无结果和清除 Cookie 后的「登录已失效」均符合预期。未把 Cookie 或业务正文写入仓库。 |
+| C. 尚未在现场做 | 真实 502/503 文案、点击原站退出按钮、日常 Chrome 的手动加载页、真实首页上的扫描/拖拽，以及 `FileSearch.aspx` iframe 共存。步骤见 `phase2-1-acceptance.md`。 |
 
 ## 已知限制与后续依赖
 
-文件描述树选择器本阶段没有 UI；`fileDescriptionId` 只作为接受内部 GUID 的模型与 Builder 入口。当前配置源自文档记录，变更租户需现场核实。查询只支持四项文本筛选、每页 20 条，不排序、不拉取整个文件库。响应校验偏保守：真实字段结构若与文档不符，会返回格式错误而不是猜测映射。自动化环境模拟 EASY，不等同于真实现场验收。
+文件描述树选择器没有 UI；`fileDescriptionId` 只接受内部 GUID。当前 `case_type`、`fileclass`、`is_pat`、`colsel` 已在这个租户的首页查询中被接受，换租户仍要改配置。查询至少要有一项文本条件，不排序，不拉取整个文件库。
 
-Phase 2.2 可以在真实响应和租户配置确认后接入 `SearchQueryHisList`、解析 QueryXml、保存本地查询模板并做客户条件覆盖；本阶段没有实现这些功能，也没有自动发文、下载、后端或写接口。
+Phase 2.2 可以接入 `SearchQueryHisList`、解析 QueryXml 并做客户条件覆盖。本阶段没有实现这些功能，也没有自动发文、下载、后端或写接口。

@@ -67,6 +67,7 @@ describe('EASY 受限传输', () => {
       { response: new Response('gateway down', { status: 502 }), code: 'HTTP_ERROR', status: 502 },
       { response: new Response('unavailable', { status: 503 }), code: 'HTTP_ERROR', status: 503 },
       { response: new Response('<html><form action="/Login.aspx"></form></html>'), code: 'SESSION_EXPIRED' },
+      { response: new Response('<div style="width:100%;text-align: center;font-size:40px;">出错了!</div>'), code: 'SESSION_EXPIRED' },
       { response: new Response('<html><body>proxy error</body></html>'), code: 'UNEXPECTED_HTML' },
       { response: new Response('{not json'), code: 'INVALID_RESPONSE' }
     ]

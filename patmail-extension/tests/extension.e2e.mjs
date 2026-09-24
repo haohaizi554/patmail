@@ -42,9 +42,18 @@ await context.route('http://183.36.43.66:88/**', async route => {
   const authenticated = (await request.allHeaders()).cookie?.includes('pm_fixture_session=active') === true
   apiCalls.push({ path: pathName, method: request.method(), params, authenticated })
   if (pathName === '/AjaxServers/Login.ashx' && params.get('Call') === 'GetUserModel') {
-    if (!authenticated) { await route.fulfill({ status: 401, body: 'unauthorized' }); return }
+    if (!authenticated) {
+      await route.fulfill({
+        status: 200, contentType: 'text/plain; charset=utf-8',
+        body: '<div style="width:100%;text-align: center;font-size:40px;">出错了!</div>'
+      })
+      return
+    }
     await route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8',
-      body: JSON.stringify({ ClientInfo: { IsLogin: true, Status: true, Result: true } }) })
+      body: JSON.stringify({
+        UserModel: { user_id: '11111111-1111-1111-1111-111111111111', user_name: 'tester', Name: '测试员', SessionId: 'hidden' },
+        ClientInfo: { IsLogin: true, Status: true, Result: false, Message: null }
+      }) })
     return
   }
   if (pathName === '/AjaxServers/CaseInfo.ashx' && params.get('Call') === 'GetSearchFiles') {
@@ -194,6 +203,7 @@ try {
       httpOnly: true, sameSite: 'Lax' }])
     await easyPanel.getByRole('button', { name: '重新检测' }).click()
     await easyPanel.getByText('已登录', { exact: true }).waitFor()
+    await easyPanel.getByText('测试员', { exact: true }).waitFor()
     assert(apiCalls.some(call => call.path === '/AjaxServers/Login.ashx' && call.authenticated))
     await easyPanel.getByLabel('我方文号').fill('A+123')
     await easyPanel.getByRole('button', { name: '查询文件' }).click()

@@ -1,8 +1,9 @@
 import type { PageInfo, PageSnapshot } from './types'
 import { isPageInfo, isPageSnapshot, isRecord } from './guards'
-import { isFileSearchApiResult, isFileSearchQuery, isSessionResult } from '../api/message-guards'
+import { isFileSearchApiResult, isFileSearchQuery, isHistoryDetailResult, isHistoryListResult, isSessionResult } from '../api/message-guards'
 import type { FileSearchQuery } from '../api/file-search-params'
 import type { FileSearchResult } from '../api/file-search-types'
+import type { HistoryQueryDetail, HistoryQueryOption } from '../api/query-history'
 import type { SessionSummary } from '../api/session'
 import type { ApiResult } from '../api/types'
 
@@ -29,6 +30,10 @@ export const MessageType = {
   SearchFilesResult: 'SEARCH_FILES_RESULT',
   CancelFileSearch: 'CANCEL_FILE_SEARCH',
   FileSearchCancelled: 'FILE_SEARCH_CANCELLED',
+  ListHistoryQueries: 'LIST_HISTORY_QUERIES',
+  HistoryQueriesResult: 'HISTORY_QUERIES_RESULT',
+  GetHistoryQuery: 'GET_HISTORY_QUERY',
+  HistoryQueryResult: 'HISTORY_QUERY_RESULT',
   Error: 'ERROR'
 } as const
 
@@ -39,6 +44,8 @@ export type ContentRequest =
   | Request<'SCAN_PAGE'> | Request<'GET_PAGE_INFO'> | Request<'SHOW_PANEL'> | Request<'PING'>
   | Request<'CHECK_SESSION'> | Request<'CANCEL_SESSION_CHECK'>
   | Request<'CANCEL_FILE_SEARCH'> | Response<'SEARCH_FILES', { query: FileSearchQuery }>
+  | Response<'LIST_HISTORY_QUERIES', { force: boolean }>
+  | Response<'GET_HISTORY_QUERY', { queryId: string }>
 export type ErrorMessage = Response<'ERROR', { message: string }>
 export type BackgroundRequest = Request<'PING'>
 export type BackgroundResponse = Response<'PONG', { ok: true }> | ErrorMessage
@@ -50,6 +57,8 @@ export type ContentResponse =
   | Response<'SESSION_CHECK_CANCELLED', { ok: true }>
   | Response<'SEARCH_FILES_RESULT', ApiResult<FileSearchResult>>
   | Response<'FILE_SEARCH_CANCELLED', { ok: true }>
+  | Response<'HISTORY_QUERIES_RESULT', ApiResult<HistoryQueryOption[]>>
+  | Response<'HISTORY_QUERY_RESULT', ApiResult<HistoryQueryDetail>>
   | BackgroundResponse
 export type AppMessage = ContentRequest | ContentResponse
 
@@ -65,6 +74,11 @@ export function isMessage(value: unknown): value is AppMessage {
     case MessageType.CancelSessionCheck:
     case MessageType.CancelFileSearch:
       return value.payload === undefined
+    case MessageType.ListHistoryQueries:
+      return isRecord(value.payload) && (value.payload.force === true || value.payload.force === false) &&
+        Object.keys(value.payload).length === 1
+    case MessageType.GetHistoryQuery:
+      return isRecord(value.payload) && typeof value.payload.queryId === 'string' && Object.keys(value.payload).length === 1
     case MessageType.SearchFiles:
       return isRecord(value.payload) && isFileSearchQuery(value.payload.query) &&
         Object.keys(value.payload).length === 1
@@ -81,6 +95,10 @@ export function isMessage(value: unknown): value is AppMessage {
       return isSessionResult(value.payload)
     case MessageType.SearchFilesResult:
       return isFileSearchApiResult(value.payload)
+    case MessageType.HistoryQueriesResult:
+      return isHistoryListResult(value.payload)
+    case MessageType.HistoryQueryResult:
+      return isHistoryDetailResult(value.payload)
     case MessageType.Error:
       return isRecord(value.payload) && typeof value.payload.message === 'string'
     default:
@@ -93,7 +111,8 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.ScanPage || value.type === MessageType.GetPageInfo ||
     value.type === MessageType.ShowPanel || value.type === MessageType.Ping ||
     value.type === MessageType.CheckSession || value.type === MessageType.CancelSessionCheck ||
-    value.type === MessageType.SearchFiles || value.type === MessageType.CancelFileSearch
+    value.type === MessageType.SearchFiles || value.type === MessageType.CancelFileSearch ||
+    value.type === MessageType.ListHistoryQueries || value.type === MessageType.GetHistoryQuery
   )
 }
 

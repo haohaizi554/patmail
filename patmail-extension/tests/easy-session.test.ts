@@ -34,6 +34,42 @@ describe('GetUserModel 会话判断', () => {
     expect(await session.check()).toMatchObject({ ok: true, data: { status: 'expired' } })
   })
 
+  it('accepts the confirmed GetUserModel shape when Result is false', async () => {
+    const session = sessionWith(JSON.stringify({
+      UserModel: {
+        user_id: '11111111-1111-1111-1111-111111111111',
+        user_name: 'tester',
+        Name: '测试员',
+        SessionId: 'must-not-leak'
+      },
+      UserMenu: [{ hidden: 'menu' }],
+      ClientInfo: { IsLogin: true, Status: true, Result: false, Message: null }
+    }))
+    const result = await session.check()
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        status: 'authenticated',
+        displayName: '测试员',
+        userId: '11111111-1111-1111-1111-111111111111'
+      }
+    })
+    expect(JSON.stringify(result)).not.toContain('must-not-leak')
+    expect(JSON.stringify(result)).not.toContain('UserMenu')
+    expect(session.status).toBe('authenticated')
+  })
+
+  it('uses the account name only when the confirmed display name is empty', async () => {
+    const session = sessionWith(JSON.stringify({
+      UserModel: { user_name: 'tester', Name: '  ', user_id: 'not-a-guid' },
+      ClientInfo: { IsLogin: true, Status: true, Result: false }
+    }))
+    const result = await session.check()
+    expect(result).toMatchObject({ ok: true, data: { displayName: 'tester' } })
+    if (!result.ok) return
+    expect(result.data.userId).toBeUndefined()
+  })
+
   it('reports unknown structure and safe key-only diagnostics', async () => {
     const session = sessionWith(JSON.stringify({ model: { secret_value: 'must-not-leak' }, marker: 'x' }))
     const result = await session.check()
@@ -50,6 +86,13 @@ describe('GetUserModel 会话判断', () => {
     expect(gateway.status).toBe('error')
     const malformed = await sessionWith(JSON.stringify({ ClientInfo: { IsLogin: 'yes' } })).check()
     expect(malformed).toMatchObject({ ok: false, error: { code: 'INVALID_RESPONSE' } })
+  })
+
+  it('treats the confirmed logged-out HTML fragment as unauthenticated', async () => {
+    const session = sessionWith('<div style="width:100%;text-align: center;font-size:40px;">出错了!</div>')
+    const result = await session.check()
+    expect(result).toMatchObject({ ok: true, data: { status: 'unauthenticated' } })
+    expect(session.status).toBe('unauthenticated')
   })
 
   it('classifies login-page redirect as session loss', async () => {

@@ -2,6 +2,21 @@ import { businessMessage, isRecord, readClientInfo, safeResponseKeys } from './r
 import { apiError, type ApiResult } from './types'
 import type { EasyTransport } from './transport'
 
+const USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** 只提取已在现场响应中确认的展示字段，不保留 SessionId、菜单或完整用户模型。 */
+function sessionIdentity(data: Record<string, unknown>): Pick<SessionSummary, 'displayName' | 'userId'> {
+  if (!isRecord(data.UserModel)) return {}
+  const model = data.UserModel
+  const name = typeof model.Name === 'string' ? model.Name.trim() : ''
+  const account = typeof model.user_name === 'string' ? model.user_name.trim() : ''
+  const userId = typeof model.user_id === 'string' && USER_ID.test(model.user_id.trim()) ? model.user_id.trim() : ''
+  return {
+    ...(name || account ? { displayName: (name || account).slice(0, 80) } : {}),
+    ...(userId ? { userId } : {})
+  }
+}
+
 export type SessionStatus =
   | 'unknown' | 'checking' | 'authenticated' | 'unauthenticated' | 'expired' | 'error'
 
@@ -16,7 +31,6 @@ export interface SessionSummary {
 export class SessionService {
   status: SessionStatus = 'unknown'
   private wasAuthenticated = false
-  private rawUserModel: unknown = null
   private generation = 0
 
   constructor(private readonly transport: EasyTransport) {}
@@ -25,13 +39,11 @@ export class SessionService {
     this.generation++
     this.status = 'unknown'
     this.wasAuthenticated = false
-    this.rawUserModel = null
   }
 
   expire(): void {
     this.generation++
     this.status = 'expired'
-    this.rawUserModel = null
   }
 
   async check(signal?: AbortSignal): Promise<ApiResult<SessionSummary>> {
@@ -47,14 +59,12 @@ export class SessionService {
       this.status = response.error.code === 'SESSION_EXPIRED'
         ? this.wasAuthenticated ? 'expired' : 'unauthenticated' : 'error'
       if (response.error.code === 'SESSION_EXPIRED') {
-        this.rawUserModel = null
         if (!this.wasAuthenticated) {
           return { ok: true, data: { status: 'unauthenticated', checkedAt: new Date().toISOString() } }
         }
       }
       return response
     }
-    this.rawUserModel = response.data
     if (!isRecord(response.data)) {
       this.status = 'error'
       return apiError('INVALID_RESPONSE', 'GetUserModel 响应不是对象。')
@@ -73,13 +83,13 @@ export class SessionService {
     const info = client.data
     if (info.IsLogin === false) {
       this.status = this.wasAuthenticated ? 'expired' : 'unauthenticated'
-      this.rawUserModel = null
       return { ok: true, data: { status: this.status, checkedAt: new Date().toISOString() } }
     }
-    if (info.Status === false || info.Result === false) {
+    if (info.Status === false) {
       this.status = 'error'
       return apiError('BUSINESS_ERROR', businessMessage(info))
     }
+    // 现场 GetUserModel 在已登录时 Result 仍为 false，不能把它当成登录失败。
     if (info.IsLogin !== true) {
       this.status = 'error'
       return { ok: false, error: {
@@ -89,7 +99,8 @@ export class SessionService {
     }
     this.status = 'authenticated'
     this.wasAuthenticated = true
-    // GetUserModel 的姓名/ID 字段尚未确认，摘要不编造这些值。
-    return { ok: true, data: { status: 'authenticated', checkedAt: new Date().toISOString() } }
+    return { ok: true, data: {
+      status: 'authenticated', checkedAt: new Date().toISOString(), ...sessionIdentity(response.data)
+    } }
   }
 }

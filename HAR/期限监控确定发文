@@ -1,0 +1,244 @@
+{
+  "log": {
+    "version": "1.2",
+    "creator": {
+      "name": "WebInspector",
+      "version": "537.36"
+    },
+    "pages": [
+      {
+        "startedDateTime": "2026-09-24T06:33:39.906Z",
+        "id": "page_5",
+        "title": "http://183.36.43.66:88/",
+        "pageTimings": {
+          "onContentLoad": 1569.430999996257,
+          "onLoad": 3848.5300000029383
+        }
+      }
+    ],
+    "entries": [
+      {
+        "_initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "send",
+                "scriptId": "737",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 17818
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "737",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "740",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "Limit.MailCustomer",
+                "scriptId": "732",
+                "url": "http://183.36.43.66:88/Scripts/Page/Patent/IhgLimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 41,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "dispatch",
+                "scriptId": "737",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 0,
+                "columnNumber": 28334
+              },
+              {
+                "functionName": "v.handle",
+                "scriptId": "737",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 0,
+                "columnNumber": 25039
+              }
+            ]
+          }
+        },
+        "_priority": "High",
+        "_resourceType": "xhr",
+        "cache": {},
+        "connection": "7890",
+        "request": {
+          "method": "POST",
+          "url": "http://183.36.43.66:88/AjaxServers/Notice.ashx",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/javascript, */*; q=0.01"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "zh-CN,zh;q=0.9,en-CN;q=0.8,en;q=0.7"
+            },
+            {
+              "name": "Cache-Control",
+              "value": "no-cache"
+            },
+            {
+              "name": "Content-Length",
+              "value": "158"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded; charset=UTF-8"
+            },
+            {
+              "name": "Host",
+              "value": "183.36.43.66:88"
+            },
+            {
+              "name": "Origin",
+              "value": "http://183.36.43.66:88"
+            },
+            {
+              "name": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Referer",
+              "value": "http://183.36.43.66:88/Ihgforms/Patent/LimitMonitor.aspx"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "X-Requested-With",
+              "value": "XMLHttpRequest"
+            }
+          ],
+          "queryString": [],
+          "cookies": [],
+          "headersSize": 1032,
+          "bodySize": 158,
+          "postData": {
+            "mimeType": "application/x-www-form-urlencoded; charset=UTF-8",
+            "text": "_file_ids=33d3cde7-c34b-4efc-a684-b238b3bf5082&mailstyle=1&mailtype=71d067a3-d1a3-4d4b-87f9-38ea9d96bf70&Call=LimitMailCustomer&log_pagename=LimitMonitor.aspx",
+            "params": [
+              {
+                "name": "_file_ids",
+                "value": "33d3cde7-c34b-4efc-a684-b238b3bf5082"
+              },
+              {
+                "name": "mailstyle",
+                "value": "1"
+              },
+              {
+                "name": "mailtype",
+                "value": "71d067a3-d1a3-4d4b-87f9-38ea9d96bf70"
+              },
+              {
+                "name": "Call",
+                "value": "LimitMailCustomer"
+              },
+              {
+                "name": "log_pagename",
+                "value": "LimitMonitor.aspx"
+              }
+            ]
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Cache-Control",
+              "value": "private"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Content-Length",
+              "value": "234"
+            },
+            {
+              "name": "Content-Type",
+              "value": "text/plain; charset=utf-8"
+            },
+            {
+              "name": "Date",
+              "value": "Thu, 24 Sep 2026 06:39:42 GMT"
+            },
+            {
+              "name": "Keep-Alive",
+              "value": "timeout=4"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Server",
+              "value": "Microsoft-IIS/8.5"
+            },
+            {
+              "name": "X-Aspnet-Version",
+              "value": "4.0.30319"
+            },
+            {
+              "name": "X-Powered-By",
+              "value": "ASP.NET"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "size": 234,
+            "mimeType": "text/plain",
+            "compression": 0
+          },
+          "redirectURL": "",
+          "headersSize": 298,
+          "bodySize": 234,
+          "_transferSize": 532,
+          "_error": null,
+          "_fetchedViaServiceWorker": false
+        },
+        "serverIPAddress": "127.0.0.1",
+        "startedDateTime": "2026-09-24T06:39:26.739Z",
+        "time": 1386.5890000015497,
+        "timings": {
+          "blocked": 5.9850000092862174,
+          "dns": -1,
+          "ssl": -1,
+          "connect": -1,
+          "send": 0.17799999999999994,
+          "wait": 1379.5730000018068,
+          "receive": 0.8529999904567376,
+          "_blocked_queueing": 2.6710000092862174,
+          "_workerStart": -1,
+          "_workerReady": -1,
+          "_workerFetchStart": -1,
+          "_workerRespondWithSettled": -1
+        },
+        "_connectionId": "405619",
+        "pageref": "page_5"
+      }
+    ]
+  }
+}

@@ -1,0 +1,4685 @@
+{
+  "log": {
+    "version": "1.2",
+    "creator": {
+      "name": "WebInspector",
+      "version": "537.36"
+    },
+    "pages": [
+      {
+        "startedDateTime": "2026-09-24T06:33:39.906Z",
+        "id": "page_5",
+        "title": "http://183.36.43.66:88/",
+        "pageTimings": {
+          "onContentLoad": 1569.430999996257,
+          "onLoad": 3848.5300000029383
+        }
+      }
+    ],
+    "entries": [
+      {
+        "_initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 17818
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "Limit.GetColorConfig",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 729,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 23,
+                "columnNumber": 14
+              },
+              {
+                "functionName": "onCallback",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 153,
+                "columnNumber": 62
+              },
+              {
+                "functionName": "poll",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 143,
+                "columnNumber": 42
+              }
+            ],
+            "parent": {
+              "description": "setTimeout",
+              "callFrames": [
+                {
+                  "functionName": "poll",
+                  "scriptId": "669",
+                  "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                  "lineNumber": 143,
+                  "columnNumber": 57
+                }
+              ],
+              "parent": {
+                "description": "setTimeout",
+                "callFrames": [
+                  {
+                    "functionName": "poll",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 143,
+                    "columnNumber": 57
+                  },
+                  {
+                    "functionName": "onScriptLoad",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 144,
+                    "columnNumber": 17
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 195,
+                    "columnNumber": 20
+                  }
+                ],
+                "parent": {
+                  "description": "script",
+                  "callFrames": [
+                    {
+                      "functionName": "Layui.use",
+                      "scriptId": "669",
+                      "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                      "lineNumber": 166,
+                      "columnNumber": 27
+                    },
+                    {
+                      "functionName": "",
+                      "scriptId": "671",
+                      "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                      "lineNumber": 21,
+                      "columnNumber": 10
+                    },
+                    {
+                      "functionName": "c",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 7854
+                    },
+                    {
+                      "functionName": "fireWith",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 8655
+                    },
+                    {
+                      "functionName": "ready",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 3263
+                    },
+                    {
+                      "functionName": "H",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 692
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "_priority": "High",
+        "_resourceType": "xhr",
+        "cache": {},
+        "connection": "7890",
+        "request": {
+          "method": "POST",
+          "url": "http://183.36.43.66:88/AjaxServers/CaseInfo.ashx",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/javascript, */*; q=0.01"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "zh-CN,zh;q=0.9,en-CN;q=0.8,en;q=0.7"
+            },
+            {
+              "name": "Cache-Control",
+              "value": "no-cache"
+            },
+            {
+              "name": "Content-Length",
+              "value": "50"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded; charset=UTF-8"
+            },
+            {
+              "name": "Host",
+              "value": "183.36.43.66:88"
+            },
+            {
+              "name": "Origin",
+              "value": "http://183.36.43.66:88"
+            },
+            {
+              "name": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Referer",
+              "value": "http://183.36.43.66:88/Forms/Report/LimitMonitor.aspx?guid=88c7b112-cd00-1ec8-c557-c03430ad4cc9"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "X-Requested-With",
+              "value": "XMLHttpRequest"
+            }
+          ],
+          "queryString": [],
+          "cookies": [],
+          "headersSize": 1072,
+          "bodySize": 50,
+          "postData": {
+            "mimeType": "application/x-www-form-urlencoded; charset=UTF-8",
+            "text": "Call=GetColorConfig&log_pagename=LimitMonitor.aspx",
+            "params": [
+              {
+                "name": "Call",
+                "value": "GetColorConfig"
+              },
+              {
+                "name": "log_pagename",
+                "value": "LimitMonitor.aspx"
+              }
+            ]
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Cache-Control",
+              "value": "private"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Content-Length",
+              "value": "884"
+            },
+            {
+              "name": "Content-Type",
+              "value": "text/plain; charset=utf-8"
+            },
+            {
+              "name": "Date",
+              "value": "Thu, 24 Sep 2026 06:35:39 GMT"
+            },
+            {
+              "name": "Keep-Alive",
+              "value": "timeout=4"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Server",
+              "value": "Microsoft-IIS/8.5"
+            },
+            {
+              "name": "X-Aspnet-Version",
+              "value": "4.0.30319"
+            },
+            {
+              "name": "X-Powered-By",
+              "value": "ASP.NET"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "size": 884,
+            "mimeType": "text/plain",
+            "compression": 0
+          },
+          "redirectURL": "",
+          "headersSize": 298,
+          "bodySize": 884,
+          "_transferSize": 1182,
+          "_error": null,
+          "_fetchedViaServiceWorker": false
+        },
+        "serverIPAddress": "127.0.0.1",
+        "startedDateTime": "2026-09-24T06:35:24.511Z",
+        "time": 23.527000012109056,
+        "timings": {
+          "blocked": 2.8210000032158566,
+          "dns": -1,
+          "ssl": -1,
+          "connect": -1,
+          "send": 0.21399999999999997,
+          "wait": 18.775999995490537,
+          "receive": 1.7160000134026632,
+          "_blocked_queueing": 1.4280000032158569,
+          "_workerStart": -1,
+          "_workerReady": -1,
+          "_workerFetchStart": -1,
+          "_workerRespondWithSettled": -1
+        },
+        "_connectionId": "405619",
+        "pageref": "page_5"
+      },
+      {
+        "_initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 17818
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "Limit.InitPage",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 344,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 24,
+                "columnNumber": 14
+              },
+              {
+                "functionName": "onCallback",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 153,
+                "columnNumber": 62
+              },
+              {
+                "functionName": "poll",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 143,
+                "columnNumber": 42
+              }
+            ],
+            "parent": {
+              "description": "setTimeout",
+              "callFrames": [
+                {
+                  "functionName": "poll",
+                  "scriptId": "669",
+                  "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                  "lineNumber": 143,
+                  "columnNumber": 57
+                }
+              ],
+              "parent": {
+                "description": "setTimeout",
+                "callFrames": [
+                  {
+                    "functionName": "poll",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 143,
+                    "columnNumber": 57
+                  },
+                  {
+                    "functionName": "onScriptLoad",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 144,
+                    "columnNumber": 17
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 195,
+                    "columnNumber": 20
+                  }
+                ],
+                "parent": {
+                  "description": "script",
+                  "callFrames": [
+                    {
+                      "functionName": "Layui.use",
+                      "scriptId": "669",
+                      "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                      "lineNumber": 166,
+                      "columnNumber": 27
+                    },
+                    {
+                      "functionName": "",
+                      "scriptId": "671",
+                      "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                      "lineNumber": 21,
+                      "columnNumber": 10
+                    },
+                    {
+                      "functionName": "c",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 7854
+                    },
+                    {
+                      "functionName": "fireWith",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 8655
+                    },
+                    {
+                      "functionName": "ready",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 3263
+                    },
+                    {
+                      "functionName": "H",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 692
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "_priority": "VeryHigh",
+        "_resourceType": "xhr",
+        "cache": {},
+        "connection": "7890",
+        "request": {
+          "method": "POST",
+          "url": "http://183.36.43.66:88/AjaxServers/PatentAction.ashx",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/javascript, */*; q=0.01"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "zh-CN,zh;q=0.9,en-CN;q=0.8,en;q=0.7"
+            },
+            {
+              "name": "Cache-Control",
+              "value": "no-cache"
+            },
+            {
+              "name": "Content-Length",
+              "value": "50"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded; charset=UTF-8"
+            },
+            {
+              "name": "Host",
+              "value": "183.36.43.66:88"
+            },
+            {
+              "name": "Origin",
+              "value": "http://183.36.43.66:88"
+            },
+            {
+              "name": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Referer",
+              "value": "http://183.36.43.66:88/Forms/Report/LimitMonitor.aspx?guid=88c7b112-cd00-1ec8-c557-c03430ad4cc9"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "X-Requested-With",
+              "value": "XMLHttpRequest"
+            }
+          ],
+          "queryString": [],
+          "cookies": [],
+          "headersSize": 1076,
+          "bodySize": 50,
+          "postData": {
+            "mimeType": "application/x-www-form-urlencoded; charset=UTF-8",
+            "text": "Call=GetFieldColumn&log_pagename=LimitMonitor.aspx",
+            "params": [
+              {
+                "name": "Call",
+                "value": "GetFieldColumn"
+              },
+              {
+                "name": "log_pagename",
+                "value": "LimitMonitor.aspx"
+              }
+            ]
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Cache-Control",
+              "value": "private"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Content-Length",
+              "value": "1318"
+            },
+            {
+              "name": "Content-Type",
+              "value": "text/plain; charset=utf-8"
+            },
+            {
+              "name": "Date",
+              "value": "Thu, 24 Sep 2026 06:35:39 GMT"
+            },
+            {
+              "name": "Keep-Alive",
+              "value": "timeout=4"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Server",
+              "value": "Microsoft-IIS/8.5"
+            },
+            {
+              "name": "X-Aspnet-Version",
+              "value": "4.0.30319"
+            },
+            {
+              "name": "X-Powered-By",
+              "value": "ASP.NET"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "size": 1318,
+            "mimeType": "text/plain",
+            "compression": 0
+          },
+          "redirectURL": "",
+          "headersSize": 299,
+          "bodySize": 1318,
+          "_transferSize": 1617,
+          "_error": null,
+          "_fetchedViaServiceWorker": false
+        },
+        "serverIPAddress": "127.0.0.1",
+        "startedDateTime": "2026-09-24T06:35:24.521Z",
+        "time": 17.29499999783002,
+        "timings": {
+          "blocked": 2.490000005829148,
+          "dns": -1,
+          "ssl": -1,
+          "connect": -1,
+          "send": 0.13799999999999996,
+          "wait": 13.279000002326445,
+          "receive": 1.3879999896744266,
+          "_blocked_queueing": 2.059000005829148,
+          "_workerStart": -1,
+          "_workerReady": -1,
+          "_workerFetchStart": -1,
+          "_workerRespondWithSettled": -1
+        },
+        "_connectionId": "405615",
+        "pageref": "page_5"
+      },
+      {
+        "_initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 17818
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "Limit.InitPage",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 526,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 24,
+                "columnNumber": 14
+              },
+              {
+                "functionName": "onCallback",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 153,
+                "columnNumber": 62
+              },
+              {
+                "functionName": "poll",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 143,
+                "columnNumber": 42
+              }
+            ],
+            "parent": {
+              "description": "setTimeout",
+              "callFrames": [
+                {
+                  "functionName": "poll",
+                  "scriptId": "669",
+                  "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                  "lineNumber": 143,
+                  "columnNumber": 57
+                }
+              ],
+              "parent": {
+                "description": "setTimeout",
+                "callFrames": [
+                  {
+                    "functionName": "poll",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 143,
+                    "columnNumber": 57
+                  },
+                  {
+                    "functionName": "onScriptLoad",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 144,
+                    "columnNumber": 17
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 195,
+                    "columnNumber": 20
+                  }
+                ],
+                "parent": {
+                  "description": "script",
+                  "callFrames": [
+                    {
+                      "functionName": "Layui.use",
+                      "scriptId": "669",
+                      "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                      "lineNumber": 166,
+                      "columnNumber": 27
+                    },
+                    {
+                      "functionName": "",
+                      "scriptId": "671",
+                      "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                      "lineNumber": 21,
+                      "columnNumber": 10
+                    },
+                    {
+                      "functionName": "c",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 7854
+                    },
+                    {
+                      "functionName": "fireWith",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 8655
+                    },
+                    {
+                      "functionName": "ready",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 3263
+                    },
+                    {
+                      "functionName": "H",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 692
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "_priority": "VeryHigh",
+        "_resourceType": "xhr",
+        "cache": {},
+        "connection": "7890",
+        "request": {
+          "method": "POST",
+          "url": "http://183.36.43.66:88/AjaxServers/Report.ashx",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/javascript, */*; q=0.01"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "zh-CN,zh;q=0.9,en-CN;q=0.8,en;q=0.7"
+            },
+            {
+              "name": "Cache-Control",
+              "value": "no-cache"
+            },
+            {
+              "name": "Content-Length",
+              "value": "52"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded; charset=UTF-8"
+            },
+            {
+              "name": "Host",
+              "value": "183.36.43.66:88"
+            },
+            {
+              "name": "Origin",
+              "value": "http://183.36.43.66:88"
+            },
+            {
+              "name": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Referer",
+              "value": "http://183.36.43.66:88/Forms/Report/LimitMonitor.aspx?guid=88c7b112-cd00-1ec8-c557-c03430ad4cc9"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "X-Requested-With",
+              "value": "XMLHttpRequest"
+            }
+          ],
+          "queryString": [],
+          "cookies": [],
+          "headersSize": 1070,
+          "bodySize": 52,
+          "postData": {
+            "mimeType": "application/x-www-form-urlencoded; charset=UTF-8",
+            "text": "Call=LimitMonitorInit&log_pagename=LimitMonitor.aspx",
+            "params": [
+              {
+                "name": "Call",
+                "value": "LimitMonitorInit"
+              },
+              {
+                "name": "log_pagename",
+                "value": "LimitMonitor.aspx"
+              }
+            ]
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Cache-Control",
+              "value": "private"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Content-Length",
+              "value": "141902"
+            },
+            {
+              "name": "Content-Type",
+              "value": "text/plain; charset=utf-8"
+            },
+            {
+              "name": "Date",
+              "value": "Thu, 24 Sep 2026 06:35:39 GMT"
+            },
+            {
+              "name": "Keep-Alive",
+              "value": "timeout=4"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Server",
+              "value": "Microsoft-IIS/8.5"
+            },
+            {
+              "name": "X-Aspnet-Version",
+              "value": "4.0.30319"
+            },
+            {
+              "name": "X-Powered-By",
+              "value": "ASP.NET"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "size": 141902,
+            "mimeType": "text/plain",
+            "compression": 0
+          },
+          "redirectURL": "",
+          "headersSize": 301,
+          "bodySize": 141902,
+          "_transferSize": 142203,
+          "_error": null,
+          "_fetchedViaServiceWorker": false
+        },
+        "serverIPAddress": "127.0.0.1",
+        "startedDateTime": "2026-09-24T06:35:24.542Z",
+        "time": 69.51099999423604,
+        "timings": {
+          "blocked": 1.7240000031851233,
+          "dns": -1,
+          "ssl": -1,
+          "connect": -1,
+          "send": 0.1339999999999999,
+          "wait": 58.749000003526916,
+          "receive": 8.903999987524003,
+          "_blocked_queueing": 1.1700000031851232,
+          "_workerStart": -1,
+          "_workerReady": -1,
+          "_workerFetchStart": -1,
+          "_workerRespondWithSettled": -1
+        },
+        "_connectionId": "405615",
+        "pageref": "page_5"
+      },
+      {
+        "_initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 17818
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "GetDeptBranch",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 6113,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "Success",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 475,
+                "columnNumber": 25
+              },
+              {
+                "functionName": "success",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 291,
+                "columnNumber": 20
+              },
+              {
+                "functionName": "c",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 0,
+                "columnNumber": 7854
+              },
+              {
+                "functionName": "fireWith",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 0,
+                "columnNumber": 8655
+              },
+              {
+                "functionName": "k",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 14014
+              },
+              {
+                "functionName": "r",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 18225
+              },
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 18350
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "Limit.InitPage",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 526,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 24,
+                "columnNumber": 14
+              },
+              {
+                "functionName": "onCallback",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 153,
+                "columnNumber": 62
+              },
+              {
+                "functionName": "poll",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 143,
+                "columnNumber": 42
+              }
+            ],
+            "parent": {
+              "description": "setTimeout",
+              "callFrames": [
+                {
+                  "functionName": "poll",
+                  "scriptId": "669",
+                  "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                  "lineNumber": 143,
+                  "columnNumber": 57
+                }
+              ],
+              "parent": {
+                "description": "setTimeout",
+                "callFrames": [
+                  {
+                    "functionName": "poll",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 143,
+                    "columnNumber": 57
+                  },
+                  {
+                    "functionName": "onScriptLoad",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 144,
+                    "columnNumber": 17
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 195,
+                    "columnNumber": 20
+                  }
+                ],
+                "parent": {
+                  "description": "script",
+                  "callFrames": [
+                    {
+                      "functionName": "Layui.use",
+                      "scriptId": "669",
+                      "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                      "lineNumber": 166,
+                      "columnNumber": 27
+                    },
+                    {
+                      "functionName": "",
+                      "scriptId": "671",
+                      "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                      "lineNumber": 21,
+                      "columnNumber": 10
+                    },
+                    {
+                      "functionName": "c",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 7854
+                    },
+                    {
+                      "functionName": "fireWith",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 8655
+                    },
+                    {
+                      "functionName": "ready",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 3263
+                    },
+                    {
+                      "functionName": "H",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 692
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "_priority": "VeryHigh",
+        "_resourceType": "xhr",
+        "cache": {},
+        "connection": "7890",
+        "request": {
+          "method": "POST",
+          "url": "http://183.36.43.66:88/AjaxServers/BaseInfo.ashx",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/javascript, */*; q=0.01"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "zh-CN,zh;q=0.9,en-CN;q=0.8,en;q=0.7"
+            },
+            {
+              "name": "Cache-Control",
+              "value": "no-cache"
+            },
+            {
+              "name": "Content-Length",
+              "value": "49"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded; charset=UTF-8"
+            },
+            {
+              "name": "Host",
+              "value": "183.36.43.66:88"
+            },
+            {
+              "name": "Origin",
+              "value": "http://183.36.43.66:88"
+            },
+            {
+              "name": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Referer",
+              "value": "http://183.36.43.66:88/Forms/Report/LimitMonitor.aspx?guid=88c7b112-cd00-1ec8-c557-c03430ad4cc9"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "X-Requested-With",
+              "value": "XMLHttpRequest"
+            }
+          ],
+          "queryString": [],
+          "cookies": [],
+          "headersSize": 1072,
+          "bodySize": 49,
+          "postData": {
+            "mimeType": "application/x-www-form-urlencoded; charset=UTF-8",
+            "text": "Call=GetDeptBranch&log_pagename=LimitMonitor.aspx",
+            "params": [
+              {
+                "name": "Call",
+                "value": "GetDeptBranch"
+              },
+              {
+                "name": "log_pagename",
+                "value": "LimitMonitor.aspx"
+              }
+            ]
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Cache-Control",
+              "value": "private"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Content-Length",
+              "value": "481"
+            },
+            {
+              "name": "Content-Type",
+              "value": "text/plain; charset=utf-8"
+            },
+            {
+              "name": "Date",
+              "value": "Thu, 24 Sep 2026 06:35:39 GMT"
+            },
+            {
+              "name": "Keep-Alive",
+              "value": "timeout=4"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Server",
+              "value": "Microsoft-IIS/8.5"
+            },
+            {
+              "name": "X-Aspnet-Version",
+              "value": "4.0.30319"
+            },
+            {
+              "name": "X-Powered-By",
+              "value": "ASP.NET"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "size": 481,
+            "mimeType": "text/plain",
+            "compression": 0
+          },
+          "redirectURL": "",
+          "headersSize": 298,
+          "bodySize": 481,
+          "_transferSize": 779,
+          "_error": null,
+          "_fetchedViaServiceWorker": false
+        },
+        "serverIPAddress": "127.0.0.1",
+        "startedDateTime": "2026-09-24T06:35:24.624Z",
+        "time": 30.046999992919154,
+        "timings": {
+          "blocked": 2.3330000032773244,
+          "dns": -1,
+          "ssl": -1,
+          "connect": -1,
+          "send": 0.122,
+          "wait": 26.250000000988134,
+          "receive": 1.341999988653697,
+          "_blocked_queueing": 1.9440000032773241,
+          "_workerStart": -1,
+          "_workerReady": -1,
+          "_workerFetchStart": -1,
+          "_workerRespondWithSettled": -1
+        },
+        "_connectionId": "405615",
+        "pageref": "page_5"
+      },
+      {
+        "_initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 17818
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "Limit.BindCtrlproc",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 1208,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "Success",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 520,
+                "columnNumber": 14
+              },
+              {
+                "functionName": "success",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 291,
+                "columnNumber": 20
+              },
+              {
+                "functionName": "c",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 0,
+                "columnNumber": 7854
+              },
+              {
+                "functionName": "fireWith",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 0,
+                "columnNumber": 8655
+              },
+              {
+                "functionName": "k",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 14014
+              },
+              {
+                "functionName": "r",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 18225
+              },
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 18350
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "Limit.InitPage",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 526,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 24,
+                "columnNumber": 14
+              },
+              {
+                "functionName": "onCallback",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 153,
+                "columnNumber": 62
+              },
+              {
+                "functionName": "poll",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 143,
+                "columnNumber": 42
+              }
+            ],
+            "parent": {
+              "description": "setTimeout",
+              "callFrames": [
+                {
+                  "functionName": "poll",
+                  "scriptId": "669",
+                  "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                  "lineNumber": 143,
+                  "columnNumber": 57
+                }
+              ],
+              "parent": {
+                "description": "setTimeout",
+                "callFrames": [
+                  {
+                    "functionName": "poll",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 143,
+                    "columnNumber": 57
+                  },
+                  {
+                    "functionName": "onScriptLoad",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 144,
+                    "columnNumber": 17
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 195,
+                    "columnNumber": 20
+                  }
+                ],
+                "parent": {
+                  "description": "script",
+                  "callFrames": [
+                    {
+                      "functionName": "Layui.use",
+                      "scriptId": "669",
+                      "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                      "lineNumber": 166,
+                      "columnNumber": 27
+                    },
+                    {
+                      "functionName": "",
+                      "scriptId": "671",
+                      "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                      "lineNumber": 21,
+                      "columnNumber": 10
+                    },
+                    {
+                      "functionName": "c",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 7854
+                    },
+                    {
+                      "functionName": "fireWith",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 8655
+                    },
+                    {
+                      "functionName": "ready",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 3263
+                    },
+                    {
+                      "functionName": "H",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 692
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "_priority": "VeryHigh",
+        "_resourceType": "xhr",
+        "cache": {},
+        "connection": "7890",
+        "request": {
+          "method": "POST",
+          "url": "http://183.36.43.66:88/AjaxServers/Report.ashx",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/javascript, */*; q=0.01"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "zh-CN,zh;q=0.9,en-CN;q=0.8,en;q=0.7"
+            },
+            {
+              "name": "Cache-Control",
+              "value": "no-cache"
+            },
+            {
+              "name": "Content-Length",
+              "value": "126"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded; charset=UTF-8"
+            },
+            {
+              "name": "Host",
+              "value": "183.36.43.66:88"
+            },
+            {
+              "name": "Origin",
+              "value": "http://183.36.43.66:88"
+            },
+            {
+              "name": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Referer",
+              "value": "http://183.36.43.66:88/Forms/Report/LimitMonitor.aspx?guid=88c7b112-cd00-1ec8-c557-c03430ad4cc9"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "X-Requested-With",
+              "value": "XMLHttpRequest"
+            }
+          ],
+          "queryString": [],
+          "cookies": [],
+          "headersSize": 1071,
+          "bodySize": 126,
+          "postData": {
+            "mimeType": "application/x-www-form-urlencoded; charset=UTF-8",
+            "text": "Call=LimitMonitorGetCtrlproc&case_type=31D1A147-2931-43B5-94AE-B72B1525BA8A&country=&proc_type=&log_pagename=LimitMonitor.aspx",
+            "params": [
+              {
+                "name": "Call",
+                "value": "LimitMonitorGetCtrlproc"
+              },
+              {
+                "name": "case_type",
+                "value": "31D1A147-2931-43B5-94AE-B72B1525BA8A"
+              },
+              {
+                "name": "country",
+                "value": ""
+              },
+              {
+                "name": "proc_type",
+                "value": ""
+              },
+              {
+                "name": "log_pagename",
+                "value": "LimitMonitor.aspx"
+              }
+            ]
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Cache-Control",
+              "value": "private"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Content-Length",
+              "value": "25288"
+            },
+            {
+              "name": "Content-Type",
+              "value": "text/plain; charset=utf-8"
+            },
+            {
+              "name": "Date",
+              "value": "Thu, 24 Sep 2026 06:35:39 GMT"
+            },
+            {
+              "name": "Keep-Alive",
+              "value": "timeout=4"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Server",
+              "value": "Microsoft-IIS/8.5"
+            },
+            {
+              "name": "X-Aspnet-Version",
+              "value": "4.0.30319"
+            },
+            {
+              "name": "X-Powered-By",
+              "value": "ASP.NET"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "size": 25288,
+            "mimeType": "text/plain",
+            "compression": 0
+          },
+          "redirectURL": "",
+          "headersSize": 300,
+          "bodySize": 25288,
+          "_transferSize": 25588,
+          "_error": null,
+          "_fetchedViaServiceWorker": false
+        },
+        "serverIPAddress": "127.0.0.1",
+        "startedDateTime": "2026-09-24T06:35:24.690Z",
+        "time": 24.97399999992922,
+        "timings": {
+          "blocked": 1.5969999960809946,
+          "dns": -1,
+          "ssl": -1,
+          "connect": -1,
+          "send": 0.11699999999999999,
+          "wait": 20.915999996123837,
+          "receive": 2.3440000077243894,
+          "_blocked_queueing": 1.1919999960809946,
+          "_workerStart": -1,
+          "_workerReady": -1,
+          "_workerFetchStart": -1,
+          "_workerRespondWithSettled": -1
+        },
+        "_connectionId": "405615",
+        "pageref": "page_5"
+      },
+      {
+        "_initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 17818
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "Limit.BindCtrlprocFee",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 1217,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "Success",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 521,
+                "columnNumber": 14
+              },
+              {
+                "functionName": "success",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 291,
+                "columnNumber": 20
+              },
+              {
+                "functionName": "c",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 0,
+                "columnNumber": 7854
+              },
+              {
+                "functionName": "fireWith",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 0,
+                "columnNumber": 8655
+              },
+              {
+                "functionName": "k",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 14014
+              },
+              {
+                "functionName": "r",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 18225
+              },
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 18350
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "Limit.InitPage",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 526,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 24,
+                "columnNumber": 14
+              },
+              {
+                "functionName": "onCallback",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 153,
+                "columnNumber": 62
+              },
+              {
+                "functionName": "poll",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 143,
+                "columnNumber": 42
+              }
+            ],
+            "parent": {
+              "description": "setTimeout",
+              "callFrames": [
+                {
+                  "functionName": "poll",
+                  "scriptId": "669",
+                  "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                  "lineNumber": 143,
+                  "columnNumber": 57
+                }
+              ],
+              "parent": {
+                "description": "setTimeout",
+                "callFrames": [
+                  {
+                    "functionName": "poll",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 143,
+                    "columnNumber": 57
+                  },
+                  {
+                    "functionName": "onScriptLoad",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 144,
+                    "columnNumber": 17
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 195,
+                    "columnNumber": 20
+                  }
+                ],
+                "parent": {
+                  "description": "script",
+                  "callFrames": [
+                    {
+                      "functionName": "Layui.use",
+                      "scriptId": "669",
+                      "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                      "lineNumber": 166,
+                      "columnNumber": 27
+                    },
+                    {
+                      "functionName": "",
+                      "scriptId": "671",
+                      "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                      "lineNumber": 21,
+                      "columnNumber": 10
+                    },
+                    {
+                      "functionName": "c",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 7854
+                    },
+                    {
+                      "functionName": "fireWith",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 8655
+                    },
+                    {
+                      "functionName": "ready",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 3263
+                    },
+                    {
+                      "functionName": "H",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 692
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "_priority": "VeryHigh",
+        "_resourceType": "xhr",
+        "cache": {},
+        "connection": "7890",
+        "request": {
+          "method": "POST",
+          "url": "http://183.36.43.66:88/AjaxServers/Report.ashx",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/javascript, */*; q=0.01"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "zh-CN,zh;q=0.9,en-CN;q=0.8,en;q=0.7"
+            },
+            {
+              "name": "Cache-Control",
+              "value": "no-cache"
+            },
+            {
+              "name": "Content-Length",
+              "value": "115"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded; charset=UTF-8"
+            },
+            {
+              "name": "Host",
+              "value": "183.36.43.66:88"
+            },
+            {
+              "name": "Origin",
+              "value": "http://183.36.43.66:88"
+            },
+            {
+              "name": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Referer",
+              "value": "http://183.36.43.66:88/Forms/Report/LimitMonitor.aspx?guid=88c7b112-cd00-1ec8-c557-c03430ad4cc9"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "X-Requested-With",
+              "value": "XMLHttpRequest"
+            }
+          ],
+          "queryString": [],
+          "cookies": [],
+          "headersSize": 1071,
+          "bodySize": 115,
+          "postData": {
+            "mimeType": "application/x-www-form-urlencoded; charset=UTF-8",
+            "text": "Call=LimitMonitorGetCtrlproc&case_type=31D1A147-2931-43B5-94AE-B72B1525BA8A&country=&log_pagename=LimitMonitor.aspx",
+            "params": [
+              {
+                "name": "Call",
+                "value": "LimitMonitorGetCtrlproc"
+              },
+              {
+                "name": "case_type",
+                "value": "31D1A147-2931-43B5-94AE-B72B1525BA8A"
+              },
+              {
+                "name": "country",
+                "value": ""
+              },
+              {
+                "name": "log_pagename",
+                "value": "LimitMonitor.aspx"
+              }
+            ]
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Cache-Control",
+              "value": "private"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Content-Length",
+              "value": "25288"
+            },
+            {
+              "name": "Content-Type",
+              "value": "text/plain; charset=utf-8"
+            },
+            {
+              "name": "Date",
+              "value": "Thu, 24 Sep 2026 06:35:39 GMT"
+            },
+            {
+              "name": "Keep-Alive",
+              "value": "timeout=4"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Server",
+              "value": "Microsoft-IIS/8.5"
+            },
+            {
+              "name": "X-Aspnet-Version",
+              "value": "4.0.30319"
+            },
+            {
+              "name": "X-Powered-By",
+              "value": "ASP.NET"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "size": 25288,
+            "mimeType": "text/plain",
+            "compression": 0
+          },
+          "redirectURL": "",
+          "headersSize": 300,
+          "bodySize": 25288,
+          "_transferSize": 25588,
+          "_error": null,
+          "_fetchedViaServiceWorker": false
+        },
+        "serverIPAddress": "127.0.0.1",
+        "startedDateTime": "2026-09-24T06:35:24.717Z",
+        "time": 28.03200000198558,
+        "timings": {
+          "blocked": 3.6989999970989302,
+          "dns": -1,
+          "ssl": -1,
+          "connect": -1,
+          "send": 0.135,
+          "wait": 22.577999994879587,
+          "receive": 1.620000010007061,
+          "_blocked_queueing": 2.63499999709893,
+          "_workerStart": -1,
+          "_workerReady": -1,
+          "_workerFetchStart": -1,
+          "_workerRespondWithSettled": -1
+        },
+        "_connectionId": "405615",
+        "pageref": "page_5"
+      },
+      {
+        "_initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 17818
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "Limit.BindFeeType",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 1226,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "Success",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 522,
+                "columnNumber": 14
+              },
+              {
+                "functionName": "success",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 291,
+                "columnNumber": 20
+              },
+              {
+                "functionName": "c",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 0,
+                "columnNumber": 7854
+              },
+              {
+                "functionName": "fireWith",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 0,
+                "columnNumber": 8655
+              },
+              {
+                "functionName": "k",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 14014
+              },
+              {
+                "functionName": "r",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 18225
+              },
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 18350
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "Limit.InitPage",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 526,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 24,
+                "columnNumber": 14
+              },
+              {
+                "functionName": "onCallback",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 153,
+                "columnNumber": 62
+              },
+              {
+                "functionName": "poll",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 143,
+                "columnNumber": 42
+              }
+            ],
+            "parent": {
+              "description": "setTimeout",
+              "callFrames": [
+                {
+                  "functionName": "poll",
+                  "scriptId": "669",
+                  "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                  "lineNumber": 143,
+                  "columnNumber": 57
+                }
+              ],
+              "parent": {
+                "description": "setTimeout",
+                "callFrames": [
+                  {
+                    "functionName": "poll",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 143,
+                    "columnNumber": 57
+                  },
+                  {
+                    "functionName": "onScriptLoad",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 144,
+                    "columnNumber": 17
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 195,
+                    "columnNumber": 20
+                  }
+                ],
+                "parent": {
+                  "description": "script",
+                  "callFrames": [
+                    {
+                      "functionName": "Layui.use",
+                      "scriptId": "669",
+                      "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                      "lineNumber": 166,
+                      "columnNumber": 27
+                    },
+                    {
+                      "functionName": "",
+                      "scriptId": "671",
+                      "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                      "lineNumber": 21,
+                      "columnNumber": 10
+                    },
+                    {
+                      "functionName": "c",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 7854
+                    },
+                    {
+                      "functionName": "fireWith",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 8655
+                    },
+                    {
+                      "functionName": "ready",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 3263
+                    },
+                    {
+                      "functionName": "H",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 692
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "_priority": "VeryHigh",
+        "_resourceType": "xhr",
+        "cache": {},
+        "connection": "7890",
+        "request": {
+          "method": "POST",
+          "url": "http://183.36.43.66:88/AjaxServers/Report.ashx",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/javascript, */*; q=0.01"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "zh-CN,zh;q=0.9,en-CN;q=0.8,en;q=0.7"
+            },
+            {
+              "name": "Cache-Control",
+              "value": "no-cache"
+            },
+            {
+              "name": "Content-Length",
+              "value": "114"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded; charset=UTF-8"
+            },
+            {
+              "name": "Host",
+              "value": "183.36.43.66:88"
+            },
+            {
+              "name": "Origin",
+              "value": "http://183.36.43.66:88"
+            },
+            {
+              "name": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Referer",
+              "value": "http://183.36.43.66:88/Forms/Report/LimitMonitor.aspx?guid=88c7b112-cd00-1ec8-c557-c03430ad4cc9"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "X-Requested-With",
+              "value": "XMLHttpRequest"
+            }
+          ],
+          "queryString": [],
+          "cookies": [],
+          "headersSize": 1071,
+          "bodySize": 114,
+          "postData": {
+            "mimeType": "application/x-www-form-urlencoded; charset=UTF-8",
+            "text": "Call=LimitMonitorGetFeeType&case_type=31D1A147-2931-43B5-94AE-B72B1525BA8A&country=&log_pagename=LimitMonitor.aspx",
+            "params": [
+              {
+                "name": "Call",
+                "value": "LimitMonitorGetFeeType"
+              },
+              {
+                "name": "case_type",
+                "value": "31D1A147-2931-43B5-94AE-B72B1525BA8A"
+              },
+              {
+                "name": "country",
+                "value": ""
+              },
+              {
+                "name": "log_pagename",
+                "value": "LimitMonitor.aspx"
+              }
+            ]
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Cache-Control",
+              "value": "private"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Content-Length",
+              "value": "29366"
+            },
+            {
+              "name": "Content-Type",
+              "value": "text/plain; charset=utf-8"
+            },
+            {
+              "name": "Date",
+              "value": "Thu, 24 Sep 2026 06:35:39 GMT"
+            },
+            {
+              "name": "Keep-Alive",
+              "value": "timeout=4"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Server",
+              "value": "Microsoft-IIS/8.5"
+            },
+            {
+              "name": "X-Aspnet-Version",
+              "value": "4.0.30319"
+            },
+            {
+              "name": "X-Powered-By",
+              "value": "ASP.NET"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "size": 29366,
+            "mimeType": "text/plain",
+            "compression": 0
+          },
+          "redirectURL": "",
+          "headersSize": 300,
+          "bodySize": 29366,
+          "_transferSize": 29666,
+          "_error": null,
+          "_fetchedViaServiceWorker": false
+        },
+        "serverIPAddress": "127.0.0.1",
+        "startedDateTime": "2026-09-24T06:35:24.746Z",
+        "time": 28.87199999531731,
+        "timings": {
+          "blocked": 1.76600000709109,
+          "dns": -1,
+          "ssl": -1,
+          "connect": -1,
+          "send": 0.16800000000000004,
+          "wait": 25.07199999680277,
+          "receive": 1.8659999914234504,
+          "_blocked_queueing": 1.28900000709109,
+          "_workerStart": -1,
+          "_workerReady": -1,
+          "_workerFetchStart": -1,
+          "_workerRespondWithSettled": -1
+        },
+        "_connectionId": "405615",
+        "pageref": "page_5"
+      },
+      {
+        "_initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 17818
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "GetPublishConfigValueFn",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 6088,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "Limit.SearchList",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 1500,
+                "columnNumber": 81
+              },
+              {
+                "functionName": "Success",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 523,
+                "columnNumber": 14
+              },
+              {
+                "functionName": "success",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 291,
+                "columnNumber": 20
+              },
+              {
+                "functionName": "c",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 0,
+                "columnNumber": 7854
+              },
+              {
+                "functionName": "fireWith",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 0,
+                "columnNumber": 8655
+              },
+              {
+                "functionName": "k",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 14014
+              },
+              {
+                "functionName": "r",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 18225
+              },
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 18350
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "Limit.InitPage",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 526,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 24,
+                "columnNumber": 14
+              },
+              {
+                "functionName": "onCallback",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 153,
+                "columnNumber": 62
+              },
+              {
+                "functionName": "poll",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 143,
+                "columnNumber": 42
+              }
+            ],
+            "parent": {
+              "description": "setTimeout",
+              "callFrames": [
+                {
+                  "functionName": "poll",
+                  "scriptId": "669",
+                  "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                  "lineNumber": 143,
+                  "columnNumber": 57
+                }
+              ],
+              "parent": {
+                "description": "setTimeout",
+                "callFrames": [
+                  {
+                    "functionName": "poll",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 143,
+                    "columnNumber": 57
+                  },
+                  {
+                    "functionName": "onScriptLoad",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 144,
+                    "columnNumber": 17
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 195,
+                    "columnNumber": 20
+                  }
+                ],
+                "parent": {
+                  "description": "script",
+                  "callFrames": [
+                    {
+                      "functionName": "Layui.use",
+                      "scriptId": "669",
+                      "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                      "lineNumber": 166,
+                      "columnNumber": 27
+                    },
+                    {
+                      "functionName": "",
+                      "scriptId": "671",
+                      "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                      "lineNumber": 21,
+                      "columnNumber": 10
+                    },
+                    {
+                      "functionName": "c",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 7854
+                    },
+                    {
+                      "functionName": "fireWith",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 8655
+                    },
+                    {
+                      "functionName": "ready",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 3263
+                    },
+                    {
+                      "functionName": "H",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 692
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "_priority": "VeryHigh",
+        "_resourceType": "xhr",
+        "cache": {},
+        "connection": "7890",
+        "request": {
+          "method": "POST",
+          "url": "http://183.36.43.66:88/AjaxServers/BaseInfo.ashx",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/javascript, */*; q=0.01"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "zh-CN,zh;q=0.9,en-CN;q=0.8,en;q=0.7"
+            },
+            {
+              "name": "Cache-Control",
+              "value": "no-cache"
+            },
+            {
+              "name": "Content-Length",
+              "value": "80"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded; charset=UTF-8"
+            },
+            {
+              "name": "Host",
+              "value": "183.36.43.66:88"
+            },
+            {
+              "name": "Origin",
+              "value": "http://183.36.43.66:88"
+            },
+            {
+              "name": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Referer",
+              "value": "http://183.36.43.66:88/Forms/Report/LimitMonitor.aspx?guid=88c7b112-cd00-1ec8-c557-c03430ad4cc9"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "X-Requested-With",
+              "value": "XMLHttpRequest"
+            }
+          ],
+          "queryString": [],
+          "cookies": [],
+          "headersSize": 1072,
+          "bodySize": 80,
+          "postData": {
+            "mimeType": "application/x-www-form-urlencoded; charset=UTF-8",
+            "text": "Call=GetPublishConfig&type=jx_columns&key=jx_date&log_pagename=LimitMonitor.aspx",
+            "params": [
+              {
+                "name": "Call",
+                "value": "GetPublishConfig"
+              },
+              {
+                "name": "type",
+                "value": "jx_columns"
+              },
+              {
+                "name": "key",
+                "value": "jx_date"
+              },
+              {
+                "name": "log_pagename",
+                "value": "LimitMonitor.aspx"
+              }
+            ]
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Cache-Control",
+              "value": "private"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Content-Length",
+              "value": "361"
+            },
+            {
+              "name": "Content-Type",
+              "value": "text/plain; charset=utf-8"
+            },
+            {
+              "name": "Date",
+              "value": "Thu, 24 Sep 2026 06:35:39 GMT"
+            },
+            {
+              "name": "Keep-Alive",
+              "value": "timeout=4"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Server",
+              "value": "Microsoft-IIS/8.5"
+            },
+            {
+              "name": "X-Aspnet-Version",
+              "value": "4.0.30319"
+            },
+            {
+              "name": "X-Powered-By",
+              "value": "ASP.NET"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "size": 361,
+            "mimeType": "text/plain",
+            "compression": 0
+          },
+          "redirectURL": "",
+          "headersSize": 298,
+          "bodySize": 361,
+          "_transferSize": 659,
+          "_error": null,
+          "_fetchedViaServiceWorker": false
+        },
+        "serverIPAddress": "127.0.0.1",
+        "startedDateTime": "2026-09-24T06:35:24.783Z",
+        "time": 12.906999996630475,
+        "timings": {
+          "blocked": 1.62400000911206,
+          "dns": -1,
+          "ssl": -1,
+          "connect": -1,
+          "send": 0.12000000000000005,
+          "wait": 9.738000007146038,
+          "receive": 1.4249999803723767,
+          "_blocked_queueing": 1.20900000911206,
+          "_workerStart": -1,
+          "_workerReady": -1,
+          "_workerFetchStart": -1,
+          "_workerRespondWithSettled": -1
+        },
+        "_connectionId": "405615",
+        "pageref": "page_5"
+      },
+      {
+        "_initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 17818
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "Ajax.LoadLayuiTable",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 6771,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "Limit.SearchList",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 2252,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "Success",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 523,
+                "columnNumber": 14
+              },
+              {
+                "functionName": "success",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 291,
+                "columnNumber": 20
+              },
+              {
+                "functionName": "c",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 0,
+                "columnNumber": 7854
+              },
+              {
+                "functionName": "fireWith",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 0,
+                "columnNumber": 8655
+              },
+              {
+                "functionName": "k",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 14014
+              },
+              {
+                "functionName": "r",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 18225
+              },
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 18350
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "Limit.InitPage",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 526,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 24,
+                "columnNumber": 14
+              },
+              {
+                "functionName": "onCallback",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 153,
+                "columnNumber": 62
+              },
+              {
+                "functionName": "poll",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 143,
+                "columnNumber": 42
+              }
+            ],
+            "parent": {
+              "description": "setTimeout",
+              "callFrames": [
+                {
+                  "functionName": "poll",
+                  "scriptId": "669",
+                  "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                  "lineNumber": 143,
+                  "columnNumber": 57
+                }
+              ],
+              "parent": {
+                "description": "setTimeout",
+                "callFrames": [
+                  {
+                    "functionName": "poll",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 143,
+                    "columnNumber": 57
+                  },
+                  {
+                    "functionName": "onScriptLoad",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 144,
+                    "columnNumber": 17
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 195,
+                    "columnNumber": 20
+                  }
+                ],
+                "parent": {
+                  "description": "script",
+                  "callFrames": [
+                    {
+                      "functionName": "Layui.use",
+                      "scriptId": "669",
+                      "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                      "lineNumber": 166,
+                      "columnNumber": 27
+                    },
+                    {
+                      "functionName": "",
+                      "scriptId": "671",
+                      "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                      "lineNumber": 21,
+                      "columnNumber": 10
+                    },
+                    {
+                      "functionName": "c",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 7854
+                    },
+                    {
+                      "functionName": "fireWith",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 8655
+                    },
+                    {
+                      "functionName": "ready",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 3263
+                    },
+                    {
+                      "functionName": "H",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 692
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "_priority": "VeryHigh",
+        "_resourceType": "xhr",
+        "cache": {},
+        "connection": "7890",
+        "request": {
+          "method": "POST",
+          "url": "http://183.36.43.66:88/AjaxServers/Common.ashx",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/javascript, */*; q=0.01"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "zh-CN,zh;q=0.9,en-CN;q=0.8,en;q=0.7"
+            },
+            {
+              "name": "Cache-Control",
+              "value": "no-cache"
+            },
+            {
+              "name": "Content-Length",
+              "value": "97"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded; charset=UTF-8"
+            },
+            {
+              "name": "Host",
+              "value": "183.36.43.66:88"
+            },
+            {
+              "name": "Origin",
+              "value": "http://183.36.43.66:88"
+            },
+            {
+              "name": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Referer",
+              "value": "http://183.36.43.66:88/Forms/Report/LimitMonitor.aspx?guid=88c7b112-cd00-1ec8-c557-c03430ad4cc9"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "X-Requested-With",
+              "value": "XMLHttpRequest"
+            }
+          ],
+          "queryString": [],
+          "cookies": [],
+          "headersSize": 1070,
+          "bodySize": 97,
+          "postData": {
+            "mimeType": "application/x-www-form-urlencoded; charset=UTF-8",
+            "text": "Call=LoadListColumn&belong_key=Report.ashx_GetLimitMonitorCaseList&log_pagename=LimitMonitor.aspx",
+            "params": [
+              {
+                "name": "Call",
+                "value": "LoadListColumn"
+              },
+              {
+                "name": "belong_key",
+                "value": "Report.ashx_GetLimitMonitorCaseList"
+              },
+              {
+                "name": "log_pagename",
+                "value": "LimitMonitor.aspx"
+              }
+            ]
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Cache-Control",
+              "value": "private"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Content-Length",
+              "value": "204"
+            },
+            {
+              "name": "Content-Type",
+              "value": "text/plain; charset=utf-8"
+            },
+            {
+              "name": "Date",
+              "value": "Thu, 24 Sep 2026 06:35:39 GMT"
+            },
+            {
+              "name": "Keep-Alive",
+              "value": "timeout=4"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Server",
+              "value": "Microsoft-IIS/8.5"
+            },
+            {
+              "name": "X-Aspnet-Version",
+              "value": "4.0.30319"
+            },
+            {
+              "name": "X-Powered-By",
+              "value": "ASP.NET"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "size": 204,
+            "mimeType": "text/plain",
+            "compression": 0
+          },
+          "redirectURL": "",
+          "headersSize": 298,
+          "bodySize": 204,
+          "_transferSize": 502,
+          "_error": null,
+          "_fetchedViaServiceWorker": false
+        },
+        "serverIPAddress": "127.0.0.1",
+        "startedDateTime": "2026-09-24T06:35:24.799Z",
+        "time": 18.32099999592174,
+        "timings": {
+          "blocked": 2.432999997860752,
+          "dns": -1,
+          "ssl": -1,
+          "connect": -1,
+          "send": 0.253,
+          "wait": 13.897999999376946,
+          "receive": 1.7369999986840412,
+          "_blocked_queueing": 1.927999997860752,
+          "_workerStart": -1,
+          "_workerReady": -1,
+          "_workerFetchStart": -1,
+          "_workerRespondWithSettled": -1
+        },
+        "_connectionId": "405615",
+        "pageref": "page_5"
+      },
+      {
+        "_initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 17818
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "Class.pullData",
+                "scriptId": "701",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/lay/modules/table-new.js",
+                "lineNumber": 795,
+                "columnNumber": 21
+              },
+              {
+                "functionName": "Class.render",
+                "scriptId": "701",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/lay/modules/table-new.js",
+                "lineNumber": 350,
+                "columnNumber": 13
+              },
+              {
+                "functionName": "Class",
+                "scriptId": "701",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/lay/modules/table-new.js",
+                "lineNumber": 227,
+                "columnNumber": 17
+              },
+              {
+                "functionName": "table.render",
+                "scriptId": "701",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/lay/modules/table-new.js",
+                "lineNumber": 2100,
+                "columnNumber": 19
+              },
+              {
+                "functionName": "Ajax.LoadLayuiTable",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 6910,
+                "columnNumber": 15
+              },
+              {
+                "functionName": "Limit.SearchList",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 2252,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "Success",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 523,
+                "columnNumber": 14
+              },
+              {
+                "functionName": "success",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 291,
+                "columnNumber": 20
+              },
+              {
+                "functionName": "c",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 0,
+                "columnNumber": 7854
+              },
+              {
+                "functionName": "fireWith",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 0,
+                "columnNumber": 8655
+              },
+              {
+                "functionName": "k",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 14014
+              },
+              {
+                "functionName": "r",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 18225
+              },
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 18350
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "Limit.InitPage",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 526,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 24,
+                "columnNumber": 14
+              },
+              {
+                "functionName": "onCallback",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 153,
+                "columnNumber": 62
+              },
+              {
+                "functionName": "poll",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 143,
+                "columnNumber": 42
+              }
+            ],
+            "parent": {
+              "description": "setTimeout",
+              "callFrames": [
+                {
+                  "functionName": "poll",
+                  "scriptId": "669",
+                  "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                  "lineNumber": 143,
+                  "columnNumber": 57
+                }
+              ],
+              "parent": {
+                "description": "setTimeout",
+                "callFrames": [
+                  {
+                    "functionName": "poll",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 143,
+                    "columnNumber": 57
+                  },
+                  {
+                    "functionName": "onScriptLoad",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 144,
+                    "columnNumber": 17
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 195,
+                    "columnNumber": 20
+                  }
+                ],
+                "parent": {
+                  "description": "script",
+                  "callFrames": [
+                    {
+                      "functionName": "Layui.use",
+                      "scriptId": "669",
+                      "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                      "lineNumber": 166,
+                      "columnNumber": 27
+                    },
+                    {
+                      "functionName": "",
+                      "scriptId": "671",
+                      "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                      "lineNumber": 21,
+                      "columnNumber": 10
+                    },
+                    {
+                      "functionName": "c",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 7854
+                    },
+                    {
+                      "functionName": "fireWith",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 8655
+                    },
+                    {
+                      "functionName": "ready",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 3263
+                    },
+                    {
+                      "functionName": "H",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 692
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "_priority": "High",
+        "_resourceType": "xhr",
+        "cache": {},
+        "connection": "7890",
+        "request": {
+          "method": "POST",
+          "url": "http://183.36.43.66:88/AjaxServers/Report.ashx",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/javascript, */*; q=0.01"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "zh-CN,zh;q=0.9,en-CN;q=0.8,en;q=0.7"
+            },
+            {
+              "name": "Cache-Control",
+              "value": "no-cache"
+            },
+            {
+              "name": "Content-Length",
+              "value": "2331"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded; charset=UTF-8"
+            },
+            {
+              "name": "Host",
+              "value": "183.36.43.66:88"
+            },
+            {
+              "name": "Origin",
+              "value": "http://183.36.43.66:88"
+            },
+            {
+              "name": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Referer",
+              "value": "http://183.36.43.66:88/Forms/Report/LimitMonitor.aspx?guid=88c7b112-cd00-1ec8-c557-c03430ad4cc9"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "X-Requested-With",
+              "value": "XMLHttpRequest"
+            }
+          ],
+          "queryString": [],
+          "cookies": [],
+          "headersSize": 1072,
+          "bodySize": 2331,
+          "postData": {
+            "mimeType": "application/x-www-form-urlencoded; charset=UTF-8",
+            "text": "pageIndex=1&pageSize=10&select_and=false&Call=GetLimitMonitorCaseList&is_first=true&case_type=31D1A147-2931-43B5-94AE-B72B1525BA8A&country=&case_volume=&case_volume_customer=&is_fuzzy_query_case_volume_other=false&is_fuzzy_query_app_no_other=false&is_point_app_no_other=false&applicant=&app_no=&int_due_date_s=&int_due_date_e=&legal_due_date_s=&legal_due_date_e=&cus_due_date_s=&cus_due_date_e=&int_due_date_isnull=&NKG_date=&legal_due_date_isnull=&ctrl_proc=&customer_name=&customer_code=&introducer=&doc_date_s=&doc_date_e=&charge_date_from=&charge_date_end=&doc_date_isnull=&smallduc_date_from=&smallduc_date_to=&smallduc_date_isnull=&cus_due_date_isnull=&type=all&apply_subject=&inventor=&flow_direction=&proc_pic_user=&case_pic_user=&branch_dept=&app_date_from=&app_date_to=&app_date_isnull=&month_day_from=&month_day_to=&case_status_id=&dept_id=&back_date_start=&back_date_end=&back_inventor_date_start=&back_inventor_date_end=&customer_status_id=&revise_user_id=&proc_type=&proc_note=&sales=&sales_help=&flow_user_id=&create_proc_date_start=&create_proc_date_end=&other_agency_id=&customer_country=&proc_status=&apply_tags_id=&is_finishdate=&upload_date_from=&upload_date_end=&pic_dept_id=&user_assistant=&pat_cus_fullname=&agent_to_reply_start=&reply_to_agent_start=&remind_to_agent_start=&last_deli_deadline_start=&book_deli_deadline_start=&reply_cus_date_start=&cus_receipt_start=&finish_revise_date_start=&cus_entrust_start=&prompt_cus_start=&reply_agengcy_start=&agengcy_receipt_start=&agengcy_revise_start=&prompt_agengcy_start=&third_party_revise_start=&revise_third_party_start=&receipt_third_party_start=&agent_to_reply_end=&reply_to_agent_end=&remind_to_agent_end=&last_deli_deadline_end=&book_deli_deadline_end=&reply_cus_date_end=&cus_receipt_end=&finish_revise_date_end=&cus_entrust_end=&prompt_cus_end=&reply_agengcy_end=&agengcy_receipt_end=&agengcy_revise_end=&prompt_agengcy_end=&third_party_revise_end=&revise_third_party_end=&receipt_third_party_end=&column1=&column2=&column3=&column4=&column5=&colsel=%3Bundefined%3Bundefined%3Bcase_id%3Bcase_volume%3Bcase_name%3Bctrl_proc%3Bpic%3Breview_stage%3Bdoc_date%3Bint_due_date%3Bsmallduc_date%3Bcus_due_date%3Blegal_due_date%3Bforeign_pic_case%3Bcustomer_name%3Bcustomer_status%3Brevise_user%3Bcase_mail_date%3B&_t=1790231724818&log_pagename=LimitMonitor.aspx",
+            "params": [
+              {
+                "name": "pageIndex",
+                "value": "1"
+              },
+              {
+                "name": "pageSize",
+                "value": "10"
+              },
+              {
+                "name": "select_and",
+                "value": "false"
+              },
+              {
+                "name": "Call",
+                "value": "GetLimitMonitorCaseList"
+              },
+              {
+                "name": "is_first",
+                "value": "true"
+              },
+              {
+                "name": "case_type",
+                "value": "31D1A147-2931-43B5-94AE-B72B1525BA8A"
+              },
+              {
+                "name": "country",
+                "value": ""
+              },
+              {
+                "name": "case_volume",
+                "value": ""
+              },
+              {
+                "name": "case_volume_customer",
+                "value": ""
+              },
+              {
+                "name": "is_fuzzy_query_case_volume_other",
+                "value": "false"
+              },
+              {
+                "name": "is_fuzzy_query_app_no_other",
+                "value": "false"
+              },
+              {
+                "name": "is_point_app_no_other",
+                "value": "false"
+              },
+              {
+                "name": "applicant",
+                "value": ""
+              },
+              {
+                "name": "app_no",
+                "value": ""
+              },
+              {
+                "name": "int_due_date_s",
+                "value": ""
+              },
+              {
+                "name": "int_due_date_e",
+                "value": ""
+              },
+              {
+                "name": "legal_due_date_s",
+                "value": ""
+              },
+              {
+                "name": "legal_due_date_e",
+                "value": ""
+              },
+              {
+                "name": "cus_due_date_s",
+                "value": ""
+              },
+              {
+                "name": "cus_due_date_e",
+                "value": ""
+              },
+              {
+                "name": "int_due_date_isnull",
+                "value": ""
+              },
+              {
+                "name": "NKG_date",
+                "value": ""
+              },
+              {
+                "name": "legal_due_date_isnull",
+                "value": ""
+              },
+              {
+                "name": "ctrl_proc",
+                "value": ""
+              },
+              {
+                "name": "customer_name",
+                "value": ""
+              },
+              {
+                "name": "customer_code",
+                "value": ""
+              },
+              {
+                "name": "introducer",
+                "value": ""
+              },
+              {
+                "name": "doc_date_s",
+                "value": ""
+              },
+              {
+                "name": "doc_date_e",
+                "value": ""
+              },
+              {
+                "name": "charge_date_from",
+                "value": ""
+              },
+              {
+                "name": "charge_date_end",
+                "value": ""
+              },
+              {
+                "name": "doc_date_isnull",
+                "value": ""
+              },
+              {
+                "name": "smallduc_date_from",
+                "value": ""
+              },
+              {
+                "name": "smallduc_date_to",
+                "value": ""
+              },
+              {
+                "name": "smallduc_date_isnull",
+                "value": ""
+              },
+              {
+                "name": "cus_due_date_isnull",
+                "value": ""
+              },
+              {
+                "name": "type",
+                "value": "all"
+              },
+              {
+                "name": "apply_subject",
+                "value": ""
+              },
+              {
+                "name": "inventor",
+                "value": ""
+              },
+              {
+                "name": "flow_direction",
+                "value": ""
+              },
+              {
+                "name": "proc_pic_user",
+                "value": ""
+              },
+              {
+                "name": "case_pic_user",
+                "value": ""
+              },
+              {
+                "name": "branch_dept",
+                "value": ""
+              },
+              {
+                "name": "app_date_from",
+                "value": ""
+              },
+              {
+                "name": "app_date_to",
+                "value": ""
+              },
+              {
+                "name": "app_date_isnull",
+                "value": ""
+              },
+              {
+                "name": "month_day_from",
+                "value": ""
+              },
+              {
+                "name": "month_day_to",
+                "value": ""
+              },
+              {
+                "name": "case_status_id",
+                "value": ""
+              },
+              {
+                "name": "dept_id",
+                "value": ""
+              },
+              {
+                "name": "back_date_start",
+                "value": ""
+              },
+              {
+                "name": "back_date_end",
+                "value": ""
+              },
+              {
+                "name": "back_inventor_date_start",
+                "value": ""
+              },
+              {
+                "name": "back_inventor_date_end",
+                "value": ""
+              },
+              {
+                "name": "customer_status_id",
+                "value": ""
+              },
+              {
+                "name": "revise_user_id",
+                "value": ""
+              },
+              {
+                "name": "proc_type",
+                "value": ""
+              },
+              {
+                "name": "proc_note",
+                "value": ""
+              },
+              {
+                "name": "sales",
+                "value": ""
+              },
+              {
+                "name": "sales_help",
+                "value": ""
+              },
+              {
+                "name": "flow_user_id",
+                "value": ""
+              },
+              {
+                "name": "create_proc_date_start",
+                "value": ""
+              },
+              {
+                "name": "create_proc_date_end",
+                "value": ""
+              },
+              {
+                "name": "other_agency_id",
+                "value": ""
+              },
+              {
+                "name": "customer_country",
+                "value": ""
+              },
+              {
+                "name": "proc_status",
+                "value": ""
+              },
+              {
+                "name": "apply_tags_id",
+                "value": ""
+              },
+              {
+                "name": "is_finishdate",
+                "value": ""
+              },
+              {
+                "name": "upload_date_from",
+                "value": ""
+              },
+              {
+                "name": "upload_date_end",
+                "value": ""
+              },
+              {
+                "name": "pic_dept_id",
+                "value": ""
+              },
+              {
+                "name": "user_assistant",
+                "value": ""
+              },
+              {
+                "name": "pat_cus_fullname",
+                "value": ""
+              },
+              {
+                "name": "agent_to_reply_start",
+                "value": ""
+              },
+              {
+                "name": "reply_to_agent_start",
+                "value": ""
+              },
+              {
+                "name": "remind_to_agent_start",
+                "value": ""
+              },
+              {
+                "name": "last_deli_deadline_start",
+                "value": ""
+              },
+              {
+                "name": "book_deli_deadline_start",
+                "value": ""
+              },
+              {
+                "name": "reply_cus_date_start",
+                "value": ""
+              },
+              {
+                "name": "cus_receipt_start",
+                "value": ""
+              },
+              {
+                "name": "finish_revise_date_start",
+                "value": ""
+              },
+              {
+                "name": "cus_entrust_start",
+                "value": ""
+              },
+              {
+                "name": "prompt_cus_start",
+                "value": ""
+              },
+              {
+                "name": "reply_agengcy_start",
+                "value": ""
+              },
+              {
+                "name": "agengcy_receipt_start",
+                "value": ""
+              },
+              {
+                "name": "agengcy_revise_start",
+                "value": ""
+              },
+              {
+                "name": "prompt_agengcy_start",
+                "value": ""
+              },
+              {
+                "name": "third_party_revise_start",
+                "value": ""
+              },
+              {
+                "name": "revise_third_party_start",
+                "value": ""
+              },
+              {
+                "name": "receipt_third_party_start",
+                "value": ""
+              },
+              {
+                "name": "agent_to_reply_end",
+                "value": ""
+              },
+              {
+                "name": "reply_to_agent_end",
+                "value": ""
+              },
+              {
+                "name": "remind_to_agent_end",
+                "value": ""
+              },
+              {
+                "name": "last_deli_deadline_end",
+                "value": ""
+              },
+              {
+                "name": "book_deli_deadline_end",
+                "value": ""
+              },
+              {
+                "name": "reply_cus_date_end",
+                "value": ""
+              },
+              {
+                "name": "cus_receipt_end",
+                "value": ""
+              },
+              {
+                "name": "finish_revise_date_end",
+                "value": ""
+              },
+              {
+                "name": "cus_entrust_end",
+                "value": ""
+              },
+              {
+                "name": "prompt_cus_end",
+                "value": ""
+              },
+              {
+                "name": "reply_agengcy_end",
+                "value": ""
+              },
+              {
+                "name": "agengcy_receipt_end",
+                "value": ""
+              },
+              {
+                "name": "agengcy_revise_end",
+                "value": ""
+              },
+              {
+                "name": "prompt_agengcy_end",
+                "value": ""
+              },
+              {
+                "name": "third_party_revise_end",
+                "value": ""
+              },
+              {
+                "name": "revise_third_party_end",
+                "value": ""
+              },
+              {
+                "name": "receipt_third_party_end",
+                "value": ""
+              },
+              {
+                "name": "column1",
+                "value": ""
+              },
+              {
+                "name": "column2",
+                "value": ""
+              },
+              {
+                "name": "column3",
+                "value": ""
+              },
+              {
+                "name": "column4",
+                "value": ""
+              },
+              {
+                "name": "column5",
+                "value": ""
+              },
+              {
+                "name": "colsel",
+                "value": "%3Bundefined%3Bundefined%3Bcase_id%3Bcase_volume%3Bcase_name%3Bctrl_proc%3Bpic%3Breview_stage%3Bdoc_date%3Bint_due_date%3Bsmallduc_date%3Bcus_due_date%3Blegal_due_date%3Bforeign_pic_case%3Bcustomer_name%3Bcustomer_status%3Brevise_user%3Bcase_mail_date%3B"
+              },
+              {
+                "name": "_t",
+                "value": "1790231724818"
+              },
+              {
+                "name": "log_pagename",
+                "value": "LimitMonitor.aspx"
+              }
+            ]
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Cache-Control",
+              "value": "private"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Content-Length",
+              "value": "187"
+            },
+            {
+              "name": "Content-Type",
+              "value": "text/plain; charset=utf-8"
+            },
+            {
+              "name": "Date",
+              "value": "Thu, 24 Sep 2026 06:35:39 GMT"
+            },
+            {
+              "name": "Keep-Alive",
+              "value": "timeout=4"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Server",
+              "value": "Microsoft-IIS/8.5"
+            },
+            {
+              "name": "X-Aspnet-Version",
+              "value": "4.0.30319"
+            },
+            {
+              "name": "X-Powered-By",
+              "value": "ASP.NET"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "size": 187,
+            "mimeType": "text/plain",
+            "compression": 0
+          },
+          "redirectURL": "",
+          "headersSize": 298,
+          "bodySize": 187,
+          "_transferSize": 485,
+          "_error": null,
+          "_fetchedViaServiceWorker": false
+        },
+        "serverIPAddress": "127.0.0.1",
+        "startedDateTime": "2026-09-24T06:35:24.831Z",
+        "time": 14.12700000219047,
+        "timings": {
+          "blocked": 1.2789999923212454,
+          "dns": -1,
+          "ssl": -1,
+          "connect": -1,
+          "send": 0.138,
+          "wait": 12.021999995235353,
+          "receive": 0.6880000146338716,
+          "_blocked_queueing": 0.8799999923212454,
+          "_workerStart": -1,
+          "_workerReady": -1,
+          "_workerFetchStart": -1,
+          "_workerRespondWithSettled": -1
+        },
+        "_connectionId": "405615",
+        "pageref": "page_5"
+      },
+      {
+        "_initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 17818
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "QueryHistory.Refresh",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 4268,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "Limit.InitPage",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 637,
+                "columnNumber": 17
+              },
+              {
+                "functionName": "",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 24,
+                "columnNumber": 14
+              },
+              {
+                "functionName": "onCallback",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 153,
+                "columnNumber": 62
+              },
+              {
+                "functionName": "poll",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 143,
+                "columnNumber": 42
+              }
+            ],
+            "parent": {
+              "description": "setTimeout",
+              "callFrames": [
+                {
+                  "functionName": "poll",
+                  "scriptId": "669",
+                  "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                  "lineNumber": 143,
+                  "columnNumber": 57
+                }
+              ],
+              "parent": {
+                "description": "setTimeout",
+                "callFrames": [
+                  {
+                    "functionName": "poll",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 143,
+                    "columnNumber": 57
+                  },
+                  {
+                    "functionName": "onScriptLoad",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 144,
+                    "columnNumber": 17
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 195,
+                    "columnNumber": 20
+                  }
+                ],
+                "parent": {
+                  "description": "script",
+                  "callFrames": [
+                    {
+                      "functionName": "Layui.use",
+                      "scriptId": "669",
+                      "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                      "lineNumber": 166,
+                      "columnNumber": 27
+                    },
+                    {
+                      "functionName": "",
+                      "scriptId": "671",
+                      "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                      "lineNumber": 21,
+                      "columnNumber": 10
+                    },
+                    {
+                      "functionName": "c",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 7854
+                    },
+                    {
+                      "functionName": "fireWith",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 8655
+                    },
+                    {
+                      "functionName": "ready",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 3263
+                    },
+                    {
+                      "functionName": "H",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 692
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "_priority": "VeryHigh",
+        "_resourceType": "xhr",
+        "cache": {},
+        "connection": "7890",
+        "request": {
+          "method": "POST",
+          "url": "http://183.36.43.66:88/AjaxServers/CaseInfo.ashx",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/javascript, */*; q=0.01"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "zh-CN,zh;q=0.9,en-CN;q=0.8,en;q=0.7"
+            },
+            {
+              "name": "Cache-Control",
+              "value": "no-cache"
+            },
+            {
+              "name": "Content-Length",
+              "value": "102"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded; charset=UTF-8"
+            },
+            {
+              "name": "Host",
+              "value": "183.36.43.66:88"
+            },
+            {
+              "name": "Origin",
+              "value": "http://183.36.43.66:88"
+            },
+            {
+              "name": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Referer",
+              "value": "http://183.36.43.66:88/Forms/Report/LimitMonitor.aspx?guid=88c7b112-cd00-1ec8-c557-c03430ad4cc9"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "X-Requested-With",
+              "value": "XMLHttpRequest"
+            }
+          ],
+          "queryString": [],
+          "cookies": [],
+          "headersSize": 1073,
+          "bodySize": 102,
+          "postData": {
+            "mimeType": "application/x-www-form-urlencoded; charset=UTF-8",
+            "text": "Call=SearchQueryHisList&query_type=LimitMonitor%E2%80%94liall&query_id=&log_pagename=LimitMonitor.aspx",
+            "params": [
+              {
+                "name": "Call",
+                "value": "SearchQueryHisList"
+              },
+              {
+                "name": "query_type",
+                "value": "LimitMonitor%E2%80%94liall"
+              },
+              {
+                "name": "query_id",
+                "value": ""
+              },
+              {
+                "name": "log_pagename",
+                "value": "LimitMonitor.aspx"
+              }
+            ]
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Cache-Control",
+              "value": "private"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Content-Length",
+              "value": "218"
+            },
+            {
+              "name": "Content-Type",
+              "value": "text/plain; charset=utf-8"
+            },
+            {
+              "name": "Date",
+              "value": "Thu, 24 Sep 2026 06:35:39 GMT"
+            },
+            {
+              "name": "Keep-Alive",
+              "value": "timeout=4"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Server",
+              "value": "Microsoft-IIS/8.5"
+            },
+            {
+              "name": "X-Aspnet-Version",
+              "value": "4.0.30319"
+            },
+            {
+              "name": "X-Powered-By",
+              "value": "ASP.NET"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "size": 218,
+            "mimeType": "text/plain",
+            "compression": 0
+          },
+          "redirectURL": "",
+          "headersSize": 298,
+          "bodySize": 218,
+          "_transferSize": 516,
+          "_error": null,
+          "_fetchedViaServiceWorker": false
+        },
+        "serverIPAddress": "127.0.0.1",
+        "startedDateTime": "2026-09-24T06:35:24.854Z",
+        "time": 30.479000008199364,
+        "timings": {
+          "blocked": 3.8800000013587996,
+          "dns": -1,
+          "ssl": -1,
+          "connect": -1,
+          "send": 0.15900000000000003,
+          "wait": 24.416999998646787,
+          "receive": 2.023000008193776,
+          "_blocked_queueing": 2.8840000013587996,
+          "_workerStart": -1,
+          "_workerReady": -1,
+          "_workerFetchStart": -1,
+          "_workerRespondWithSettled": -1
+        },
+        "_connectionId": "405615",
+        "pageref": "page_5"
+      },
+      {
+        "_initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "send",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 17818
+              },
+              {
+                "functionName": "ajax",
+                "scriptId": "642",
+                "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                "lineNumber": 2,
+                "columnNumber": 13489
+              },
+              {
+                "functionName": "Ajax.Request",
+                "scriptId": "647",
+                "url": "http://183.36.43.66:88/Scripts/JSCOMM/public.js?v=2.6.09.02",
+                "lineNumber": 312,
+                "columnNumber": 6
+              },
+              {
+                "functionName": "",
+                "scriptId": "671",
+                "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                "lineNumber": 29,
+                "columnNumber": 13
+              },
+              {
+                "functionName": "onCallback",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 153,
+                "columnNumber": 62
+              },
+              {
+                "functionName": "poll",
+                "scriptId": "669",
+                "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                "lineNumber": 143,
+                "columnNumber": 42
+              }
+            ],
+            "parent": {
+              "description": "setTimeout",
+              "callFrames": [
+                {
+                  "functionName": "poll",
+                  "scriptId": "669",
+                  "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                  "lineNumber": 143,
+                  "columnNumber": 57
+                }
+              ],
+              "parent": {
+                "description": "setTimeout",
+                "callFrames": [
+                  {
+                    "functionName": "poll",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 143,
+                    "columnNumber": 57
+                  },
+                  {
+                    "functionName": "onScriptLoad",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 144,
+                    "columnNumber": 17
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "669",
+                    "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                    "lineNumber": 195,
+                    "columnNumber": 20
+                  }
+                ],
+                "parent": {
+                  "description": "script",
+                  "callFrames": [
+                    {
+                      "functionName": "Layui.use",
+                      "scriptId": "669",
+                      "url": "http://183.36.43.66:88/Scripts/layuiadmin/layui/layui-new.js",
+                      "lineNumber": 166,
+                      "columnNumber": 27
+                    },
+                    {
+                      "functionName": "",
+                      "scriptId": "671",
+                      "url": "http://183.36.43.66:88/Scripts/Page/Report/LimitMonitor.js?v=2.6.09.02",
+                      "lineNumber": 21,
+                      "columnNumber": 10
+                    },
+                    {
+                      "functionName": "c",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 7854
+                    },
+                    {
+                      "functionName": "fireWith",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 8655
+                    },
+                    {
+                      "functionName": "ready",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 3263
+                    },
+                    {
+                      "functionName": "H",
+                      "scriptId": "642",
+                      "url": "http://183.36.43.66:88/Scripts/jquery.js",
+                      "lineNumber": 0,
+                      "columnNumber": 692
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "_priority": "High",
+        "_resourceType": "xhr",
+        "cache": {},
+        "connection": "7890",
+        "request": {
+          "method": "POST",
+          "url": "http://183.36.43.66:88/AjaxServers/CaseInfo.ashx",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/javascript, */*; q=0.01"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "zh-CN,zh;q=0.9,en-CN;q=0.8,en;q=0.7"
+            },
+            {
+              "name": "Cache-Control",
+              "value": "no-cache"
+            },
+            {
+              "name": "Content-Length",
+              "value": "48"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded; charset=UTF-8"
+            },
+            {
+              "name": "Host",
+              "value": "183.36.43.66:88"
+            },
+            {
+              "name": "Origin",
+              "value": "http://183.36.43.66:88"
+            },
+            {
+              "name": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Referer",
+              "value": "http://183.36.43.66:88/Forms/Report/LimitMonitor.aspx?guid=88c7b112-cd00-1ec8-c557-c03430ad4cc9"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "X-Requested-With",
+              "value": "XMLHttpRequest"
+            }
+          ],
+          "queryString": [],
+          "cookies": [],
+          "headersSize": 1072,
+          "bodySize": 48,
+          "postData": {
+            "mimeType": "application/x-www-form-urlencoded; charset=UTF-8",
+            "text": "Call=GetApplyTags&log_pagename=LimitMonitor.aspx",
+            "params": [
+              {
+                "name": "Call",
+                "value": "GetApplyTags"
+              },
+              {
+                "name": "log_pagename",
+                "value": "LimitMonitor.aspx"
+              }
+            ]
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "Cache-Control",
+              "value": "private"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Content-Length",
+              "value": "204"
+            },
+            {
+              "name": "Content-Type",
+              "value": "text/plain; charset=utf-8"
+            },
+            {
+              "name": "Date",
+              "value": "Thu, 24 Sep 2026 06:35:39 GMT"
+            },
+            {
+              "name": "Keep-Alive",
+              "value": "timeout=4"
+            },
+            {
+              "name": "Proxy-Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Server",
+              "value": "Microsoft-IIS/8.5"
+            },
+            {
+              "name": "X-Aspnet-Version",
+              "value": "4.0.30319"
+            },
+            {
+              "name": "X-Powered-By",
+              "value": "ASP.NET"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "size": 204,
+            "mimeType": "text/plain",
+            "compression": 0
+          },
+          "redirectURL": "",
+          "headersSize": 298,
+          "bodySize": 204,
+          "_transferSize": 502,
+          "_error": null,
+          "_fetchedViaServiceWorker": false
+        },
+        "serverIPAddress": "127.0.0.1",
+        "startedDateTime": "2026-09-24T06:35:24.888Z",
+        "time": 69.46600000082981,
+        "timings": {
+          "blocked": 3.227000001102686,
+          "dns": -1,
+          "ssl": -1,
+          "connect": -1,
+          "send": 0.4700000000000002,
+          "wait": 65.09199999609311,
+          "receive": 0.6770000036340207,
+          "_blocked_queueing": 0.7340000011026859,
+          "_workerStart": -1,
+          "_workerReady": -1,
+          "_workerFetchStart": -1,
+          "_workerRespondWithSettled": -1
+        },
+        "_connectionId": "405615",
+        "pageref": "page_5"
+      }
+    ]
+  }
+}

@@ -3,10 +3,14 @@ import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref } from 'vue
 import type { FileSearchQuery } from '../api/file-search-params'
 import type { FileSearchResult } from '../api/file-search-types'
 import type { SessionStatus } from '../api/session'
+import QueryTemplateSection from './QueryTemplateSection.vue'
 import { MessageType, type MessageBridge } from '../shared/message'
 
 const bridge = inject<MessageBridge>('bridge')
 const sessionStatus = ref<SessionStatus>('unknown')
+const sessionName = ref('')
+const sessionUserId = ref('')
+const querySource = ref<'manual' | 'history' | 'customer'>('manual')
 const sessionMessage = ref('')
 const sessionLoading = ref(false)
 const caseVolume = ref('')
@@ -55,6 +59,8 @@ async function checkSession(): Promise<void> {
   generation++
   void bridge.request({ type: MessageType.CancelFileSearch })
   sessionStatus.value = 'checking'
+  sessionName.value = ''
+  sessionUserId.value = ''
   sessionLoading.value = true
   sessionMessage.value = ''
   result.value = null
@@ -74,6 +80,8 @@ async function checkSession(): Promise<void> {
       return
     }
     sessionStatus.value = response.payload.data.status
+    sessionName.value = response.payload.data.displayName ?? ''
+    sessionUserId.value = response.payload.data.userId ?? ''
     if (sessionStatus.value !== 'authenticated') {
       result.value = null
       lastQuery.value = null
@@ -102,7 +110,7 @@ function formQuery(): FileSearchQuery {
 
 async function executeSearch(query: FileSearchQuery): Promise<void> {
   if (!bridge || !canSearch.value) return
-  if (![query.caseVolume, query.applicationNo, query.customerName, query.fileName].some(value => value?.trim())) {
+  if (!query.resolvedFields && ![query.caseVolume, query.applicationNo, query.customerName, query.fileName, query.fileDescriptionId].some(value => value?.trim())) {
     searchState.value = 'error'
     searchMessage.value = '请输入查询条件。'
     result.value = null
@@ -170,11 +178,21 @@ onBeforeUnmount(() => {
   <div class="file-search">
     <section class="card session-card" aria-label="EASY 登录状态">
       <div class="section-heading"><strong>EASY 登录状态</strong><button type="button" class="text-button" :disabled="sessionLoading" @click="checkSession">重新检测</button></div>
-      <p class="session-state" role="status"><span class="status-dot" :class="{ 'status-dot-error': sessionStatus !== 'authenticated' }"></span>{{ sessionLabel }}</p>
+      <p class="session-state" role="status"><span class="status-dot" :class="{ 'status-dot-error': sessionStatus !== 'authenticated' }"></span><span>{{ sessionLabel }}</span><span v-if="sessionStatus === 'authenticated' && sessionName">{{ sessionName }}</span></p>
       <p v-if="sessionMessage" class="hint">{{ sessionMessage }}</p>
     </section>
 
-    <form class="card search-form" aria-label="查询条件" @submit.prevent="search">
+    <section class="card search-form" aria-label="查询来源">
+      <strong>查询来源</strong>
+      <label>方式
+        <select v-model="querySource">
+          <option value="manual">手动查询</option>
+          <option value="history">历史模板</option>
+          <option value="customer">客户模板</option>
+        </select>
+      </label>
+    </section>
+    <form v-if="querySource === 'manual'" class="card search-form" aria-label="查询条件" @submit.prevent="search">
       <strong>查询条件</strong>
       <label>我方文号<input v-model="caseVolume" type="text" autocomplete="off" /></label>
       <label>申请号<input v-model="applicationNo" type="text" autocomplete="off" /></label>
@@ -182,6 +200,7 @@ onBeforeUnmount(() => {
       <label>附件名称<input v-model="fileName" type="text" autocomplete="off" /></label>
       <button type="submit" class="search-submit" :disabled="!canSearch">{{ searchState === 'loading' ? '重新查询' : '查询文件' }}</button>
     </form>
+    <QueryTemplateSection v-else :bridge="bridge" :can-search="canSearch" :user-id="sessionUserId" :mode="querySource === 'customer' ? 'customer' : 'history'" :page-size="pageSize" @search="executeSearch" />
 
     <section ref="resultsSection" class="card file-results" aria-label="查询结果">
       <div class="section-heading"><strong>查询结果</strong><button type="button" class="text-button" :disabled="!canSearch || !lastQuery || searchState === 'loading'" @click="refresh">刷新</button></div>

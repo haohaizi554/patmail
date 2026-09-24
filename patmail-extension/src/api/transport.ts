@@ -1,7 +1,7 @@
 import { trustedOrigin } from './config'
 import { apiError, type ApiResult } from './types'
 
-export type EasyOperation = 'session' | 'fileSearch'
+export type EasyOperation = 'session' | 'fileSearch' | 'historyQuery'
 
 export interface TransportOptions {
   fetcher?: typeof fetch
@@ -10,7 +10,8 @@ export interface TransportOptions {
 
 const ROUTES: Record<EasyOperation, { path: string; call: string }> = {
   session: { path: '/AjaxServers/Login.ashx', call: 'GetUserModel' },
-  fileSearch: { path: '/AjaxServers/CaseInfo.ashx', call: 'GetSearchFiles' }
+  fileSearch: { path: '/AjaxServers/CaseInfo.ashx', call: 'GetSearchFiles' },
+  historyQuery: { path: '/AjaxServers/CaseInfo.ashx', call: 'SearchQueryHisList' }
 }
 
 function loginRedirect(response: Response, origin: string): boolean {
@@ -26,6 +27,11 @@ function loginRedirect(response: Response, origin: string): boolean {
 function looksLikeLoginHtml(body: string): boolean {
   return /<\s*(?:!doctype\s+html|html|form)\b/i.test(body.slice(0, 300)) &&
     /login|登录|type\s*=\s*["']?password/i.test(body.slice(0, 3000))
+}
+
+/** 无有效会话时，GetUserModel 返回短 HTML「出错了!」，不是登录页，也不是业务 JSON。 */
+function looksLikeLoggedOutHtml(body: string): boolean {
+  return looksLikeLoginHtml(body) || (body.length <= 500 && /出错了/.test(body) && !/<html[\s>]/i.test(body))
 }
 
 export class EasyTransport {
@@ -78,8 +84,8 @@ export class EasyTransport {
       }
       const body = (await response.text()).trim()
       if (body.startsWith('<')) {
-        return apiError(looksLikeLoginHtml(body) ? 'SESSION_EXPIRED' : 'UNEXPECTED_HTML',
-          looksLikeLoginHtml(body) ? 'EASY 返回登录页面，请重新登录。' : 'EASY 返回了非业务 HTML。')
+        return apiError(looksLikeLoggedOutHtml(body) ? 'SESSION_EXPIRED' : 'UNEXPECTED_HTML',
+          looksLikeLoggedOutHtml(body) ? 'EASY 登录状态已失效，请在原网站重新登录。' : 'EASY 返回了非业务 HTML。')
       }
       try {
         return { ok: true, data: JSON.parse(body) as unknown }

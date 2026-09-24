@@ -82,7 +82,17 @@
 .text-button:disabled { opacity: .5; cursor: not-allowed; }
 .session-state { display: flex; gap: 7px; align-items: center; margin: 9px 0 0; color: #705d76; }
 .hint { margin: 9px 0 0; color: #947f99; font-size: 11px; overflow-wrap: anywhere; }
-.search-form { display: grid; gap: 8px; }
+.search-form, .query-template { display: grid; gap: 8px; }
+.query-template select, .editor input, .editor select, .temporary input, .field-row input, .field-row select { width: 100%; min-height: 31px; padding: 5px 8px; border: 1px solid #e9d9e9; border-radius: 8px; background: #fff; color: #4e4056; font-family: inherit; font-size: 12px; }
+.inline-actions { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.field-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 4px; align-items: center; }
+.check-line { display: flex; gap: 6px; align-items: center; color: #8d7693; font-size: 11px; }
+.check-line input[type="text"] { flex: 1; }
+.editor, .temporary, .preview { display: grid; gap: 6px; margin-top: 4px; }
+.preview dl { display: grid; gap: 4px; margin: 0; }
+.preview dl div { display: grid; grid-template-columns: 78px 1fr; gap: 4px; font-size: 11px; }
+.preview dt { color: #a38ca5; }
+.preview dd { margin: 0; color: #65536d; overflow-wrap: anywhere; }
 .search-form label { display: grid; gap: 3px; color: #8d7693; font-size: 11px; }
 .search-form input { width: 100%; min-height: 31px; padding: 5px 8px; border: 1px solid #e9d9e9; border-radius: 8px; background: #fff; color: #4e4056; font-family: inherit; font-size: 12px; }
 .search-form input:focus-visible { outline: 2px solid #db9cbd; outline-offset: 1px; }
