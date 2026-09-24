@@ -1,0 +1,216 @@
+<script setup lang="ts">
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import type { FileSearchQuery } from '../api/file-search-params'
+import type { FileSearchResult } from '../api/file-search-types'
+import type { SessionStatus } from '../api/session'
+import { MessageType, type MessageBridge } from '../shared/message'
+
+const bridge = inject<MessageBridge>('bridge')
+const sessionStatus = ref<SessionStatus>('unknown')
+const sessionMessage = ref('')
+const sessionLoading = ref(false)
+const caseVolume = ref('')
+const applicationNo = ref('')
+const customerName = ref('')
+const fileName = ref('')
+const pageSize = ref(20)
+const searchState = ref<'idle' | 'loading' | 'success' | 'empty' | 'error'>('idle')
+const searchMessage = ref('')
+const result = ref<FileSearchResult | null>(null)
+const resultsSection = ref<HTMLElement | null>(null)
+const lastQuery = ref<FileSearchQuery | null>(null)
+let generation = 0
+let sessionGeneration = 0
+
+const canSearch = computed(() => sessionStatus.value === 'authenticated' && !sessionLoading.value)
+const sessionLabel = computed(() => ({
+  unknown: '尚未检测登录状态', checking: '检测中…', authenticated: '已登录',
+  unauthenticated: '未登录', expired: '登录已失效', error: '无法确认当前登录状态'
+})[sessionStatus.value])
+
+function messageForError(code: string, message: string): string {
+  if (code === 'SESSION_EXPIRED') return 'EASY 登录已失效，请在原网站重新登录后检测。'
+  if (code === 'AUTH_UNKNOWN') return '无法确认当前登录状态，请重试。'
+  if (code === 'REQUEST_TIMEOUT') return '请求超时，请稍后重试。'
+  if (code === 'NETWORK_ERROR') return '网络异常，请检查 EASY 网站连接。'
+  return message || '请求失败，请稍后重试。'
+}
+
+async function showResults(): Promise<void> {
+  await nextTick()
+  const section = resultsSection.value
+  const viewport = section?.closest<HTMLElement>('.body')
+  if (section && viewport) {
+    viewport.scrollTop += section.getBoundingClientRect().top - viewport.getBoundingClientRect().top
+  }
+}
+
+async function checkSession(): Promise<void> {
+  if (!bridge) {
+    sessionStatus.value = 'error'
+    sessionMessage.value = '页面通信不可用。'
+    return
+  }
+  const current = ++sessionGeneration
+  generation++
+  void bridge.request({ type: MessageType.CancelFileSearch })
+  sessionStatus.value = 'checking'
+  sessionLoading.value = true
+  sessionMessage.value = ''
+  result.value = null
+  lastQuery.value = null
+  searchState.value = 'idle'
+  try {
+    const response = await bridge.request({ type: MessageType.CheckSession })
+    if (current !== sessionGeneration) return
+    if (response.type !== MessageType.SessionResult) {
+      sessionStatus.value = 'error'
+      sessionMessage.value = '会话检测返回了意外结果。'
+      return
+    }
+    if (!response.payload.ok) {
+      sessionStatus.value = response.payload.error.code === 'SESSION_EXPIRED' ? 'expired' : 'error'
+      sessionMessage.value = messageForError(response.payload.error.code, response.payload.error.message)
+      return
+    }
+    sessionStatus.value = response.payload.data.status
+    if (sessionStatus.value !== 'authenticated') {
+      result.value = null
+      lastQuery.value = null
+      searchState.value = 'idle'
+      sessionMessage.value = '请先在 EASY 原网站登录。'
+    }
+  } catch {
+    if (current !== sessionGeneration) return
+    sessionStatus.value = 'error'
+    sessionMessage.value = '会话检测失败，请重试。'
+  } finally {
+    if (current === sessionGeneration) sessionLoading.value = false
+  }
+}
+
+function formQuery(): FileSearchQuery {
+  return {
+    caseVolume: caseVolume.value.trim(),
+    applicationNo: applicationNo.value.trim(),
+    customerName: customerName.value.trim(),
+    fileName: fileName.value.trim(),
+    pageIndex: 1,
+    pageSize: pageSize.value
+  }
+}
+
+async function executeSearch(query: FileSearchQuery): Promise<void> {
+  if (!bridge || !canSearch.value) return
+  if (![query.caseVolume, query.applicationNo, query.customerName, query.fileName].some(value => value?.trim())) {
+    searchState.value = 'error'
+    searchMessage.value = '请输入查询条件。'
+    result.value = null
+    lastQuery.value = null
+    void showResults()
+    return
+  }
+  const current = ++generation
+  lastQuery.value = query
+  searchState.value = 'loading'
+  searchMessage.value = ''
+  result.value = null
+  try {
+    const response = await bridge.request({ type: MessageType.SearchFiles, payload: { query } })
+    if (current !== generation) return
+    if (response.type !== MessageType.SearchFilesResult) {
+      searchState.value = 'error'
+      searchMessage.value = '文件查询返回了意外结果。'
+      void showResults()
+      return
+    }
+    if (!response.payload.ok) {
+      searchState.value = 'error'
+      searchMessage.value = messageForError(response.payload.error.code, response.payload.error.message)
+      if (response.payload.error.code === 'SESSION_EXPIRED') sessionStatus.value = 'expired'
+      void showResults()
+      return
+    }
+    result.value = response.payload.data
+    searchState.value = result.value.total === 0 ? 'empty' : 'success'
+    void showResults()
+  } catch {
+    if (current !== generation) return
+    searchState.value = 'error'
+    searchMessage.value = '文件查询通信失败，请重试。'
+    void showResults()
+  }
+}
+
+function search(): void { void executeSearch(formQuery()) }
+function refresh(): void { if (lastQuery.value) void executeSearch({ ...lastQuery.value }) }
+function changePageSize(): void {
+  if (!lastQuery.value || !canSearch.value || ![20, 50, 100].includes(pageSize.value)) return
+  void executeSearch({ ...lastQuery.value, pageIndex: 1, pageSize: pageSize.value })
+}
+function page(delta: number): void {
+  if (!lastQuery.value || !result.value || searchState.value === 'loading') return
+  const next = lastQuery.value.pageIndex + delta
+  if (next < 1 || next > result.value.totalPages) return
+  void executeSearch({ ...lastQuery.value, pageIndex: next })
+}
+
+onMounted(() => { void checkSession() })
+onBeforeUnmount(() => {
+  generation++
+  sessionGeneration++
+  if (bridge) {
+    void bridge.request({ type: MessageType.CancelFileSearch })
+    void bridge.request({ type: MessageType.CancelSessionCheck })
+  }
+})
+</script>
+
+<template>
+  <div class="file-search">
+    <section class="card session-card" aria-label="EASY 登录状态">
+      <div class="section-heading"><strong>EASY 登录状态</strong><button type="button" class="text-button" :disabled="sessionLoading" @click="checkSession">重新检测</button></div>
+      <p class="session-state" role="status"><span class="status-dot" :class="{ 'status-dot-error': sessionStatus !== 'authenticated' }"></span>{{ sessionLabel }}</p>
+      <p v-if="sessionMessage" class="hint">{{ sessionMessage }}</p>
+    </section>
+
+    <form class="card search-form" aria-label="查询条件" @submit.prevent="search">
+      <strong>查询条件</strong>
+      <label>我方文号<input v-model="caseVolume" type="text" autocomplete="off" /></label>
+      <label>申请号<input v-model="applicationNo" type="text" autocomplete="off" /></label>
+      <label>客户名称<input v-model="customerName" type="text" autocomplete="off" /></label>
+      <label>附件名称<input v-model="fileName" type="text" autocomplete="off" /></label>
+      <button type="submit" class="search-submit" :disabled="!canSearch">{{ searchState === 'loading' ? '重新查询' : '查询文件' }}</button>
+    </form>
+
+    <section ref="resultsSection" class="card file-results" aria-label="查询结果">
+      <div class="section-heading"><strong>查询结果</strong><button type="button" class="text-button" :disabled="!canSearch || !lastQuery || searchState === 'loading'" @click="refresh">刷新</button></div>
+      <div v-if="lastQuery" class="result-toolbar">
+        <span v-if="result">共 {{ result.total }} 个文件</span>
+        <label>每页数量 <select v-model.number="pageSize" :disabled="!canSearch || searchState === 'loading'" @change="changePageSize"><option :value="20">20</option><option :value="50">50</option><option :value="100">100</option></select></label>
+      </div>
+      <p v-if="searchState === 'idle'" class="hint">输入条件后查询文件。</p>
+      <p v-else-if="searchState === 'loading'" class="hint" role="status">正在查询…</p>
+      <p v-else-if="searchState === 'error'" class="error" role="alert">{{ searchMessage }}</p>
+      <p v-else-if="searchState === 'empty'" class="hint" role="status">没有符合条件的文件。</p>
+      <template v-else-if="result">
+        <article v-for="file in result.items" :key="file.fileId" class="file-card">
+          <strong>{{ file.fileName }}</strong>
+          <dl>
+            <div><dt>文件描述</dt><dd>{{ file.fileDescription || '暂无' }}</dd></div>
+            <div><dt>我方文号</dt><dd>{{ file.caseVolume || '暂无' }}</dd></div>
+            <div><dt>申请号</dt><dd>{{ file.applicationNo || '暂无' }}</dd></div>
+            <div><dt>客户名称</dt><dd>{{ file.customerName || '暂无' }}</dd></div>
+            <div><dt>官方发文日</dt><dd>{{ file.officialPostDate || '暂无' }}</dd></div>
+            <div><dt>文件状态</dt><dd>{{ file.fileStatus || '暂无' }}</dd></div>
+          </dl>
+        </article>
+        <nav class="pagination" aria-label="文件分页">
+          <button type="button" :disabled="result.pageIndex <= 1" @click="page(-1)">上一页</button>
+          <span>第 {{ result.pageIndex }} / {{ result.totalPages }} 页</span>
+          <button type="button" :disabled="result.pageIndex >= result.totalPages" @click="page(1)">下一页</button>
+        </nav>
+      </template>
+    </section>
+  </div>
+</template>

@@ -20,11 +20,11 @@
 
 ## 顺序
 
-- [ ] 先写 L2 模型行为测试，确认当前扫描返回值与 V2 期望不符。
-- [ ] 实现纯数据扫描模块：字段语义、可见性、安全属性、选项、iframe 元信息、扫描耗时。
-- [ ] 更新消息校验、Popup 摘要与浮窗 Debug/复制，避免默认渲染完整 JSON。
-- [ ] 为唯一注入和局部重载写真实扩展回归测试；在原注入器内修复生命周期。
-- [ ] 缩小 Manifest 权限，更新现有 E2E 及文档，执行 pnpm install/test/typecheck/build 和 Chromium 验收。
+- [x] 先写 L2 模型行为测试，确认当前扫描返回值与 V2 期望不符。
+- [x] 实现纯数据扫描模块：字段语义、可见性、安全属性、选项、iframe 元信息、扫描耗时。
+- [x] 更新消息校验、Popup 摘要与浮窗 Debug/复制，避免默认渲染完整 JSON。
+- [x] 为唯一注入和局部重载写真实扩展回归测试；在原注入器内修复生命周期，包括 document.write 整页重写。
+- [x] 缩小 Manifest 权限，更新现有 E2E 及文档，执行 pnpm install/test/typecheck/build 和 Chromium 验收。
 
 ## 明确界限
 

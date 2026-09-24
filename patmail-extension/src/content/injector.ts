@@ -10,7 +10,10 @@ let activeHost: HTMLElement | null = null
 
 /** 页面仅增加一个零尺寸宿主；应用节点和样式封装在 Shadow DOM 内。 */
 export function injectPanel(bridge: MessageBridge): void {
-  if (activeHost?.isConnected) return
+  if (activeHost?.isConnected) {
+    if (!activeHost.matches(':popover-open')) activeHost.showPopover()
+    return
+  }
 
   // 新版脚本再次执行或扩展重新加载时，清理旧实例后再挂载。
   activeHost?.dispatchEvent(new Event(DISPOSE_EVENT))
@@ -66,9 +69,9 @@ export function injectPanel(bridge: MessageBridge): void {
     if (dismissed) return
     watchHtml()
     watchBody()
-    if (host.isConnected) return
-    ;(document.body ?? document.documentElement).appendChild(host)
-    host.showPopover()
+    if (!host.isConnected) (document.body ?? document.documentElement).appendChild(host)
+    // document.write 等旧页面刷新可能保留宿主节点，却把它移出 top layer。
+    if (!host.matches(':popover-open')) host.showPopover()
   }
 
   function dispose(): void {

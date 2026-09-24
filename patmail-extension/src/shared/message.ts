@@ -1,5 +1,10 @@
 import type { PageInfo, PageSnapshot } from './types'
 import { isPageInfo, isPageSnapshot, isRecord } from './guards'
+import { isFileSearchApiResult, isFileSearchQuery, isSessionResult } from '../api/message-guards'
+import type { FileSearchQuery } from '../api/file-search-params'
+import type { FileSearchResult } from '../api/file-search-types'
+import type { SessionSummary } from '../api/session'
+import type { ApiResult } from '../api/types'
 
 /** 所有通道共享的 JSON 消息信封；具体消息使用下方的可辨识联合类型。 */
 export interface Message<TPayload = unknown> {
@@ -16,13 +21,24 @@ export const MessageType = {
   PanelShown: 'PANEL_SHOWN',
   Ping: 'PING',
   Pong: 'PONG',
+  CheckSession: 'CHECK_SESSION',
+  SessionResult: 'SESSION_RESULT',
+  CancelSessionCheck: 'CANCEL_SESSION_CHECK',
+  SessionCheckCancelled: 'SESSION_CHECK_CANCELLED',
+  SearchFiles: 'SEARCH_FILES',
+  SearchFilesResult: 'SEARCH_FILES_RESULT',
+  CancelFileSearch: 'CANCEL_FILE_SEARCH',
+  FileSearchCancelled: 'FILE_SEARCH_CANCELLED',
   Error: 'ERROR'
 } as const
 
 type Request<T extends string> = Message<undefined> & { type: T }
 type Response<T extends string, P> = Message<P> & { type: T; payload: P }
 
-export type ContentRequest = Request<'SCAN_PAGE'> | Request<'GET_PAGE_INFO'> | Request<'SHOW_PANEL'> | Request<'PING'>
+export type ContentRequest =
+  | Request<'SCAN_PAGE'> | Request<'GET_PAGE_INFO'> | Request<'SHOW_PANEL'> | Request<'PING'>
+  | Request<'CHECK_SESSION'> | Request<'CANCEL_SESSION_CHECK'>
+  | Request<'CANCEL_FILE_SEARCH'> | Response<'SEARCH_FILES', { query: FileSearchQuery }>
 export type ErrorMessage = Response<'ERROR', { message: string }>
 export type BackgroundRequest = Request<'PING'>
 export type BackgroundResponse = Response<'PONG', { ok: true }> | ErrorMessage
@@ -30,6 +46,10 @@ export type ContentResponse =
   | Response<'SCAN_RESULT', PageSnapshot>
   | Response<'PAGE_INFO', PageInfo>
   | Response<'PANEL_SHOWN', { ok: true }>
+  | Response<'SESSION_RESULT', ApiResult<SessionSummary>>
+  | Response<'SESSION_CHECK_CANCELLED', { ok: true }>
+  | Response<'SEARCH_FILES_RESULT', ApiResult<FileSearchResult>>
+  | Response<'FILE_SEARCH_CANCELLED', { ok: true }>
   | BackgroundResponse
 export type AppMessage = ContentRequest | ContentResponse
 
@@ -41,14 +61,26 @@ export function isMessage(value: unknown): value is AppMessage {
     case MessageType.GetPageInfo:
     case MessageType.ShowPanel:
     case MessageType.Ping:
+    case MessageType.CheckSession:
+    case MessageType.CancelSessionCheck:
+    case MessageType.CancelFileSearch:
       return value.payload === undefined
+    case MessageType.SearchFiles:
+      return isRecord(value.payload) && isFileSearchQuery(value.payload.query) &&
+        Object.keys(value.payload).length === 1
     case MessageType.ScanResult:
       return isPageSnapshot(value.payload)
     case MessageType.PageInfo:
       return isPageInfo(value.payload)
     case MessageType.PanelShown:
     case MessageType.Pong:
+    case MessageType.SessionCheckCancelled:
+    case MessageType.FileSearchCancelled:
       return isRecord(value.payload) && value.payload.ok === true
+    case MessageType.SessionResult:
+      return isSessionResult(value.payload)
+    case MessageType.SearchFilesResult:
+      return isFileSearchApiResult(value.payload)
     case MessageType.Error:
       return isRecord(value.payload) && typeof value.payload.message === 'string'
     default:
@@ -59,7 +91,9 @@ export function isMessage(value: unknown): value is AppMessage {
 export function isContentRequest(value: unknown): value is ContentRequest {
   return isMessage(value) && (
     value.type === MessageType.ScanPage || value.type === MessageType.GetPageInfo ||
-    value.type === MessageType.ShowPanel || value.type === MessageType.Ping
+    value.type === MessageType.ShowPanel || value.type === MessageType.Ping ||
+    value.type === MessageType.CheckSession || value.type === MessageType.CancelSessionCheck ||
+    value.type === MessageType.SearchFiles || value.type === MessageType.CancelFileSearch
   )
 }
 

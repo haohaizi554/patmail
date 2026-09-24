@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { computed, inject, onMounted, ref } from 'vue'
+import { computed, inject, nextTick, onMounted, ref, watch } from 'vue'
 import { MessageType, type ContentResponse, type MessageBridge } from '../shared/message'
 import { summarize, type PageSnapshot, type ScanSummary } from '../shared/types'
 import DebugViewer from './DebugViewer.vue'
+import FileSearchPanel from './FileSearchPanel.vue'
 import { copySnapshot } from './copySnapshot'
 import { usePanelDrag } from './usePanelDrag'
+import { EASY_ORIGIN, trustedOrigin } from '../api/config'
 
 const bridge = inject<MessageBridge>('bridge')
 const closePanel = inject<() => void>('closePanel')
 const panel = ref<HTMLElement | null>(null)
 const collapsed = ref(false)
+const activeTab = ref<'files' | 'scan'>('scan')
 const { position, dragging, onPointerDown } = usePanelDrag(panel, collapsed)
 
 const url = ref('')
@@ -23,6 +26,12 @@ const errorText = ref('')
 const copyText = ref('')
 const backgroundStatus = ref<'checking' | 'ready' | 'unavailable'>('checking')
 const backgroundError = ref('')
+const fileSearchAvailable = computed(() => trustedOrigin(url.value) !== null)
+watch(activeTab, async () => {
+  await nextTick()
+  const body = panel.value?.querySelector<HTMLElement>('.body')
+  if (body) body.scrollTop = 0
+})
 const statusText = computed(() => {
   if (backgroundStatus.value === 'checking') return '正在连接后台'
   if (backgroundStatus.value === 'unavailable') return '后台连接失败'
@@ -72,6 +81,7 @@ async function loadPageInfo(): Promise<void> {
     }
     url.value = message.payload.url
     title.value = message.payload.title
+    if (new URL(message.payload.url).origin === EASY_ORIGIN) activeTab.value = 'files'
   } catch (error) {
     errorText.value = `读取页面信息失败：${failureText(error)}`
   } finally {
@@ -148,6 +158,14 @@ onMounted(() => {
         <p class="status"><span class="status-dot" :class="{ 'status-dot-error': backgroundStatus === 'unavailable' }"></span>{{ statusText }}</p>
       </div>
 
+      <nav class="panel-tabs" aria-label="PatMail 功能">
+        <button type="button" :class="{ active: activeTab === 'files' }" :disabled="!fileSearchAvailable" @click="activeTab = 'files'">文件查询</button>
+        <button type="button" :class="{ active: activeTab === 'scan' }" @click="activeTab = 'scan'">页面扫描</button>
+      </nav>
+
+      <FileSearchPanel v-if="activeTab === 'files' && fileSearchAvailable" />
+      <template v-if="activeTab === 'scan'">
+
       <section class="card page-card" aria-label="当前页面">
         <span class="field-label">当前页面</span>
         <p class="value url">{{ url || (loadingInfo ? '读取中…' : '暂无页面地址') }}</p>
@@ -177,6 +195,7 @@ onMounted(() => {
 
       <DebugViewer v-if="showDom && snapshot" :snapshot="snapshot" />
       <p v-else-if="showDom" class="empty">{{ scanning ? '正在读取页面结构…' : '扫描页面后可查看结构化结果。' }}</p>
+      </template>
     </div>
   </section>
 </template>

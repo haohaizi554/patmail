@@ -8,15 +8,14 @@
 
 ## 设计
 
-- Manifest 在普通网页顶层文档 `document_idle` 注入单文件 IIFE Content Script。
+- Manifest 在获授权的 EASY 与本地开发网页顶层文档 `document_idle` 注入单文件 IIFE Content Script。
 - 页面只新增一个 `patmail-root` 宿主；Vue、CSS、DOM 预览全部放入 ShadowRoot。
 - 浮窗与 Content Script 同处扩展隔离环境，通过 Promise MessageBridge 请求响应；
   Popup 与 Content Script 用 `chrome.tabs.sendMessage`；Content Script 与 Service Worker
   用 `chrome.runtime.sendMessage`。不借助网页可伪造的全局事件总线。
 - 消息采用 `{ type, payload }` 可辨识联合类型，运行时校验未知消息；有效负载不得滥用 any。
 - 第一阶段只扫描当前顶层 DOM，不穿透 iframe 或网页自身 Shadow DOM。
-- `inputs` 包含 input 和 textarea；按钮类型的 input 归入 buttons（包括 image）。
-  密码和文件控件只采集结构，不暴露其值；其他值仅在本地浮窗内展示，不保存扫描历史。
+- L2 快照将 input、textarea、select、button 统一放入 `controls`；按钮类型的 input 计入按钮统计（包括 image）。密码、文件及敏感名称控件值被遮蔽；扫描历史不保存。
 - Background 提供 PING/PONG 运行状态探测，预留后续扩展入口，不持久化表单数据。
 - 360×600 粉白淡紫浮窗，支持拖动、视口边界约束、收缩、关闭。小视口自适应。
 - 审查补充：最低 Chrome 114；使用 manual Popover 顶层宿主避免 body transform 导致浮窗随页面滚动，DOM 层级仍保持 body → patmail-root → ShadowRoot。
@@ -27,9 +26,9 @@
 
 - [x] 1. 构建与验证工具：启用 vue-tsc、测试脚本、锁文件；验证双入口构建与 manifest 路径。
 - [x] 2. 消息与扫描：测试畸形消息、input/textarea/select/button、动态 DOM、Shadow DOM 隔离、密码值和 image 按钮；实现必要修复。
-- [x] 3. 浮窗与 Popup：实现完整 JSON 查看、加载与错误反馈、拖动和收缩边界、关闭清理和重新打开。
-- [ ] 4. 集成测试：安装依赖、类型检查、单元测试、生产构建；真实 Chromium 加载 dist 测试自动注入、通信、扫描、拖动、关闭和刷新。
-- [ ] 5. 独立代码审查与说明：修复审查问题，交付 README、验收页和第二阶段建议。
+- [x] 3. 浮窗与 Popup：实现有界 JSON 调试预览与完整复制、加载与错误反馈、拖动和收缩边界、关闭清理和重新打开。
+- [x] 4. 集成测试：安装依赖、类型检查、单元测试、生产构建；真实 Chromium 加载 dist 测试自动注入、通信、扫描、拖动、关闭和刷新。
+- [x] 5. 审查与说明：修复审查问题，交付 README、验收页和第二阶段建议。
 
 ## 审查重点
 
@@ -45,3 +44,4 @@
 - 分工：主执行者负责构建、类型/通信与集成；独立子任务负责浮窗交互和审查。
 - 2026-09-23：16 项扫描与消息单元测试通过，vue-tsc 与 Vite 双阶段生产构建通过；依赖审计零已知漏洞。
 - 审查回归：body transform + 滚动 500px，旧浮窗 y=-396，证实固定定位失效；增加真实浏览器回归用例后修复顶层宿主。
+- 2026-09-24 收口：升级 PageSnapshot V2 与 L2 语义扫描；缩小权限；增加单文档唯一宿主和 document.write 恢复回归。最终验收结果见 phase1-closure-report.md。

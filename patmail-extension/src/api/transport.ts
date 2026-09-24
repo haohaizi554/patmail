@@ -1,0 +1,98 @@
+import { trustedOrigin } from './config'
+import { apiError, type ApiResult } from './types'
+
+export type EasyOperation = 'session' | 'fileSearch'
+
+export interface TransportOptions {
+  fetcher?: typeof fetch
+  timeoutMs?: number
+}
+
+const ROUTES: Record<EasyOperation, { path: string; call: string }> = {
+  session: { path: '/AjaxServers/Login.ashx', call: 'GetUserModel' },
+  fileSearch: { path: '/AjaxServers/CaseInfo.ashx', call: 'GetSearchFiles' }
+}
+
+function loginRedirect(response: Response, origin: string): boolean {
+  if (!response.url) return false
+  try {
+    const finalUrl = new URL(response.url)
+    return finalUrl.origin === origin && /\blogin(?:\.aspx)?$/i.test(finalUrl.pathname)
+  } catch {
+    return false
+  }
+}
+
+function looksLikeLoginHtml(body: string): boolean {
+  return /<\s*(?:!doctype\s+html|html|form)\b/i.test(body.slice(0, 300)) &&
+    /login|登录|type\s*=\s*["']?password/i.test(body.slice(0, 3000))
+}
+
+export class EasyTransport {
+  private readonly origin: string | null
+  private readonly fetcher: typeof fetch
+  private readonly timeoutMs: number
+
+  constructor(pageOrigin: string, options: TransportOptions = {}) {
+    this.origin = trustedOrigin(pageOrigin)
+    // 浏览器原生 fetch 是 WebIDL 方法，作为类字段调用会丢失 Window 接收者。
+    this.fetcher = options.fetcher ?? globalThis.fetch.bind(globalThis)
+    this.timeoutMs = options.timeoutMs ?? 15_000
+  }
+
+  /** Handler、Call、方法和目标 Origin 由内部白名单固定，页面消息不能提供 URL。 */
+  async post(operation: EasyOperation, params: URLSearchParams, signal?: AbortSignal): Promise<ApiResult<unknown>> {
+    if (!this.origin) return apiError('INVALID_ORIGIN', '当前页面不属于受信任的 EASY 站点。')
+    const route = ROUTES[operation]
+    if (!route || params.getAll('Call').length !== 1 || params.get('Call') !== route.call) {
+      return apiError('INVALID_QUERY', '业务请求类型无效。')
+    }
+    if (signal?.aborted) return apiError('REQUEST_ABORTED', '请求已取消。')
+
+    const controller = new AbortController()
+    let timedOut = false
+    const onExternalAbort = () => controller.abort()
+    signal?.addEventListener('abort', onExternalAbort, { once: true })
+    const timer = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, this.timeoutMs)
+    try {
+      const response = await this.fetcher(this.origin + route.path, {
+        method: 'POST',
+        credentials: 'same-origin',
+        redirect: 'follow',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: params.toString(),
+        signal: controller.signal
+      })
+      if (response.status === 401 || response.status === 403 || loginRedirect(response, this.origin)) {
+        return apiError('SESSION_EXPIRED', 'EASY 登录状态已失效，请在原网站重新登录。', response.status)
+      }
+      if (!response.ok) {
+        return apiError('HTTP_ERROR', response.status === 502 ? 'EASY 网关异常。' :
+          response.status === 503 ? 'EASY 服务暂不可用。' : 'EASY 返回 HTTP 错误。', response.status)
+      }
+      const body = (await response.text()).trim()
+      if (body.startsWith('<')) {
+        return apiError(looksLikeLoginHtml(body) ? 'SESSION_EXPIRED' : 'UNEXPECTED_HTML',
+          looksLikeLoginHtml(body) ? 'EASY 返回登录页面，请重新登录。' : 'EASY 返回了非业务 HTML。')
+      }
+      try {
+        return { ok: true, data: JSON.parse(body) as unknown }
+      } catch {
+        return apiError('INVALID_RESPONSE', 'EASY 响应不是有效 JSON。')
+      }
+    } catch {
+      if (timedOut) return apiError('REQUEST_TIMEOUT', '请求超时，请重试。')
+      if (signal?.aborted || controller.signal.aborted) return apiError('REQUEST_ABORTED', '请求已取消。')
+      return apiError('NETWORK_ERROR', '无法连接 EASY，请检查网络。')
+    } finally {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onExternalAbort)
+    }
+  }
+}

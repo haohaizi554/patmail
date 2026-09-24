@@ -40,4 +40,39 @@ describe('message validation', () => {
       ...base, stats: { ...base.stats, totalControls: 1 }
     } })).toBe(false)
   })
+
+  it('accepts only typed session and file-search requests', () => {
+    expect(isContentRequest({ type: 'CHECK_SESSION' })).toBe(true)
+    expect(isContentRequest({ type: 'CANCEL_SESSION_CHECK' })).toBe(true)
+    expect(isContentRequest({ type: 'CANCEL_FILE_SEARCH' })).toBe(true)
+    expect(isContentRequest({ type: 'SEARCH_FILES', payload: { query: {
+      caseVolume: 'A-123', pageIndex: 1, pageSize: 20
+    } } })).toBe(true)
+    expect(isContentRequest({ type: 'SEARCH_FILES', payload: { query: {
+      caseVolume: 'A-123', pageIndex: '1', pageSize: 20
+    } } })).toBe(false)
+    expect(isContentRequest({ type: 'SEARCH_FILES', payload: { query: {
+      caseVolume: 'A-123', pageIndex: 1, pageSize: 20, rawUrl: 'https://evil.test/'
+    } } })).toBe(false)
+    expect(isContentRequest({ type: 'API_REQUEST', payload: { url: 'https://evil.test/' } })).toBe(false)
+  })
+
+  it('validates normalized API responses without accepting raw server records', () => {
+    expect(isMessage({ type: 'SESSION_RESULT', payload: { ok: true, data: {
+      status: 'authenticated', checkedAt: '2026-09-24T00:00:00.000Z'
+    } } })).toBe(true)
+    expect(isMessage({ type: 'SEARCH_FILES_RESULT', payload: { ok: true, data: {
+      items: [{ fileId: 'f1', fileName: '通知书.pdf' }], total: 1,
+      pageIndex: 1, pageSize: 20, totalPages: 1
+    } } })).toBe(true)
+    expect(isMessage({ type: 'SEARCH_FILES_RESULT', payload: { ok: false, error: {
+      code: 'SESSION_EXPIRED', message: '登录失效'
+    } } })).toBe(true)
+    expect(isMessage({ type: 'SEARCH_FILES_RESULT', payload: { ok: true, data: {
+      TableRows: [{ file_id: 'f1' }]
+    } } })).toBe(false)
+    expect(isMessage({ type: 'SESSION_RESULT', payload: { ok: false, error: {
+      code: 'UNKNOWN_CODE', message: 'bad'
+    } } })).toBe(false)
+  })
 })
