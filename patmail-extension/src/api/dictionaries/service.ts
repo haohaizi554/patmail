@@ -10,7 +10,7 @@ import {
 import { DictionaryCache } from './cache'
 import { readDictionaryBody, responseKeyNames } from './guards'
 import type {
-  BasicDataSnapshot, DictionarySnapshot, FieldColumnSnapshot, FileTypeTreeSnapshot, FlowDataSnapshot, ListColumnSnapshot
+  BasicDataSnapshot, DictionarySnapshot, FieldColumnSnapshot, FileTypeTreeSnapshot, FlowDataSnapshot, ListColumnSnapshot, MailTypeSnapshot
 } from './types'
 
 const PAGE = 'FileSearch.aspx'
@@ -123,11 +123,46 @@ export class DictionaryService {
     })
   }
 
+  loadMailTypes(userKey: string, force: boolean, signal?: AbortSignal): Promise<ApiResult<MailTypeSnapshot>> {
+    return this.cache.load(this.cache.mailTypeKey(userKey), force, async () => {
+      const response = await this.transport.post('mailType', params({ Call: 'LoadMailType', log_pagename: 'FileSearchMail.aspx' }), signal)
+      if (!response.ok) return response
+      const body = readDictionaryBody(response.data)
+      if (!body.ok) return body
+      const raw = body.data.MailType
+      if (raw !== null && raw !== undefined && !Array.isArray(raw)) return apiError('INVALID_RESPONSE', '发文类型响应不是数组。')
+      const nodes: MailTypeSnapshot['nodes'] = []
+      const diagnostics: string[] = []
+      for (const row of Array.isArray(raw) ? raw : []) {
+        if (!row || typeof row !== 'object' || Array.isArray(row)) {
+          diagnostics.push('忽略了无法识别的发文类型。')
+          continue
+        }
+        const record = row as Record<string, unknown>
+        const id = typeof record.id === 'string' ? record.id.trim() : ''
+        const name = typeof record.name === 'string' ? record.name.trim() : ''
+        const parentId = typeof record.pid === 'string' ? record.pid.trim() : ''
+        const treeType = typeof record.TreeType === 'string' ? record.TreeType : ''
+        if (!isQueryGuid(id) || !name) {
+          diagnostics.push('忽略了缺少 ID 或名称的发文类型。')
+          continue
+        }
+        if (nodes.some(node => node.id === id)) {
+          diagnostics.push('忽略了重复的发文类型。')
+          continue
+        }
+        nodes.push({ id, name, parentId, treeType })
+      }
+      return { ok: true, data: { kind: 'mailType', nodes, diagnostics } }
+    })
+  }
+
   load(kind: DictionarySnapshot['kind'], userKey: string, force: boolean, caseTypeId = '', signal?: AbortSignal): Promise<ApiResult<DictionarySnapshot>> {
     if (kind === 'basic') return this.loadBasic(userKey, force, signal)
     if (kind === 'flow') return this.loadFlow(userKey, force, signal)
     if (kind === 'fileType') return this.loadFileTypes(userKey, caseTypeId, force, signal)
     if (kind === 'fieldColumn') return this.loadFieldColumns(userKey, force, signal)
+    if (kind === 'mailType') return this.loadMailTypes(userKey, force, signal)
     return this.loadListColumns(userKey, force, signal)
   }
 }

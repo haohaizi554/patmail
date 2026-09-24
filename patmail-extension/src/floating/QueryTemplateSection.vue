@@ -6,7 +6,8 @@ import type { HistoryQueryOption } from '../api/query-history'
 import { CustomerQueryService, BundleCustomerRepository, type CustomerQueryProfile } from '../customer'
 import { fieldLabel, parseQueryXml, resolveQueryTemplate } from '../query'
 import { TemplateLoadCoordinator } from '../query/load-coordinator'
-import { optionsForCaseType, resolveInternalIdDisplay } from '../schema'
+import { optionsForCaseType, resolveFileDescriptionDisplay, resolveInternalIdDisplay } from '../schema'
+import type { FileTypeNode } from '../api/dictionaries'
 import { BundleTemplateRepository } from '../query/repository'
 import type { QueryTemplate } from '../query/query-types'
 import { ChromeBundleRepository, MemoryBundleRepository, storageKey, type QueryBundleRepository } from '../storage/query-bundle'
@@ -49,6 +50,7 @@ const draftEasyId = ref('')
 const draftCustomerId = ref('')
 const editingTemplateId = ref('')
 const loadingHistory = ref(false)
+const fileTypeNodes = ref<FileTypeNode[]>([])
 const basicDictionaries = ref<Record<string, NormalizedDictionary>>({})
 const flowDictionaries = ref<Record<string, NormalizedDictionary>>({})
 const loads = new TemplateLoadCoordinator()
@@ -117,6 +119,13 @@ function previewText(key: string): string {
   if (!Object.prototype.hasOwnProperty.call(resolved.value.fields, key)) return '未设置'
   const value = resolved.value.fields[key] ?? ''
   if (!value) return '（空）'
+  if (key === 'filetype') {
+    return resolveFileDescriptionDisplay({
+      savedIds: value,
+      descriptions: fileTypeNodes.value,
+      historyText: displayValues.value.filetype
+    }).text
+  }
   const dictionary = dictionaryFor(key)
   if (dictionary) {
     const options = dictionary.dictionary.options[0]?.metadata?.caseTypeId
@@ -135,7 +144,7 @@ async function reloadLocal(): Promise<void> {
     const loaded = await bundles.value.load()
     localTemplates.value = loaded.bundle.templates
     customers.value = loaded.bundle.customers
-    storageMessage.value = loaded.warning ?? (scopedUser.value ? '' : '当前会话没有稳定用户 ID，本地模板保存在未分区的本机空间。')
+    storageMessage.value = loaded.warning ?? (scopedUser.value ? '' : '当前没有稳定用户 ID。查询模板保存在未分区空间；发文规则不会写入该空间，也不会套用其他账号的配置。')
     if (typeof chrome === 'undefined' || !chrome.storage?.local) {
       storageMessage.value = '当前环境不能使用扩展本地存储，模板只留在本次页面内存中。'
     }
@@ -144,6 +153,15 @@ async function reloadLocal(): Promise<void> {
   }
 }
 
+async function loadFileTypes(caseTypeId: string, ticket: { id: number; signal: AbortSignal }): Promise<void> {
+  fileTypeNodes.value = []
+  if (!props.bridge || !/^[0-9a-f-]{36}$/i.test(caseTypeId)) return
+  const response = await props.bridge.request({
+    type: MessageType.LoadDictionary, payload: { kind: 'fileType', force: false, caseTypeId }
+  }, ticket.signal)
+  if (!loads.isCurrent(ticket.id) || response.type !== MessageType.DictionaryResult || !response.payload.ok) return
+  if (response.payload.data.kind === 'fileType') fileTypeNodes.value = response.payload.data.nodes
+}
 async function loadDictionaries(ticketId: number, signal: AbortSignal): Promise<void> {
   if (!props.bridge) return
   const responses = await Promise.all((['basic', 'flow'] as const).map(kind => props.bridge!.request({
@@ -210,6 +228,7 @@ async function applyBase(id: string, ticket: { id: number; signal: AbortSignal }
     displayValues.value = { ...(local.displayValues ?? {}) }
     unknownFields.value = { ...(local.unknownFields ?? {}) }
     baseName.value = local.name
+    await loadFileTypes(local.fields.case_type ?? '', ticket)
     return
   }
   const easy = historyOptions.value.find(item => item.id === id)
@@ -238,6 +257,7 @@ async function applyBase(id: string, ticket: { id: number; signal: AbortSignal }
   unknownFields.value = parsed.data.unknownFields
   parseWarnings.value = parsed.data.warnings
   baseName.value = response.payload.data.name
+  await loadFileTypes(parsed.data.fields.case_type ?? '', ticket)
 }
 
 function openTemplateEditor(template?: QueryTemplate): void {
@@ -382,6 +402,7 @@ watch(() => [props.userId, props.canSearch, props.mode] as const, () => {
   historyOptions.value = []
   basicDictionaries.value = {}
   flowDictionaries.value = {}
+  fileTypeNodes.value = []
   resetBase()
   selectedBaseId.value = ''
   void reloadLocal()

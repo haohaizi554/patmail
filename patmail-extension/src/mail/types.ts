@@ -1,0 +1,137 @@
+export type SendMode = 'merge_by_customer_description' | 'single_file'
+export type DraftStatus = 'ready' | 'warning' | 'blocked'
+export type IssueSeverity = 'warning' | 'error'
+
+export interface SelectedPatentFile {
+  fileId: string
+  fileName: string
+  fileDescription: string
+  fileDescriptionId?: string
+  customerName: string
+  customerId?: string
+  customerProfileId?: string
+  caseId?: string
+  caseVolume?: string
+  applicationNo?: string
+}
+
+export interface SelectionSnapshot {
+  selectedAt: string
+  files: SelectedPatentFile[]
+  configVersion: number
+}
+
+export interface CustomerMailPolicy {
+  customerProfileId: string
+  sendMode: SendMode
+  recipientTemplateId?: string
+  enabled: boolean
+  version: number
+  updatedAt: string
+}
+
+export interface DescriptionMailTypeMapping {
+  id: string
+  fileDescriptionId?: string
+  fileDescriptionText?: string
+  mailTypeId: string
+  mailTypeName: string
+  enabled: boolean
+  version: number
+  updatedAt: string
+}
+
+export interface CustomerRecipientTemplate {
+  id: string
+  customerProfileId: string
+  name: string
+  to: string[]
+  cc: string[]
+  enabled: boolean
+  isDefault: boolean
+  version: number
+  updatedAt: string
+}
+
+export interface OperatorSignature {
+  id: string
+  operatorId: string
+  name: string
+  content: string
+  enabled: boolean
+  isDefault: boolean
+  version: number
+  updatedAt: string
+}
+
+export type MissingAnchorPolicy = 'keep' | 'prefix' | 'confirm'
+
+export interface SubjectRule {
+  template: string
+  countInjection: boolean
+  anchor: string
+  missingAnchor: MissingAnchorPolicy
+  version: number
+}
+
+export interface BodyRule {
+  template: string
+  supplement: string
+  version: number
+}
+
+export interface MailRuleBundle {
+  version: 1
+  revision: number
+  ownerId: string
+  policies: CustomerMailPolicy[]
+  mappings: DescriptionMailTypeMapping[]
+  recipients: CustomerRecipientTemplate[]
+  signatures: OperatorSignature[]
+  subject: SubjectRule
+  body: BodyRule
+}
+
+export interface MailGroup {
+  id: string
+  customerProfileId: string
+  customerIdentity: string
+  descriptionIdentity: string
+  descriptionLabel: string
+  sendMode: SendMode
+  files: SelectedPatentFile[]
+  policyVersion: number
+}
+
+export interface ValidationIssue {
+  code: string
+  severity: IssueSeverity
+  message: string
+  field: string
+  draftId: string
+}
+
+export interface MailDraftPreview {
+  id: string
+  customerProfileId: string
+  fileIds: string[]
+  files: SelectedPatentFile[]
+  mailTypeId: string
+  mailTypeName: string
+  to: string[]
+  cc: string[]
+  subject: string
+  body: string
+  signature: string
+  sendMode: SendMode
+  status: DraftStatus
+  issues: ValidationIssue[]
+  ruleVersions: Record<string, number>
+}
+
+export interface MailTypeNode {
+  id: string
+  name: string
+  parentId: string
+  treeType: string
+}

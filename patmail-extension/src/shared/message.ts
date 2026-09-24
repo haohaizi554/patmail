@@ -126,7 +126,7 @@ export function isContentRequest(value: unknown): value is ContentRequest {
   )
 }
 
-const DICTIONARY_KINDS = new Set(['basic', 'flow', 'fieldColumn', 'listColumn', 'fileType'])
+const DICTIONARY_KINDS = new Set(['basic', 'flow', 'fieldColumn', 'listColumn', 'fileType', 'mailType'])
 
 function isDictionaryRequest(value: unknown): value is DictionaryLoadRequest {
   if (!isRecord(value) || (value.force !== true && value.force !== false) || typeof value.kind !== 'string' || !DICTIONARY_KINDS.has(value.kind)) {

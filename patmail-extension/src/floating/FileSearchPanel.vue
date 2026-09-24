@@ -3,6 +3,8 @@ import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref } from 'vue
 import { assessQueryScope, type FileSearchQuery } from '../api/file-search-params'
 import type { FileSearchResult } from '../api/file-search-types'
 import type { SessionStatus } from '../api/session'
+import { bindCustomer, selectPage, toSelectedFile, toggleSelected, type SelectedPatentFile } from '../mail'
+import MailWorkspace from './MailWorkspace.vue'
 import QueryTemplateSection from './QueryTemplateSection.vue'
 import SchemaQueryForm from './SchemaQueryForm.vue'
 import { MessageType, type MessageBridge } from '../shared/message'
@@ -24,6 +26,11 @@ const searchMessage = ref('')
 const result = ref<FileSearchResult | null>(null)
 const resultsSection = ref<HTMLElement | null>(null)
 const lastQuery = ref<FileSearchQuery | null>(null)
+const selected = ref<Record<string, SelectedPatentFile>>({})
+const showSelected = ref(false)
+const showMail = ref(false)
+const bindProfileId = ref('')
+const bindCustomers = ref<Array<{ id: string; name: string }>>([])
 let generation = 0
 let sessionGeneration = 0
 
@@ -66,6 +73,8 @@ async function checkSession(): Promise<void> {
   sessionMessage.value = ''
   result.value = null
   lastQuery.value = null
+  selected.value = {}
+  showMail.value = false
   searchState.value = 'idle'
   try {
     const response = await bridge.request({ type: MessageType.CheckSession })
@@ -158,6 +167,13 @@ function changePageSize(): void {
   if (!lastQuery.value || !canSearch.value || ![20, 50, 100].includes(pageSize.value)) return
   void executeSearch({ ...lastQuery.value, pageIndex: 1, pageSize: pageSize.value })
 }
+async function loadBindCustomers(): Promise<void> {
+  if (!sessionUserId.value || typeof chrome === 'undefined' || !chrome.storage?.local) return
+  const { ChromeBundleRepository, storageKey } = await import('../storage/query-bundle')
+  const loaded = await new ChromeBundleRepository(storageKey(location.origin, sessionUserId.value)).load()
+  bindCustomers.value = loaded.bundle.customers.map(item => ({ id: item.id, name: item.name }))
+}
+
 function page(delta: number): void {
   if (!lastQuery.value || !result.value || searchState.value === 'loading') return
   const next = lastQuery.value.pageIndex + delta
@@ -208,8 +224,15 @@ onBeforeUnmount(() => {
       <p v-else-if="searchState === 'error'" class="error" role="alert">{{ searchMessage }}</p>
       <p v-else-if="searchState === 'empty'" class="hint" role="status">没有符合条件的文件。</p>
       <template v-else-if="result">
+        <div class="result-toolbar">
+          <span>已选 {{ Object.keys(selected).length }} 个文件</span>
+          <button type="button" class="text-button" @click="selected = selectPage(selected, result.items.map(file => toSelectedFile(file)), true)">当前页全选</button>
+          <button type="button" class="text-button" @click="selected = {}">清空已选</button>
+          <button type="button" class="text-button" @click="showSelected = !showSelected">查看已选</button>
+          <button type="button" class="text-button" :disabled="Object.keys(selected).length === 0" @click="showMail = true">生成发文计划</button>
+        </div>
         <article v-for="file in result.items" :key="file.fileId" class="file-card">
-          <strong>{{ file.fileName }}</strong>
+          <label class="check-line"><input type="checkbox" :checked="Boolean(selected[file.fileId])" @change="selected = toggleSelected(selected, toSelectedFile(file, selected[file.fileId]?.customerProfileId))" />{{ file.fileName }}</label>
           <dl>
             <div><dt>文件描述</dt><dd>{{ file.fileDescription || '暂无' }}</dd></div>
             <div><dt>我方文号</dt><dd>{{ file.caseVolume || '暂无' }}</dd></div>
@@ -224,6 +247,20 @@ onBeforeUnmount(() => {
           <span>第 {{ result.pageIndex }} / {{ result.totalPages }} 页</span>
           <button type="button" :disabled="result.pageIndex >= result.totalPages" @click="page(1)">下一页</button>
         </nav>
+        <section v-if="showSelected" class="card" aria-label="已选文件">
+          <article v-for="file in Object.values(selected)" :key="file.fileId" class="file-card">
+            <strong>{{ file.fileName }}</strong>
+            <p class="hint">{{ file.fileDescription || '缺少文件描述' }} · {{ file.customerName || '缺少客户' }} · {{ file.caseVolume || '无文号' }}</p>
+          </article>
+          <label>绑定到已有客户配置
+            <select v-model="bindProfileId" @focus="loadBindCustomers">
+              <option value="">选择客户配置</option>
+              <option v-for="item in bindCustomers" :key="item.id" :value="item.id">{{ item.name }}</option>
+            </select>
+          </label>
+          <button type="button" class="text-button" :disabled="!bindProfileId" @click="selected = bindCustomer(selected, Object.keys(selected), bindProfileId)">绑定已选文件</button>
+        </section>
+        <MailWorkspace v-if="showMail" :bridge="bridge" :user-id="sessionUserId" :files="Object.values(selected)" />
       </template>
     </section>
   </div>

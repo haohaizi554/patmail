@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { CURRENT_ENVIRONMENT } from '../api/config'
 import type { CustomFieldColumn, DictionaryOption, FileTypeTreeSnapshot, NormalizedDictionary } from '../api/dictionaries'
 import type { FileSearchQuery } from '../api/file-search-params'
-import { optionsForCaseType, resolveInternalIdDisplay, formHasQueryScope, formValuesToFields, FILE_SEARCH_SCHEMA } from '../schema'
+import { optionsForCaseType, resolveFileDescriptionDisplay, resolveInternalIdDisplay, formHasQueryScope, formValuesToFields, FILE_SEARCH_SCHEMA } from '../schema'
 import { MessageType, type MessageBridge } from '../shared/message'
 import FileTypePicker from './FileTypePicker.vue'
 
@@ -111,6 +111,9 @@ watch(caseTypeId, (value, previous) => {
 })
 
 function displayOf(key: string, multiple = false): string {
+  if (key === 'filetype') {
+    return resolveFileDescriptionDisplay({ savedIds: fieldText(key), descriptions: tree.value?.nodes ?? [] }).text
+  }
   const schema = FILE_SEARCH_SCHEMA.find(item => item.key === key)
   return resolveInternalIdDisplay(fieldText(key), selectOptions(schema?.dictionaryKey, schema?.dependsOn), multiple).text
 }

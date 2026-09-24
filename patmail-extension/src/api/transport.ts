@@ -3,7 +3,7 @@ import { apiError, type ApiResult } from './types'
 
 export type EasyOperation =
   | 'session' | 'fileSearch' | 'historyQuery'
-  | 'basicData' | 'flowDirection' | 'fileTypeTree' | 'fieldColumn' | 'listColumn'
+  | 'basicData' | 'flowDirection' | 'fileTypeTree' | 'fieldColumn' | 'listColumn' | 'mailType'
 
 export interface TransportOptions {
   fetcher?: typeof fetch
@@ -18,7 +18,8 @@ const ROUTES: Record<EasyOperation, { path: string; call: string }> = {
   flowDirection: { path: '/AjaxServers/CaseInfo.ashx', call: 'GetFlowdirection' },
   fileTypeTree: { path: '/AjaxServers/Common.ashx', call: 'LoadFileTypeByCaseType' },
   fieldColumn: { path: '/AjaxServers/PatentAction.ashx', call: 'GetFieldColumn' },
-  listColumn: { path: '/AjaxServers/Common.ashx', call: 'LoadListColumn' }
+  listColumn: { path: '/AjaxServers/Common.ashx', call: 'LoadListColumn' },
+  mailType: { path: '/AjaxServers/Common.ashx', call: 'LoadMailType' }
 }
 
 function loginRedirect(response: Response, origin: string): boolean {

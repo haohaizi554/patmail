@@ -69,10 +69,16 @@ export interface ListColumnSnapshot {
 }
 
 export type DictionarySnapshot =
-  | BasicDataSnapshot | FlowDataSnapshot | FileTypeTreeSnapshot | FieldColumnSnapshot | ListColumnSnapshot
+  | BasicDataSnapshot | FlowDataSnapshot | FileTypeTreeSnapshot | FieldColumnSnapshot | ListColumnSnapshot | MailTypeSnapshot
 
-export type DictionaryKind = 'basic' | 'flow' | 'fileType' | 'fieldColumn' | 'listColumn'
+export interface MailTypeSnapshot {
+  kind: 'mailType'
+  nodes: Array<{ id: string; name: string; parentId: string; treeType: string }>
+  diagnostics: string[]
+}
+
+export type DictionaryKind = 'basic' | 'flow' | 'fileType' | 'fieldColumn' | 'listColumn' | 'mailType'
 
 export type DictionaryLoadRequest =
-  | { kind: 'basic' | 'flow' | 'fieldColumn' | 'listColumn'; force: boolean }
+  | { kind: 'basic' | 'flow' | 'fieldColumn' | 'listColumn' | 'mailType'; force: boolean }
   | { kind: 'fileType'; force: boolean; caseTypeId: string }
