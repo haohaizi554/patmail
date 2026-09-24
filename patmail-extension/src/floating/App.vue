@@ -2,6 +2,8 @@
 import { computed, inject, onMounted, ref } from 'vue'
 import { MessageType, type ContentResponse, type MessageBridge } from '../shared/message'
 import { summarize, type PageSnapshot, type ScanSummary } from '../shared/types'
+import DebugViewer from './DebugViewer.vue'
+import { copySnapshot } from './copySnapshot'
 import { usePanelDrag } from './usePanelDrag'
 
 const bridge = inject<MessageBridge>('bridge')
@@ -18,9 +20,9 @@ const showDom = ref(false)
 const loadingInfo = ref(true)
 const scanning = ref(false)
 const errorText = ref('')
+const copyText = ref('')
 const backgroundStatus = ref<'checking' | 'ready' | 'unavailable'>('checking')
 const backgroundError = ref('')
-const formattedDom = computed(() => snapshot.value ? JSON.stringify(snapshot.value, null, 2) : '')
 const statusText = computed(() => {
   if (backgroundStatus.value === 'checking') return '正在连接后台'
   if (backgroundStatus.value === 'unavailable') return '后台连接失败'
@@ -77,6 +79,17 @@ async function loadPageInfo(): Promise<void> {
   }
 }
 
+async function copyJson(): Promise<void> {
+  if (!snapshot.value || !panel.value) return
+  copyText.value = ''
+  try {
+    copyText.value = await copySnapshot(snapshot.value, panel.value)
+      ? '完整 JSON 已复制' : '复制失败，请检查浏览器剪贴板权限'
+  } catch {
+    copyText.value = '复制失败，请检查浏览器剪贴板权限'
+  }
+}
+
 async function scan(): Promise<void> {
   if (scanning.value) return
   if (!bridge) {
@@ -85,6 +98,7 @@ async function scan(): Promise<void> {
   }
   scanning.value = true
   errorText.value = ''
+  copyText.value = ''
   try {
     const message = await bridge.request({ type: MessageType.ScanPage })
     if (message.type !== MessageType.ScanResult || !message.payload) {
@@ -93,8 +107,8 @@ async function scan(): Promise<void> {
     }
     snapshot.value = message.payload
     summary.value = summarize(message.payload)
-    url.value = message.payload.url
-    title.value = message.payload.title
+    url.value = message.payload.page.url
+    title.value = message.payload.page.title
   } catch (error) {
     errorText.value = `扫描失败：${failureText(error)}`
   } finally {
@@ -144,7 +158,9 @@ onMounted(() => {
       <div class="buttons">
         <button type="button" class="primary" :disabled="scanning" @click="scan">{{ scanning ? '扫描中…' : '扫描页面' }}</button>
         <button type="button" class="secondary" :aria-expanded="showDom" @click="toggleDom">{{ showDom ? '收起 DOM' : '查看 DOM' }}</button>
+        <button type="button" class="secondary" :disabled="!snapshot" @click="copyJson">复制 JSON</button>
       </div>
+      <p v-if="copyText" class="copy-status" role="status">{{ copyText }}</p>
       <p v-if="backgroundError" class="error" role="alert">{{ backgroundError }}</p>
       <p v-if="errorText" class="error" role="alert">{{ errorText }}</p>
 
@@ -155,15 +171,12 @@ onMounted(() => {
           <div><strong>{{ summary.selectCount }}</strong><span>selects</span></div>
           <div><strong>{{ summary.buttonCount }}</strong><span>buttons</span></div>
         </div>
+        <p class="result-meta">控件 {{ summary.totalControls }} · textarea {{ summary.textareaCount }} · 可见 {{ summary.visibleCount }} · 隐藏 {{ summary.hiddenCount }} · 语义识别 {{ summary.semanticResolved }}</p>
         <p class="result-meta">{{ summary.hostname || '—' }} · {{ summary.title || '（无标题）' }}</p>
       </section>
 
-      <section v-if="showDom" class="card dom" aria-label="DOM 结构化预览">
-        <div class="section-heading"><span class="eyebrow">DOM PREVIEW</span><span class="result-note">完整 JSON</span></div>
-        <p v-if="scanning && !snapshot" class="empty">正在读取页面结构…</p>
-        <p v-else-if="!snapshot" class="empty">扫描页面后可查看结构化结果。</p>
-        <pre v-else>{{ formattedDom }}</pre>
-      </section>
+      <DebugViewer v-if="showDom && snapshot" :snapshot="snapshot" />
+      <p v-else-if="showDom" class="empty">{{ scanning ? '正在读取页面结构…' : '扫描页面后可查看结构化结果。' }}</p>
     </div>
   </section>
 </template>

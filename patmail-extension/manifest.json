@@ -3,9 +3,9 @@
   "minimum_chrome_version": "114",
   "name": "PatMail",
   "version": "0.1.0",
-  "description": "专利发文自动化插件。当前阶段提供页面注入、浮窗和 DOM 扫描。",
-  "permissions": ["storage", "tabs", "activeTab", "scripting"],
-  "host_permissions": ["<all_urls>"],
+  "description": "专利发文辅助插件。当前阶段提供页面语义扫描与浮窗调试。",
+  "permissions": ["tabs"],
+  "host_permissions": ["http://183.36.43.66:88/*", "http://127.0.0.1/*", "http://localhost/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -16,7 +16,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": ["http://183.36.43.66:88/*", "http://127.0.0.1/*", "http://localhost/*"],
       "js": ["content.js"],
       "run_at": "document_idle",
       "all_frames": false

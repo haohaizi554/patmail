@@ -13,9 +13,9 @@ const workerStatus = ref<'checking' | 'ready' | 'unavailable'>('checking')
 function supportedUrl(value: string | undefined): boolean {
   if (!value) return false
   const url = new URL(value)
-  return ['http:', 'https:', 'file:'].includes(url.protocol) &&
-    url.hostname !== 'chromewebstore.google.com' &&
-    !(url.hostname === 'chrome.google.com' && url.pathname.startsWith('/webstore'))
+  return url.protocol === 'http:' && (
+    url.host === '183.36.43.66:88' || url.hostname === '127.0.0.1' || url.hostname === 'localhost'
+  )
 }
 
 async function act(type: 'SCAN_PAGE' | 'SHOW_PANEL'): Promise<void> {
@@ -24,7 +24,7 @@ async function act(type: 'SCAN_PAGE' | 'SHOW_PANEL'): Promise<void> {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
     if (tab?.id === undefined || !supportedUrl(tab.url)) {
-      hint.value = '此页面不允许插件注入，请切换到普通网页。'
+      hint.value = '此页面不在插件授权范围，请切换到 EASY 或本地验收页。'
       return
     }
     const request: ContentRequest = { type }
@@ -41,7 +41,7 @@ async function act(type: 'SCAN_PAGE' | 'SHOW_PANEL'): Promise<void> {
       hint.value = '页面返回了意外结果，请刷新网页后再试。'
     }
   } catch {
-    hint.value = '无法连接当前页，请刷新网页后重试。若为本地文件，请在扩展详情中允许访问文件网址。'
+    hint.value = '无法连接当前页，请确认站点授权并刷新网页后重试。'
   } finally {
     busy.value = false
   }
@@ -67,6 +67,7 @@ onMounted(async () => {
       <p class="url">{{ summary.url }}</p>
       <ul>
         <li>input：{{ summary.inputCount }}</li>
+        <li>textarea：{{ summary.textareaCount }}</li>
         <li>select：{{ summary.selectCount }}</li>
         <li>button：{{ summary.buttonCount }}</li>
       </ul>

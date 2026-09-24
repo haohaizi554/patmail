@@ -30,5 +30,9 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   return true
 })
 
-injectPanel(bridge)
+try {
+  injectPanel(bridge)
+} catch (error) {
+  console.error('PatMail initial injection failed', error)
+}
 

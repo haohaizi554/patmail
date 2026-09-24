@@ -24,6 +24,7 @@
     <input id="submit-button" type="submit" value="提交">
   </form>
   <output id="page-state">未点击</output>
+  <iframe id="nested-frame" srcdoc="&lt;input id='iframe-only'&gt;"></iframe>
   <script>
     window.submitCount = 0;
     document.querySelector('#sample-form').addEventListener('submit', (event) => {

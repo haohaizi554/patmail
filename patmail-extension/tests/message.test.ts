@@ -8,10 +8,15 @@ describe('message validation', () => {
     { type: 'PONG', payload: { ok: false } }
   ])('rejects malformed messages: %j', value => expect(isMessage(value)).toBe(false))
 
-  it('accepts the documented scan request and complete empty snapshot', () => {
+  it('accepts the documented scan request and complete V2 snapshot', () => {
     expect(isMessage({ type: 'SCAN_PAGE' })).toBe(true)
     expect(isMessage({ type: 'SCAN_RESULT', payload: {
-      url: 'https://example.test', title: '', hostname: 'example.test', inputs: [], selects: [], buttons: []
+      version: 2,
+      page: { url: 'https://example.test/', origin: 'https://example.test', hostname: 'example.test',
+        pathname: '/', search: '', title: '', iframeDepth: 0, readyState: 'complete' },
+      controls: [], stats: { totalControls: 0, inputs: 0, textareas: 0, selects: 0, buttons: 0,
+        visible: 0, hidden: 0, disabled: 0, semanticResolved: 0, durationMs: 1 },
+      iframes: [], scannedAt: '2026-09-24T00:00:00.000Z'
     } })).toBe(true)
   })
 
@@ -21,13 +26,18 @@ describe('message validation', () => {
     expect(isContentRequest({ type: 'SHOW_PANEL' })).toBe(true)
   })
 
-  it('rejects invalid select options and button records inside a snapshot', () => {
-    const base = { url: '', title: '', hostname: '', inputs: [], selects: [], buttons: [] }
+  it('rejects invalid controls and inconsistent statistics inside a V2 snapshot', () => {
+    const base = {
+      version: 2, page: { url: '', origin: '', hostname: '', pathname: '', search: '', title: '', iframeDepth: 0, readyState: 'complete' },
+      controls: [], stats: { totalControls: 0, inputs: 0, textareas: 0, selects: 0, buttons: 0,
+        visible: 0, hidden: 0, disabled: 0, semanticResolved: 0, durationMs: 1 },
+      iframes: [], scannedAt: '2026-09-24T00:00:00.000Z'
+    }
     expect(isMessage({ type: 'SCAN_RESULT', payload: {
-      ...base, selects: [{ tag: 'select', name: '', id: '', value: '', options: [123] }]
+      ...base, controls: [null]
     } })).toBe(false)
     expect(isMessage({ type: 'SCAN_RESULT', payload: {
-      ...base, buttons: [{ tag: 'button', name: '', id: '', type: 'submit' }]
+      ...base, stats: { ...base.stats, totalControls: 1 }
     } })).toBe(false)
   })
 })

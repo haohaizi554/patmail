@@ -4,13 +4,22 @@ import { mountFloating } from '../floating/main'
 import type { MessageBridge } from '../shared/message'
 
 const HOST_TAG = 'patmail-root'
+const HOST_ID = 'patmail-extension-root'
+const DISPOSE_EVENT = 'patmail:dispose'
 let activeHost: HTMLElement | null = null
 
 /** 页面仅增加一个零尺寸宿主；应用节点和样式封装在 Shadow DOM 内。 */
 export function injectPanel(bridge: MessageBridge): void {
   if (activeHost?.isConnected) return
 
+  // 新版脚本再次执行或扩展重新加载时，清理旧实例后再挂载。
+  activeHost?.dispatchEvent(new Event(DISPOSE_EVENT))
+  const previous = document.querySelector<HTMLElement>(HOST_TAG)
+  previous?.dispatchEvent(new Event(DISPOSE_EVENT))
+  previous?.remove()
+
   const host = document.createElement(HOST_TAG)
+  host.id = HOST_ID
   // 手动 popover 进入浏览器 top layer，避免 body 的 transform/filter 改变固定定位。
   // manual 不锁定页面，也不会点击外部就关闭或关闭网页原有 popover。
   host.popover = 'manual'
@@ -30,9 +39,54 @@ export function injectPanel(bridge: MessageBridge): void {
   activeHost = host
 
   let app: VueApp | null = null
-  app = mountFloating(mountPoint, bridge, () => {
+  let dismissed = false
+  let observedBody: HTMLElement | null = null
+  let observedHtml: HTMLElement | null = null
+  const bodyObserver = new MutationObserver(restoreIfDetached)
+  const htmlObserver = new MutationObserver(restoreIfDetached)
+  const documentObserver = new MutationObserver(restoreIfDetached)
+
+  function watchHtml(): void {
+    const html = document.documentElement
+    if (!html || html === observedHtml) return
+    htmlObserver.disconnect()
+    htmlObserver.observe(html, { childList: true })
+    observedHtml = html
+  }
+
+  function watchBody(): void {
+    const body = document.body
+    if (!body || body === observedBody) return
+    bodyObserver.disconnect()
+    bodyObserver.observe(body, { childList: true })
+    observedBody = body
+  }
+
+  function restoreIfDetached(): void {
+    if (dismissed) return
+    watchHtml()
+    watchBody()
+    if (host.isConnected) return
+    ;(document.body ?? document.documentElement).appendChild(host)
+    host.showPopover()
+  }
+
+  function dispose(): void {
+    if (dismissed) return
+    dismissed = true
+    bodyObserver.disconnect()
+    htmlObserver.disconnect()
+    documentObserver.disconnect()
+    host.removeEventListener(DISPOSE_EVENT, dispose)
     app?.unmount()
     host.remove()
-    activeHost = null
-  })
+    if (activeHost === host) activeHost = null
+  }
+
+  host.addEventListener(DISPOSE_EVENT, dispose)
+  watchHtml()
+  watchBody()
+  // 旧式 document.write 会整体替换 html；只观察 Document 的直接子节点以重新绑定。
+  documentObserver.observe(document, { childList: true })
+  app = mountFloating(mountPoint, bridge, dispose)
 }
