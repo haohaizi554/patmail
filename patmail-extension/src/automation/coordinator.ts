@@ -43,7 +43,13 @@ function readLeases(value: unknown): ExecutionLease[] {
   const record = value as { version?: unknown; leases?: unknown; cookie?: unknown; authorization?: unknown; password?: unknown }
   if (record.version !== 1 || !Array.isArray(record.leases)) return []
   if ('cookie' in record || 'authorization' in record || 'password' in record) return []
-  return record.leases.filter(isLease)
+  return record.leases.filter(isLease).map(item => ({ ...item, leaseVersion: item.leaseVersion || 1 }))
+}
+
+function retainLeases(leases: ExecutionLease[]): ExecutionLease[] {
+  const kept = leases.filter(item => item.status !== 'RELEASED' || item.requestSent)
+  const released = leases.filter(item => item.status === 'RELEASED' && !item.requestSent)
+  return [...kept, ...released]
 }
 
 function isLease(value: unknown): value is ExecutionLease {
@@ -67,9 +73,9 @@ export class ExecutionCoordinator {
       const now = new Date().toISOString()
       const lease: ExecutionLease = {
         executionId: globalThis.crypto.randomUUID(), taskFingerprint, owner: this.ownerId, status: 'RUNNING',
-        requestSent: false, easyMailId: '', startedAt: now, updatedAt: now, lastCheckpoint: 'claimed', origin, operatorId
+        requestSent: false, easyMailId: '', startedAt: now, updatedAt: now, lastCheckpoint: 'claimed', leaseVersion: 1, origin, operatorId
       }
-      await this.area.set({ [key]: { version: 1, leases: [...leases, lease].slice(-40) } })
+      await this.area.set({ [key]: { version: 1, leases: retainLeases([...leases, lease]) } })
       return { ok: true as const, lease }
     })
   }

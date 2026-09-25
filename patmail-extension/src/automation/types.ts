@@ -1,4 +1,4 @@
-import type { MailDraftPreview, MailGroup, SelectedPatentFile } from '../mail/types'
+import type { MailDraftPreview, MailGroup, MailRuleBundle, SelectedPatentFile } from '../mail/types'
 
 export type AutomationTaskState =
   | 'CREATED' | 'VALIDATING' | 'READY' | 'DRY_RUNNING' | 'DRY_RUN_COMPLETED' | 'CONFIRM_REQUIRED'
@@ -7,7 +7,7 @@ export type AutomationTaskState =
 
 export type AutomationItemState =
   | 'READY' | 'DRY_RUN_COMPLETED' | 'BLOCKED' | 'RUNNING' | 'WAITING_USER'
-  | 'PARTIAL_FAILURE' | 'UNKNOWN' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
+  | 'PARTIAL_FAILURE' | 'UNKNOWN' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'BINDING_BLOCKED'
 
 export type StageId =
   | 'SESSION_CHECK' | 'FILE_QUERY' | 'FILE_SELECTION' | 'CUSTOMER_RESOLVE' | 'DESCRIPTION_MAPPING' | 'MAIL_GROUPING'
@@ -37,10 +37,33 @@ export interface AutomationIssue {
 
 export interface Checkpoint {
   stage: StageId
+  itemId: string
   requestSent: boolean
+  responseReceived: boolean
+  verified: boolean
   easyMailId: string
   at: string
   note: string
+}
+
+export interface TaskCustomer {
+  id: string
+  name: string
+}
+
+export type EvidenceLevel = 'UNKNOWN' | 'REQUEST_OBSERVED' | 'RESPONSE_OBSERVED' | 'READBACK_VERIFIED'
+
+export interface AutomationStagePlan {
+  stage: StageId
+  itemId: string
+  sideEffect: 'none' | 'read' | 'write'
+  precondition: string
+  expectedInput: string
+  expectedOutput: string
+  canExecute: boolean
+  blockers: string[]
+  requiresConfirmation: boolean
+  contractStatus: EvidenceLevel
 }
 
 export interface AutomationTaskItem {
@@ -68,6 +91,12 @@ export interface AutomationTask {
   operatorId: string
   customerProfileId: string
   customerName: string
+  customers: TaskCustomer[]
+  legacyTaskId: string
+  archived: boolean
+  readonly: boolean
+  ruleSnapshot: MailRuleBundle
+  verifiedAt: string
   selectionFingerprint: string
   taskFingerprint: string
   selectedFiles: SelectedPatentFile[]
@@ -105,6 +134,7 @@ export interface ExecutionLease {
   startedAt: string
   updatedAt: string
   lastCheckpoint: string
+  leaseVersion: number
   origin: string
   operatorId: string
 }

@@ -8,14 +8,20 @@ export function validateTask(task: AutomationTask, current: TaskBuildInput): Aut
     issues.push({ code: 'ACCOUNT_MISMATCH', message: '任务不能跨账号或跨站点复用。', itemId: '' })
   }
   if (!isQueryGuid(current.operatorId)) issues.push({ code: 'SESSION_USER', message: '当前用户身份失效。', itemId: '' })
-  const frozen = taskFingerprint({
-    origin: task.origin, operatorId: task.operatorId, files: task.selectedFiles,
-    rules: { ...current.rules, revision: task.mailRuleRevision }, queryTemplateVersion: task.queryTemplateVersion
-  })
-  const live = taskFingerprint(current)
-  if (frozen !== live || task.taskFingerprint !== frozen || current.rules.revision !== task.mailRuleRevision || current.queryTemplateVersion !== task.queryTemplateVersion) {
-    issues.push({ code: 'STALE_TASK', message: '文件、客户绑定或规则版本已经变化，需要重新生成计划。', itemId: '' })
+  if (!task.ruleSnapshot) {
+    issues.push({ code: 'STALE_TASK', message: '旧任务没有规则快照，只能只读。', itemId: '' })
+  } else {
+    const frozen = taskFingerprint({
+      origin: task.origin, operatorId: task.operatorId, files: task.selectedFiles,
+      rules: task.ruleSnapshot, queryTemplateVersion: task.queryTemplateVersion
+    })
+    const live = taskFingerprint(current)
+    if (frozen !== live || task.taskFingerprint !== frozen) {
+      issues.push({ code: 'STALE_TASK', message: '文件、客户绑定或规则内容已经变化，需要重新生成计划。', itemId: '' })
+    }
   }
+  const sent = task.status === 'UNKNOWN' || task.readonly || task.checkpoints.some(item => item.requestSent)
+  if (sent) return { ...task, issues, status: 'UNKNOWN', readonly: true, updatedAt: current.now ?? new Date().toISOString() }
   const stale = issues.some(item => item.code === 'STALE_TASK' || item.code === 'ACCOUNT_MISMATCH' || item.code === 'SESSION_USER')
   return { ...task, issues, status: stale ? 'STALE' : task.status, updatedAt: current.now ?? new Date().toISOString() }
 }
