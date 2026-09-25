@@ -1,6 +1,12 @@
 import { isQueryGuid } from '../query/query-validator'
 import type { WorkflowNode, WorkflowReviewer } from './types'
 
+/** 只返回当前选中节点上的候选人，不把其他节点的人员并进来。 */
+export function reviewersForNode(nodes: WorkflowNode[], nodeId: string): WorkflowReviewer[] {
+  if (!nodeId) return []
+  return nodes.find(node => node.nodeId.toLowerCase() === nodeId.toLowerCase())?.reviewers ?? []
+}
+
 export type ReviewerResolution =
   | { status: 'matched'; reviewer: WorkflowReviewer }
   | { status: 'blocked'; reason: string }

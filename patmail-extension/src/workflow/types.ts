@@ -4,8 +4,9 @@ export type WorkflowExecutionState =
   | 'SUBMITTED' | 'VERIFYING' | 'COMPLETED' | 'STALE' | 'UNKNOWN' | 'FAILED' | 'BLOCKED'
 
 export type WorkflowExecutionEvent =
-  | 'READ_STARTED' | 'READ_READY' | 'READ_FAILED'
+  | 'READ_STARTED' | 'READ_READY' | 'READ_FAILED' | 'READ_REFRESHED'
   | 'NEED_NODE' | 'NEED_REVIEWER' | 'PLAN_READY' | 'REQUEST_CONFIRM'
+  | 'PLAN_INVALIDATED' | 'REPLAN_REQUESTED' | 'PLAN_UPDATED'
   | 'CONFIRM_SUBMIT' | 'VERSION_MATCH' | 'VERSION_STALE' | 'VERSION_UNKNOWN'
   | 'SUBMIT_UNKNOWN' | 'SUBMIT_FAILED' | 'SUBMIT_ACCEPTED'
   | 'VERIFY_OK' | 'VERIFY_FAILED'
@@ -103,6 +104,7 @@ export interface WorkflowPlan {
 export interface WorkflowExecutionRecord {
   executionId: string
   mailId: string
+  flowType: string
   flowId: string
   currentNodeId: string
   nextNodeId: string

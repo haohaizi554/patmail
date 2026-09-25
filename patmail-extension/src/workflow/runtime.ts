@@ -4,7 +4,7 @@ import { versionAgrees } from './contracts'
 import type { WorkflowWriteGate } from './gate'
 import { planWorkflow, type PlanInput } from './planner'
 import { WorkflowReadService, type WorkflowRead } from './read-service'
-import { applyWorkflowEvent, blocksAnotherSubmit } from './state'
+import { applyWorkflowEvent, blocksAnotherSubmit, canReplan, nextWorkflowState } from './state'
 import { WorkflowStore } from './store'
 import type { FlowInfoFields } from './contracts'
 import type { WorkflowExecutionEvent, WorkflowExecutionRecord, WorkflowExecutionState, WorkflowPlan, WorkflowView } from './types'
@@ -43,14 +43,24 @@ export class WorkflowRuntime {
   async read(userId: string, mailId: string, flowType: string): Promise<WorkflowView> {
     if (!isQueryGuid(mailId) || !flowType.trim()) return this.ephemeral(userId, mailId, '当前邮件或流程类型无效。')
     if (!(await this.mailVerified(userId, mailId))) return this.ephemeral(userId, mailId, '文件关联还没有核验，不能进入流程。')
+    return this.open(userId, mailId, flowType)
+  }
+
+  /** 只读核验一封已经存在的邮件。不要求 PatMail 创建记录，也不会进入提交。 */
+  diagnose(userId: string, mailId: string, flowType: string): Promise<WorkflowView> {
+    if (!isQueryGuid(mailId) || !flowType.trim()) return Promise.resolve(this.ephemeral(userId, mailId, '当前邮件或流程类型无效。'))
+    return this.open(userId, mailId, flowType)
+  }
+
+  private open(userId: string, mailId: string, flowType: string): Promise<WorkflowView> {
     return this.store.exclusive(this.origin, userId, mailId, async () => {
       const records = await this.store.load(this.origin, userId)
       const held = records.find(item => item.mailId.toLowerCase() === mailId.toLowerCase() && item.status === 'UNKNOWN')
       if (held) return this.rereadUnknown(userId, records, held, flowType)
       const blocking = records.find(item => item.mailId.toLowerCase() === mailId.toLowerCase() && blocksAnotherSubmit(item))
       if (blocking) return this.view(blocking, ['已有未结束的流程提交，不能另起一次。'])
-      let record = this.blank(userId, mailId)
-      record = this.move(record, 'READ_STARTED') ?? record
+      let record = this.blank(userId, mailId, flowType)
+      record = this.move(record, 'READ_STARTED', { flowType }) ?? record
       await this.persist(userId, records, record)
       const loaded = await this.reader.load(mailId, flowType)
       if (!loaded.ok) {
@@ -76,29 +86,71 @@ export class WorkflowRuntime {
     })
   }
 
+  private async reload(userId: string, records: WorkflowExecutionRecord[], current: WorkflowExecutionRecord, discardPlan: boolean): Promise<WorkflowView> {
+    const flowType = current.flowType || this.details.get(current.executionId)?.read?.info.flowType || ''
+    if (!flowType) return this.view(current, ['记录里没有流程类型，请重新读取。'])
+    const loaded = await this.reader.load(current.mailId, flowType)
+    if (!loaded.ok) return this.view({ ...current, lastError: loaded.message }, [loaded.message])
+    const token = loaded.data.snapshot.versionToken ?? ''
+    const nodeId = loaded.data.info.curNodeId ?? ''
+    const changed = loaded.data.info.flowId !== current.flowId || nodeId !== current.currentNodeId || token !== current.versionToken
+    const detail = { read: loaded.data, plan: null as WorkflowPlan | null }
+    this.details.set(current.executionId, detail)
+    let record = current
+    if (discardPlan || changed) {
+      const event = nextWorkflowState(record.status, 'READ_REFRESHED') ? 'READ_REFRESHED' as const : nextWorkflowState(record.status, 'PLAN_INVALIDATED') ? 'PLAN_INVALIDATED' as const : null
+      if (event && !record.requestSent) {
+        record = this.move(record, event, {
+          flowId: loaded.data.info.flowId, flowType, currentNodeId: nodeId, versionToken: token,
+          nextNodeId: '', reviewerId: '', lastError: changed ? '流程状态已变化，旧提交计划已作废。' : ''
+        }) ?? { ...record, flowId: loaded.data.info.flowId, currentNodeId: nodeId, versionToken: token, nextNodeId: '', reviewerId: '' }
+      } else {
+        record = { ...record, flowId: loaded.data.info.flowId, currentNodeId: nodeId, versionToken: token, lastError: record.requestSent ? '已重新读取。提交结果仍未知，没有自动重试。' : record.lastError }
+      }
+    }
+    await this.persist(userId, records, record)
+    const blockers = [loaded.data.nodeMessage, changed ? '流程状态已变化，旧提交计划已作废。' : ''].filter(Boolean)
+    return this.view(record, blockers)
+  }
+
   async refresh(userId: string, executionId: string): Promise<WorkflowView> {
     const records = await this.store.load(this.origin, userId)
     const current = records.find(item => item.executionId === executionId && item.userId === userId)
     if (!current) return this.ephemeral(userId, '', '没有可刷新的流程记录。')
-    const detail = this.details.get(executionId)
-    if (!detail?.read) return this.view(current, ['请先读取流程。'])
-    const nodes = await this.reader.nodes(detail.read.info)
-    detail.read.snapshot = { ...detail.read.snapshot, availableNodes: nodes.nodes }
-    detail.read.nodeMessage = nodes.message
-    detail.plan = null
-    return this.view(current, nodes.message ? [nodes.message] : [])
+    return this.reload(userId, records, current, true)
+  }
+
+  /** 页面重新打开后只根据持久化记录重读流程。不恢复旧计划，也不再次提交。 */
+  async restore(userId: string, mailId: string): Promise<WorkflowView | null> {
+    if (!isQueryGuid(mailId)) return null
+    const records = await this.store.load(this.origin, userId)
+    const current = [...records].reverse().find(item => item.mailId.toLowerCase() === mailId.toLowerCase())
+    if (!current) return null
+    if (current.status === 'SUBMITTING' && current.requestSent) {
+      const unknown = this.move(current, 'SUBMIT_UNKNOWN', { lastError: '提交过程中断，结果未知，不能自动重试。' }) ?? { ...current, status: 'UNKNOWN' as const, lastError: '提交过程中断，结果未知，不能自动重试。' }
+      await this.persist(userId, records, unknown)
+      return this.reload(userId, records, unknown, true)
+    }
+    return this.reload(userId, records, current, true)
   }
 
   async preview(userId: string, executionId: string, input: PlanInput): Promise<WorkflowView> {
     const records = await this.store.load(this.origin, userId)
     const current = records.find(item => item.executionId === executionId && item.userId === userId)
     if (!current) return this.ephemeral(userId, '', '没有可预览的流程记录。')
-    if (current.requestSent || current.status === 'UNKNOWN') return this.view(current, ['提交流程的结果还不能确认，不能用旧计划重试。'])
+    if (current.requestSent || current.status === 'UNKNOWN' || current.status === 'SUBMITTING' || current.status === 'SUBMITTED' || current.status === 'VERIFYING' || current.status === 'COMPLETED') {
+      return this.view(current, ['提交流程的结果还不能确认，不能用旧计划重试。'])
+    }
+    if (current.status === 'STALE') return this.view(current, ['流程版本已变化，请先刷新流程后再规划。'])
     const detail = this.details.get(executionId)
-    if (!detail?.read) return this.view(current, ['请先读取流程。'])
+    if (!detail?.read) return this.view(current, ['页面已刷新，内存中的流程详情不在了。请先重新读取。'])
+    let record = current
+    if (canReplan(record)) {
+      detail.plan = null
+      record = this.move(record, 'PLAN_INVALIDATED', { nextNodeId: '', reviewerId: '', lastError: '' }) ?? { ...record, nextNodeId: '', reviewerId: '' }
+    }
     const planned = planWorkflow(detail.read.snapshot, { ...input, currentUserId: userId })
     detail.plan = planned.plan
-    let record = current
     const reason = planned.blockers.join('')
     if (!planned.plan && planned.blockers.some(item => item.includes('不唯一'))) {
       record = this.move(record, 'NEED_NODE', { lastError: reason }) ?? { ...record, lastError: reason }
@@ -234,13 +286,13 @@ export class WorkflowRuntime {
   }
 
   private move(record: WorkflowExecutionRecord, event: WorkflowExecutionEvent, patch: Partial<WorkflowExecutionRecord> = {}): WorkflowExecutionRecord | null {
-    const next = applyWorkflowEvent(record, event, patch)
-    return next.status === record.status ? null : next
+    if (!nextWorkflowState(record.status, event)) return null
+    return applyWorkflowEvent(record, event, patch)
   }
 
-  private blank(userId: string, mailId: string): WorkflowExecutionRecord {
+  private blank(userId: string, mailId: string, flowType = ''): WorkflowExecutionRecord {
     return {
-      executionId: globalThis.crypto.randomUUID(), mailId, flowId: '', currentNodeId: '', nextNodeId: '', reviewerId: '',
+      executionId: globalThis.crypto.randomUUID(), mailId, flowType, flowId: '', currentNodeId: '', nextNodeId: '', reviewerId: '',
       status: 'NOT_STARTED', versionToken: '', submittedAt: '', lastVerifiedAt: '', lastError: '', requestSent: false,
       userId, origin: this.origin
     }

@@ -51,6 +51,13 @@ export const MessageType = {
   ReadWorkflow: 'READ_WORKFLOW',
   RefreshWorkflow: 'REFRESH_WORKFLOW',
   PreviewWorkflow: 'PREVIEW_WORKFLOW',
+  RestoreWorkflow: 'RESTORE_WORKFLOW',
+  DiagnoseExistingMail: 'DIAGNOSE_EXISTING_MAIL',
+  ExistingMailDiagnostic: 'EXISTING_MAIL_DIAGNOSTIC',
+  ClaimExecution: 'CLAIM_EXECUTION',
+  ExecutionLease: 'EXECUTION_LEASE',
+  RecoverExecution: 'RECOVER_EXECUTION',
+  ExecutionRecovered: 'EXECUTION_RECOVERED',
   WorkflowResult: 'WORKFLOW_RESULT',
   Error: 'ERROR'
 } as const
@@ -72,9 +79,31 @@ export type ContentRequest =
   | Response<'READ_WORKFLOW', { mailId: string; flowType: string }>
   | Response<'REFRESH_WORKFLOW', { executionId: string }>
   | Response<'PREVIEW_WORKFLOW', { executionId: string; nodeId: string; reviewerId: string; auditType: 'submit' | 'handover'; remark: string; urgencyId: string }>
+  | Response<'RESTORE_WORKFLOW', { mailId: string }>
+  | Response<'DIAGNOSE_EXISTING_MAIL', { mailId: string; flowType: string }>
 export type ErrorMessage = Response<'ERROR', { message: string }>
-export type BackgroundRequest = Request<'PING'>
-export type BackgroundResponse = Response<'PONG', { ok: true }> | ErrorMessage
+export interface ExistingMailDiagnostic {
+  mailId: string
+  fileIds: string[]
+  fileNames: string[]
+  writesAttempted: false
+  blockers: string[]
+  workflow: WorkflowView
+}
+export interface ExecutionLeasePayload {
+  ok: boolean
+  reason: string
+  lease: { executionId: string; taskFingerprint: string; owner: string; status: string; requestSent: boolean; easyMailId: string } | null
+}
+export type BackgroundRequest =
+  | Request<'PING'>
+  | Response<'CLAIM_EXECUTION', { origin: string; operatorId: string; taskFingerprint: string }>
+  | Response<'RECOVER_EXECUTION', { origin: string; operatorId: string }>
+export type BackgroundResponse =
+  | Response<'PONG', { ok: true }>
+  | Response<'EXECUTION_LEASE', ExecutionLeasePayload>
+  | Response<'EXECUTION_RECOVERED', { leases: ExecutionLeasePayload['lease'][] }>
+  | ErrorMessage
 export type ContentResponse =
   | Response<'SCAN_RESULT', PageSnapshot>
   | Response<'PAGE_INFO', PageInfo>
@@ -87,9 +116,10 @@ export type ContentResponse =
   | Response<'HISTORY_QUERY_RESULT', ApiResult<HistoryQueryDetail>>
   | Response<'DICTIONARY_RESULT', ApiResult<DictionarySnapshot>>
   | Response<'MAIL_EXECUTION_RESULT', { view: MailExecutionView | null }>
-  | Response<'WORKFLOW_RESULT', { view: WorkflowView }>
+  | Response<'WORKFLOW_RESULT', { view: WorkflowView | null }>
+  | Response<'EXISTING_MAIL_DIAGNOSTIC', ExistingMailDiagnostic>
   | BackgroundResponse
-export type AppMessage = ContentRequest | ContentResponse
+export type AppMessage = ContentRequest | ContentResponse | BackgroundRequest
 
 /** 先校验未知值，再缩窄类型，避免把畸形负载当成合法扫描结果。 */
 export function isMessage(value: unknown): value is AppMessage {
@@ -123,6 +153,16 @@ export function isMessage(value: unknown): value is AppMessage {
     case MessageType.RefreshWorkflow:
       return isRecord(value.payload) && typeof value.payload.executionId === 'string' && value.payload.executionId.length <= 80 &&
         Object.keys(value.payload).length === 1
+    case MessageType.RestoreWorkflow:
+      return isRecord(value.payload) && isFlowId(value.payload.mailId) && Object.keys(value.payload).length === 1
+    case MessageType.DiagnoseExistingMail:
+      return isRecord(value.payload) && isFlowId(value.payload.mailId) && isFlowType(value.payload.flowType) &&
+        Object.keys(value.payload).length === 2
+    case MessageType.ClaimExecution:
+      return isClaim(value.payload)
+    case MessageType.RecoverExecution:
+      return isRecord(value.payload) && typeof value.payload.origin === 'string' && value.payload.origin.length <= 200 &&
+        typeof value.payload.operatorId === 'string' && value.payload.operatorId.length <= 80 && Object.keys(value.payload).length === 2
     case MessageType.PreviewWorkflow:
       return isWorkflowPreview(value.payload)
     case MessageType.FindMailExecution:
@@ -156,7 +196,15 @@ export function isMessage(value: unknown): value is AppMessage {
       return isRecord(value.payload) && Object.keys(value.payload).length === 1 &&
         (value.payload.view === null || isMailExecutionView(value.payload.view))
     case MessageType.WorkflowResult:
-      return isRecord(value.payload) && Object.keys(value.payload).length === 1 && isWorkflowView(value.payload.view)
+      return isRecord(value.payload) && Object.keys(value.payload).length === 1 &&
+        (value.payload.view === null || isWorkflowView(value.payload.view))
+    case MessageType.ExistingMailDiagnostic:
+      return isExistingMailDiagnostic(value.payload)
+    case MessageType.ExecutionLease:
+      return isRecord(value.payload) && typeof value.payload.ok === 'boolean' && typeof value.payload.reason === 'string' &&
+        (value.payload.lease === null || isLeaseSummary(value.payload.lease))
+    case MessageType.ExecutionRecovered:
+      return isRecord(value.payload) && Array.isArray(value.payload.leases) && value.payload.leases.every(item => item === null || isLeaseSummary(item))
     case MessageType.Error:
       return isRecord(value.payload) && typeof value.payload.message === 'string'
     default:
@@ -174,8 +222,29 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.LoadDictionary || value.type === MessageType.CreateEasyMail ||
     value.type === MessageType.SaveEasyMail || value.type === MessageType.FindMailExecution ||
     value.type === MessageType.InspectEasyMail || value.type === MessageType.ReadWorkflow ||
-    value.type === MessageType.RefreshWorkflow || value.type === MessageType.PreviewWorkflow
+    value.type === MessageType.RefreshWorkflow || value.type === MessageType.PreviewWorkflow ||
+    value.type === MessageType.RestoreWorkflow || value.type === MessageType.DiagnoseExistingMail
   )
+}
+
+function isClaim(value: unknown): value is { origin: string; operatorId: string; taskFingerprint: string } {
+  return isRecord(value) && typeof value.origin === 'string' && value.origin.length > 0 && value.origin.length <= 200 &&
+    typeof value.operatorId === 'string' && value.operatorId.length <= 80 &&
+    typeof value.taskFingerprint === 'string' && value.taskFingerprint.length > 0 && value.taskFingerprint.length <= 20000 &&
+    Object.keys(value).length === 3
+}
+
+function isLeaseSummary(value: unknown): boolean {
+  return isRecord(value) && typeof value.executionId === 'string' && typeof value.taskFingerprint === 'string' &&
+    typeof value.owner === 'string' && typeof value.status === 'string' && typeof value.requestSent === 'boolean' &&
+    typeof value.easyMailId === 'string'
+}
+
+function isExistingMailDiagnostic(value: unknown): value is ExistingMailDiagnostic {
+  return isRecord(value) && typeof value.mailId === 'string' && Array.isArray(value.fileIds) && value.fileIds.every(item => typeof item === 'string') &&
+    Array.isArray(value.fileNames) && value.fileNames.every(item => typeof item === 'string') && value.writesAttempted === false &&
+    Array.isArray(value.blockers) && value.blockers.every(item => typeof item === 'string') && isWorkflowView(value.workflow) &&
+    Object.keys(value).length === 6
 }
 
 function isConfirmedPreview(value: unknown): value is { preview: MailDraftPreview; selection: SelectionClaim; confirmed: true } {

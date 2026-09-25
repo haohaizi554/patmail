@@ -20,7 +20,8 @@ export interface WorkflowArea {
 function isStored(value: unknown): value is WorkflowExecutionRecord {
   if (!value || typeof value !== 'object') return false
   const item = value as WorkflowExecutionRecord
-  return typeof item.executionId === 'string' && typeof item.mailId === 'string' && typeof item.flowId === 'string' &&
+  return typeof item.executionId === 'string' && typeof item.mailId === 'string' &&
+    (item.flowType === undefined || typeof item.flowType === 'string') && typeof item.flowId === 'string' &&
     typeof item.currentNodeId === 'string' && typeof item.nextNodeId === 'string' && typeof item.reviewerId === 'string' &&
     STATES.has(item.status) && typeof item.versionToken === 'string' && typeof item.submittedAt === 'string' &&
     typeof item.lastVerifiedAt === 'string' && typeof item.lastError === 'string' && typeof item.requestSent === 'boolean' &&
@@ -33,6 +34,7 @@ export function readWorkflowRecords(value: unknown, userId: string, origin: stri
   if (record.version !== 1 || !Array.isArray(record.records)) return []
   if ('cookie' in record || 'authorization' in record || 'password' in record) return []
   return record.records.filter(isStored).filter(item => item.userId === userId && item.origin === origin).slice(-40)
+    .map(item => ({ ...item, flowType: item.flowType ?? '' }))
 }
 
 export class WorkflowStore {

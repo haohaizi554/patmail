@@ -17,6 +17,8 @@ import { WorkflowRuntime } from '../workflow/runtime'
 import { WorkflowStore } from '../workflow/store'
 import type { WorkflowView } from '../workflow/types'
 import type { PlanInput } from '../workflow/planner'
+import { EasyMailReadService } from '../mail/easy/read-service'
+import type { ExistingMailDiagnostic } from '../shared/message'
 import { EasyTransport, type TransportOptions } from './transport'
 import { apiError, type ApiResult } from './types'
 
@@ -37,7 +39,7 @@ function chromeExecutionArea(): ExecutionArea | null {
 function refusedWorkflow(message: string): WorkflowView {
   return {
     record: {
-      executionId: '', mailId: '', flowId: '', currentNodeId: '', nextNodeId: '', reviewerId: '',
+      executionId: '', mailId: '', flowType: '', flowId: '', currentNodeId: '', nextNodeId: '', reviewerId: '',
       status: 'BLOCKED', versionToken: '', submittedAt: '', lastVerifiedAt: '', lastError: message,
       requestSent: false, userId: '', origin: ''
     },
@@ -229,6 +231,29 @@ export class EasyRuntime {
     return this.mailUser().then(user => user.ok
       ? this.workflow.preview(user.userId, executionId, { ...input, currentUserId: user.userId, pageFields: null })
       : refusedWorkflow(user.message))
+  }
+
+  restoreWorkflow(mailId: string): Promise<WorkflowView | null> {
+    return this.mailUser().then(user => user.ok ? this.workflow.restore(user.userId, mailId) : null)
+  }
+
+  /** 只读核验一封已有邮件。不保存、不提交。 */
+  diagnoseExistingMail(mailId: string, flowType: string): Promise<ExistingMailDiagnostic> {
+    return this.mailUser().then(async user => {
+      if (!user.ok) {
+        return { mailId, fileIds: [], fileNames: [], writesAttempted: false, blockers: [user.message], workflow: refusedWorkflow(user.message) }
+      }
+      const mail = await new EasyMailReadService(this.transport).load(mailId)
+      const workflow = await this.workflow.diagnose(user.userId, mailId, flowType)
+      return {
+        mailId,
+        fileIds: mail.ok ? mail.snapshot.files.map(file => file.fileId) : [],
+        fileNames: mail.ok ? mail.snapshot.files.map(file => file.fileName) : [],
+        writesAttempted: false,
+        blockers: [mail.ok ? '' : mail.message, ...workflow.blockers].filter(Boolean),
+        workflow
+      }
+    })
   }
 
   cancelFileSearch(): void {
