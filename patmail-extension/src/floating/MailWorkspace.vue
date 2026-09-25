@@ -2,7 +2,9 @@
 import { computed, ref, watch } from 'vue'
 import type { CustomerQueryProfile } from '../customer/types'
 import { planDrafts, selectionFingerprint, upsertMapping, type MailDraftPreview, type MailRuleBundle, type SelectedPatentFile, MailRuleRepository, emptyMailRules } from '../mail'
+import type { MailExecutionState } from '../mail/easy/types'
 import MailExecutionPanel from './MailExecutionPanel.vue'
+import WorkflowPanel from './WorkflowPanel.vue'
 import { ChromeBundleRepository, storageKey } from '../storage/query-bundle'
 import { MessageType, type MessageBridge } from '../shared/message'
 
@@ -13,6 +15,7 @@ const scope = ref<'account' | 'session'>('session')
 const message = ref('')
 const mailTypes = ref<Array<{ id: string; name: string }>>([])
 const drafts = ref<MailDraftPreview[]>([])
+const mailStates = ref<Record<string, { mailId: string; state: MailExecutionState | '' }>>({})
 const repository = ref<MailRuleRepository | null>(null)
 const policyCustomer = ref('')
 const policyMode = ref<'merge_by_customer_description' | 'single_file'>('merge_by_customer_description')
@@ -207,7 +210,8 @@ watch(() => props.files, () => { drafts.value = [] }, { deep: true })
       <p v-if="draft.signature" class="hint">签名：{{ draft.signature }}</p>
       <p class="hint">规则来源 {{ JSON.stringify(draft.ruleVersions) }}</p>
       <p v-for="issue in draft.issues" :key="issue.code + issue.field" class="hint">{{ issue.message }}</p>
-      <MailExecutionPanel :bridge="bridge" :draft="draft" />
+      <MailExecutionPanel :bridge="bridge" :draft="draft" :files="files" :revision="bundle.revision" @changed="mailStates[draft.id] = { mailId: $event?.record.mailId ?? '', state: $event?.record.state ?? '' }" />
+      <WorkflowPanel :bridge="bridge" :mail-id="mailStates[draft.id]?.mailId ?? ''" :ready="mailStates[draft.id]?.state === 'COMPLETED'" />
     </article>
   </section>
 </template>

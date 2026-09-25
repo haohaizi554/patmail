@@ -4,9 +4,8 @@ import { buildMailCustomerParams, readMailCustomer, unconfirmedWrite } from './c
 import type { MailWriteGate } from './gate'
 import type { WriteStatus } from './types'
 
-export function assessCreate(preview: MailDraftPreview, gate: MailWriteGate, currentFingerprint: string): { ok: true } | { ok: false; message: string } {
+export function assessCreate(preview: MailDraftPreview, gate: MailWriteGate): { ok: true } | { ok: false; message: string } {
   if (preview.status !== 'ready') return { ok: false, message: '草稿还有未通过的校验，不能创建。' }
-  if (preview.fingerprint !== currentFingerprint) return { ok: false, message: '预览已失效，不能把旧草稿提交创建。' }
   if (preview.issues.some(issue => issue.severity === 'error' || issue.code === 'STALE_RULE')) {
     return { ok: false, message: '预览已失效或仍有错误，不能创建。' }
   }

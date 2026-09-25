@@ -5,7 +5,7 @@ import { adaptMailDraft } from '../src/mail/easy/adapter'
 import { buildMailCustomerParams, formatRecipientList, readMailCustomer, saveParams } from '../src/mail/easy/contracts'
 import { productionGate, type MailWriteGate } from '../src/mail/easy/gate'
 import { EasyMailReadService } from '../src/mail/easy/read-service'
-import { MailExecutionRuntime } from '../src/mail/easy/runtime'
+import { MailExecutionRuntime, type SelectionClaim } from '../src/mail/easy/runtime'
 import { blocksAnotherCreate, nextState } from '../src/mail/easy/state'
 import { MemoryExecutionStore } from '../src/mail/easy/store'
 import type { EasyMailSnapshot, MailExecutionRecord } from '../src/mail/easy/types'
@@ -47,6 +47,9 @@ function rules(): MailRuleBundle {
 }
 function profile(): CustomerQueryProfile {
   return { id: 'profile-a', name: '客户A', baseTemplateId: 'base', overrides: {}, enabled: true, createdAt: '2026-09-24T00:00:00.000Z', updatedAt: '2026-09-24T00:00:00.000Z' }
+}
+function claimOf(preview: MailDraftPreview): SelectionClaim {
+  return { files: preview.files, revision: rules().revision }
 }
 function previewOf(files: SelectedPatentFile[], bundle = rules()): MailDraftPreview {
   const snapshot = { selectedAt: '2026-09-24T00:00:00.000Z', files, configVersion: bundle.revision, userId: user, origin, fingerprint: '' }
@@ -121,12 +124,12 @@ describe('创建契约', () => {
     const fetcher = vi.fn<typeof fetch>()
     const runtime = new MailExecutionRuntime(new EasyTransport(origin, { fetcher }), new MemoryExecutionStore(), productionGate, origin)
     const preview = previewOf([selected(fileA)])
-    const first = await runtime.create(user, preview, preview.fingerprint)
+    const first = await runtime.create(user, preview, claimOf(preview))
     expect(first.record.state).toBe('CONFIRM_REQUIRED')
     expect(first.record.requestSent).toBe(false)
     expect(fetcher).not.toHaveBeenCalled()
     const single = previewOf([selected(fileA)], { ...rules(), policies: [{ ...rules().policies[0]!, sendMode: 'single_file' }] })
-    expect((await runtime.create(user, single, single.fingerprint)).blockers.join('')).toContain('mailstyle')
+    expect((await runtime.create(user, single, claimOf(single))).blockers.join('')).toContain('mailstyle')
   })
 
   it('keeps an unknown create from being sent again', async () => {
@@ -139,10 +142,10 @@ describe('创建契约', () => {
     }
     const runtime = new MailExecutionRuntime(new EasyTransport(origin, { fetcher }), new MemoryExecutionStore(), openGate, origin)
     const preview = previewOf([selected(fileA)])
-    const created = await runtime.create(user, preview, preview.fingerprint)
+    const created = await runtime.create(user, preview, claimOf(preview))
     expect(created.record.state).toBe('UNKNOWN')
     expect(created.record.requestSent).toBe(true)
-    const again = await runtime.create(user, preview, preview.fingerprint)
+    const again = await runtime.create(user, preview, claimOf(preview))
     expect(again.record.executionId).toBe(created.record.executionId)
     expect(callsOf(bodies).filter(call => call === 'MailCustomer')).toHaveLength(1)
   })
@@ -160,17 +163,17 @@ describe('创建契约', () => {
     }
     const runtime = new MailExecutionRuntime(new EasyTransport(origin, { fetcher }), new MemoryExecutionStore(), openGate, origin)
     const preview = previewOf([selected(fileA)])
-    const created = await runtime.create(user, preview, preview.fingerprint)
+    const created = await runtime.create(user, preview, claimOf(preview))
     expect(created.record.state).toBe('FAILED')
     expect(created.record.mailId).toBe(mailId)
     expect(blocksAnotherCreate(created.record)).toBe(true)
-    await runtime.create(user, preview, preview.fingerprint)
+    await runtime.create(user, preview, claimOf(preview))
     expect(createCalls).toBe(1)
     const hanging: typeof fetch = (_url, init) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true })
     })
     const timed = new MailExecutionRuntime(new EasyTransport(origin, { fetcher: hanging, timeoutMs: 5 }), new MemoryExecutionStore(), openGate, origin)
-    const timeout = await timed.create(user, preview, preview.fingerprint)
+    const timeout = await timed.create(user, preview, claimOf(preview))
     expect(timeout.record.state).toBe('UNKNOWN')
     expect(timeout.record.requestSent).toBe(true)
   })
@@ -241,10 +244,10 @@ describe('邮件读取和保存', () => {
     const store = new MemoryExecutionStore()
     const runtime = new MailExecutionRuntime(new EasyTransport(origin, { fetcher }), store, openGate, origin)
     const preview = previewOf([selected(fileA)])
-    const created = await runtime.create(user, preview, preview.fingerprint)
+    const created = await runtime.create(user, preview, claimOf(preview))
     expect(created.record.state).toBe('MAIL_LOADED')
     expect(created.record.mailId).toBe(mailId)
-    const saved = await runtime.save(user, created.record.executionId, preview, preview.fingerprint)
+    const saved = await runtime.save(user, created.record.executionId, preview, claimOf(preview), created.record.diffDigest)
     expect(saved.record.state).toBe('COMPLETED')
     expect(saved.linkedFileIds).toEqual([fileA])
     expect(callsOf(bodies).filter(call => call === 'SaveMailRalteCaseFile')).toHaveLength(1)
@@ -277,12 +280,12 @@ describe('邮件读取和保存', () => {
         new MemoryExecutionStore(), mode === 'nobind' ? saveWithoutBind : openGate, origin
       )
       const preview = previewOf([selected(fileA)])
-      const created = await runtime.create(user, preview, preview.fingerprint)
-      const saved = await runtime.save(user, created.record.executionId, preview, preview.fingerprint)
+      const created = await runtime.create(user, preview, claimOf(preview))
+      const saved = await runtime.save(user, created.record.executionId, preview, claimOf(preview), created.record.diffDigest)
       expect(calls.filter(call => call === 'SaveMailRalteCaseFile')).toHaveLength(0)
       if (mode === 'fail') expect(saved.record.state).toBe('FAILED')
       if (mode === 'timeout') expect(saved.record.state).toBe('UNKNOWN')
-      if (mode === 'nobind') expect(saved.record.state).toBe('SAVED')
+      if (mode === 'nobind') expect(saved.record.state).toBe('BINDING_BLOCKED')
       expect(saved.record.mailId).toBe(mailId)
     }
   })
@@ -306,9 +309,9 @@ describe('邮件读取和保存', () => {
     }
     const runtime = new MailExecutionRuntime(new EasyTransport(origin, { fetcher }), new MemoryExecutionStore(), openGate, origin)
     const preview = previewOf([selected(fileA)])
-    const created = await runtime.create(user, preview, preview.fingerprint)
+    const created = await runtime.create(user, preview, claimOf(preview))
     expect(created.record.state).toBe('MAIL_LOADED')
-    const saved = await runtime.save(user, created.record.executionId, preview, preview.fingerprint)
+    const saved = await runtime.save(user, created.record.executionId, preview, claimOf(preview), created.record.diffDigest)
     expect(saved.record.state).toBe('PARTIAL_FAILURE')
     expect(saved.record.mailId).toBe(mailId)
   })
@@ -336,15 +339,16 @@ describe('邮件读取和保存', () => {
 describe('消息门禁', () => {
   it('rejects a create message that was not explicitly confirmed', () => {
     const preview = previewOf([selected(fileA)])
-    expect(isMessage({ type: 'CREATE_EASY_MAIL', payload: { preview, currentFingerprint: preview.fingerprint, confirmed: false } })).toBe(false)
-    expect(isMessage({ type: 'CREATE_EASY_MAIL', payload: { preview, currentFingerprint: preview.fingerprint, confirmed: true } })).toBe(true)
+    expect(isMessage({ type: 'CREATE_EASY_MAIL', payload: { preview, selection: claimOf(preview), confirmed: false } })).toBe(false)
+    expect(isMessage({ type: 'CREATE_EASY_MAIL', payload: { preview, currentFingerprint: preview.fingerprint, confirmed: true } })).toBe(false)
+    expect(isMessage({ type: 'CREATE_EASY_MAIL', payload: { preview, selection: claimOf(preview), confirmed: true } })).toBe(true)
   })
 
   it('does not create mail from the runtime when the session is absent', async () => {
     const fetcher = vi.fn<typeof fetch>(async () => json({ ClientInfo: { IsLogin: false, Status: false, Result: false } }))
     const runtime = new EasyRuntime(origin, { fetcher, mailStore: new MemoryExecutionStore(), mailGate: openGate })
     const preview = previewOf([selected(fileA)])
-    const result = await runtime.createEasyMail(preview, preview.fingerprint)
+    const result = await runtime.createEasyMail(preview, claimOf(preview))
     expect(result.record.requestSent).toBe(false)
     expect(result.record.state).toBe('FAILED')
     expect(fetcher.mock.calls.some(call => String(call[1]?.body).includes('MailCustomer'))).toBe(false)

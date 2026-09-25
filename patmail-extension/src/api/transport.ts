@@ -6,6 +6,7 @@ export type EasyOperation =
   | 'basicData' | 'flowDirection' | 'fileTypeTree' | 'fieldColumn' | 'listColumn' | 'mailType'
   | 'mailCustomer' | 'mailInfoInit' | 'getMailInfo' | 'getMailFile' | 'getMailCase'
   | 'getMailRule' | 'getCustomerContact' | 'getSignature' | 'saveMailInfo' | 'saveMailRelatedFiles'
+  | 'getFlowInfo' | 'getFlowHistory' | 'getUrgencyList' | 'getFlowSubmit' | 'getFlowLastStatus'
 
 export interface TransportOptions {
   fetcher?: typeof fetch
@@ -31,7 +32,12 @@ const ROUTES: Record<EasyOperation, { path: string; call: string }> = {
   getCustomerContact: { path: '/AjaxServers/Mail.ashx', call: 'GetCustomerContact' },
   getSignature: { path: '/AjaxServers/Mail.ashx', call: 'GetSignature' },
   saveMailInfo: { path: '/AjaxServers/Mail.ashx', call: 'SaveMailInfo' },
-  saveMailRelatedFiles: { path: '/AjaxServers/Mail.ashx', call: 'SaveMailRalteCaseFile' }
+  saveMailRelatedFiles: { path: '/AjaxServers/Mail.ashx', call: 'SaveMailRalteCaseFile' },
+  getFlowInfo: { path: '/AjaxServers/Common.ashx', call: 'GetFlowInfo' },
+  getFlowHistory: { path: '/AjaxServers/Common.ashx', call: 'GetFlowHistory' },
+  getUrgencyList: { path: '/AjaxServers/Common.ashx', call: 'GetUrgencyList' },
+  getFlowSubmit: { path: '/AjaxServers/Common.ashx', call: 'GetFlowSubmit' },
+  getFlowLastStatus: { path: '/AjaxServers/Common.ashx', call: 'GetFlowLastStatus' }
 }
 
 function loginRedirect(response: Response, origin: string): boolean {

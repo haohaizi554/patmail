@@ -7,9 +7,12 @@ import type { FileSearchResult } from '../api/file-search-types'
 import type { HistoryQueryDetail, HistoryQueryOption } from '../api/query-history'
 import type { SessionSummary } from '../api/session'
 import type { ApiResult } from '../api/types'
-import { isMailDraftPreview, isMailExecutionView } from '../mail/easy/guards'
+import { isMailDraftPreview, isMailExecutionView, isSelectionClaim } from '../mail/easy/guards'
+import type { SelectionClaim } from '../mail/easy/runtime'
 import type { MailDraftPreview } from '../mail/types'
 import type { MailExecutionView } from '../mail/easy/types'
+import { isWorkflowView } from '../workflow/guards'
+import type { WorkflowView } from '../workflow/types'
 
 /** 所有通道共享的 JSON 消息信封；具体消息使用下方的可辨识联合类型。 */
 export interface Message<TPayload = unknown> {
@@ -45,6 +48,10 @@ export const MessageType = {
   FindMailExecution: 'FIND_MAIL_EXECUTION',
   InspectEasyMail: 'INSPECT_EASY_MAIL',
   MailExecutionResult: 'MAIL_EXECUTION_RESULT',
+  ReadWorkflow: 'READ_WORKFLOW',
+  RefreshWorkflow: 'REFRESH_WORKFLOW',
+  PreviewWorkflow: 'PREVIEW_WORKFLOW',
+  WorkflowResult: 'WORKFLOW_RESULT',
   Error: 'ERROR'
 } as const
 
@@ -58,10 +65,13 @@ export type ContentRequest =
   | Response<'LIST_HISTORY_QUERIES', { force: boolean }>
   | Response<'GET_HISTORY_QUERY', { queryId: string }>
   | Response<'LOAD_DICTIONARY', DictionaryLoadRequest>
-  | Response<'CREATE_EASY_MAIL', { preview: MailDraftPreview; currentFingerprint: string; confirmed: true }>
-  | Response<'SAVE_EASY_MAIL', { executionId: string; preview: MailDraftPreview; currentFingerprint: string; confirmed: true }>
+  | Response<'CREATE_EASY_MAIL', { preview: MailDraftPreview; selection: SelectionClaim; confirmed: true }>
+  | Response<'SAVE_EASY_MAIL', { executionId: string; preview: MailDraftPreview; selection: SelectionClaim; acknowledgedDigest: string; confirmed: true }>
   | Response<'FIND_MAIL_EXECUTION', { fingerprint: string }>
   | Response<'INSPECT_EASY_MAIL', { executionId: string }>
+  | Response<'READ_WORKFLOW', { mailId: string; flowType: string }>
+  | Response<'REFRESH_WORKFLOW', { executionId: string }>
+  | Response<'PREVIEW_WORKFLOW', { executionId: string; nodeId: string; reviewerId: string; auditType: 'submit' | 'handover'; remark: string; urgencyId: string }>
 export type ErrorMessage = Response<'ERROR', { message: string }>
 export type BackgroundRequest = Request<'PING'>
 export type BackgroundResponse = Response<'PONG', { ok: true }> | ErrorMessage
@@ -77,6 +87,7 @@ export type ContentResponse =
   | Response<'HISTORY_QUERY_RESULT', ApiResult<HistoryQueryDetail>>
   | Response<'DICTIONARY_RESULT', ApiResult<DictionarySnapshot>>
   | Response<'MAIL_EXECUTION_RESULT', { view: MailExecutionView | null }>
+  | Response<'WORKFLOW_RESULT', { view: WorkflowView }>
   | BackgroundResponse
 export type AppMessage = ContentRequest | ContentResponse
 
@@ -103,8 +114,17 @@ export function isMessage(value: unknown): value is AppMessage {
       return isConfirmedPreview(value.payload) && Object.keys(value.payload).length === 3
     case MessageType.SaveEasyMail:
       return isRecord(value.payload) && value.payload.confirmed === true && typeof value.payload.executionId === 'string' &&
-        typeof value.payload.currentFingerprint === 'string' && isMailDraftPreview(value.payload.preview) &&
-        Object.keys(value.payload).length === 4
+        isSelectionClaim(value.payload.selection) && typeof value.payload.acknowledgedDigest === 'string' &&
+        value.payload.acknowledgedDigest.length <= 20000 && isMailDraftPreview(value.payload.preview) &&
+        Object.keys(value.payload).length === 5
+    case MessageType.ReadWorkflow:
+      return isRecord(value.payload) && isFlowId(value.payload.mailId) && isFlowType(value.payload.flowType) &&
+        Object.keys(value.payload).length === 2
+    case MessageType.RefreshWorkflow:
+      return isRecord(value.payload) && typeof value.payload.executionId === 'string' && value.payload.executionId.length <= 80 &&
+        Object.keys(value.payload).length === 1
+    case MessageType.PreviewWorkflow:
+      return isWorkflowPreview(value.payload)
     case MessageType.FindMailExecution:
       return isRecord(value.payload) && typeof value.payload.fingerprint === 'string' && value.payload.fingerprint.length <= 20000 &&
         Object.keys(value.payload).length === 1
@@ -135,6 +155,8 @@ export function isMessage(value: unknown): value is AppMessage {
     case MessageType.MailExecutionResult:
       return isRecord(value.payload) && Object.keys(value.payload).length === 1 &&
         (value.payload.view === null || isMailExecutionView(value.payload.view))
+    case MessageType.WorkflowResult:
+      return isRecord(value.payload) && Object.keys(value.payload).length === 1 && isWorkflowView(value.payload.view)
     case MessageType.Error:
       return isRecord(value.payload) && typeof value.payload.message === 'string'
     default:
@@ -151,13 +173,28 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.ListHistoryQueries || value.type === MessageType.GetHistoryQuery ||
     value.type === MessageType.LoadDictionary || value.type === MessageType.CreateEasyMail ||
     value.type === MessageType.SaveEasyMail || value.type === MessageType.FindMailExecution ||
-    value.type === MessageType.InspectEasyMail
+    value.type === MessageType.InspectEasyMail || value.type === MessageType.ReadWorkflow ||
+    value.type === MessageType.RefreshWorkflow || value.type === MessageType.PreviewWorkflow
   )
 }
 
-function isConfirmedPreview(value: unknown): value is { preview: MailDraftPreview; currentFingerprint: string; confirmed: true } {
-  return isRecord(value) && value.confirmed === true && typeof value.currentFingerprint === 'string' &&
-    value.currentFingerprint.length <= 20000 && isMailDraftPreview(value.preview)
+function isConfirmedPreview(value: unknown): value is { preview: MailDraftPreview; selection: SelectionClaim; confirmed: true } {
+  return isRecord(value) && value.confirmed === true && isSelectionClaim(value.selection) && isMailDraftPreview(value.preview)
+}
+
+function isFlowId(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+}
+
+function isFlowType(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 20 && /^[A-Za-z0-9_-]+$/.test(value)
+}
+
+function isWorkflowPreview(value: unknown): value is { executionId: string; nodeId: string; reviewerId: string; auditType: 'submit' | 'handover'; remark: string; urgencyId: string } {
+  if (!isRecord(value) || Object.keys(value).length !== 6) return false
+  return typeof value.executionId === 'string' && typeof value.nodeId === 'string' && typeof value.reviewerId === 'string' &&
+    (value.auditType === 'submit' || value.auditType === 'handover') && typeof value.remark === 'string' && value.remark.length <= 2000 &&
+    typeof value.urgencyId === 'string' && value.nodeId.length <= 80 && value.reviewerId.length <= 80 && value.urgencyId.length <= 80
 }
 
 const DICTIONARY_KINDS = new Set(['basic', 'flow', 'fieldColumn', 'listColumn', 'fileType', 'mailType'])

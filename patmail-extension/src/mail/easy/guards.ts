@@ -1,5 +1,6 @@
 import { isRecord } from '../../shared/guards'
 import type { MailDraftPreview, SelectedPatentFile } from '../types'
+import type { SelectionClaim } from './runtime'
 import type { FieldDiff, MailExecutionRecord, MailExecutionView } from './types'
 
 const SEND = new Set(['merge_by_customer_description', 'single_file'])
@@ -7,7 +8,7 @@ const DRAFT_STATUS = new Set(['ready', 'warning', 'blocked'])
 const STATES = new Set([
   'PREVIEW_READY', 'CONFIRM_REQUIRED', 'CREATING', 'CREATED', 'LOADING_MAIL', 'MAIL_LOADED',
   'SAVE_CONFIRM_REQUIRED', 'SAVING', 'SAVED', 'BINDING_FILES', 'VERIFYING',
-  'COMPLETED', 'PARTIAL_FAILURE', 'UNKNOWN', 'FAILED'
+  'COMPLETED', 'PARTIAL_FAILURE', 'BINDING_BLOCKED', 'UNKNOWN', 'FAILED'
 ])
 
 function strings(value: unknown, limit: number): value is string[] {
@@ -16,8 +17,19 @@ function strings(value: unknown, limit: number): value is string[] {
 
 function isSelectedFile(value: unknown): value is SelectedPatentFile {
   if (!isRecord(value)) return false
-  return typeof value.fileId === 'string' && typeof value.fileName === 'string' &&
-    typeof value.fileDescription === 'string' && typeof value.customerName === 'string'
+  if (typeof value.fileId !== 'string' || typeof value.fileName !== 'string') return false
+  if (typeof value.fileDescription !== 'string' || typeof value.customerName !== 'string') return false
+  if (value.customerBinding === undefined) return true
+  if (!isRecord(value.customerBinding)) return false
+  return typeof value.customerBinding.profileId === 'string' && typeof value.customerBinding.profileName === 'string' &&
+    typeof value.customerBinding.sourceCustomerName === 'string' && typeof value.customerBinding.confirmed === 'boolean' &&
+    value.customerBinding.source === 'explicit'
+}
+
+export function isSelectionClaim(value: unknown): value is SelectionClaim {
+  return isRecord(value) && Number.isSafeInteger(value.revision) && Number(value.revision) >= 0 &&
+    Array.isArray(value.files) && value.files.length > 0 && value.files.length <= 50 && value.files.every(isSelectedFile) &&
+    Object.keys(value).length === 2
 }
 
 export function isMailDraftPreview(value: unknown): value is MailDraftPreview {
@@ -46,7 +58,7 @@ function isExecutionRecord(value: unknown): value is MailExecutionRecord {
     typeof value.customerProfileId === 'string' && strings(value.fileIds, 50) && typeof value.mailTypeId === 'string' &&
     typeof value.ruleRevision === 'number' && typeof value.fingerprint === 'string' && typeof value.mailId === 'string' &&
     typeof value.stage === 'string' && typeof value.lastError === 'string' && typeof value.requestSent === 'boolean' &&
-    typeof value.updatedAt === 'string'
+    typeof value.diffDigest === 'string' && typeof value.updatedAt === 'string'
 }
 
 function isDiff(value: unknown): value is FieldDiff {

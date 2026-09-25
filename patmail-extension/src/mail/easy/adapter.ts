@@ -3,6 +3,10 @@ import type { MailDraftPreview } from '../types'
 import { SAVE_KEYS, filesMatch, formatRecipientList } from './contracts'
 import type { EasyMailDraft, EasyMailSnapshot, FieldDiff, KnownValue } from './types'
 
+export function diffDigest(diffs: FieldDiff[]): string {
+  return diffs.map(item => [item.field, item.easyValue, item.planValue, item.saveValue, item.source, item.blocksSave ? '1' : '0'].join('\u001f')).join('\u001e')
+}
+
 function text(value: KnownValue): string {
   return value.state === 'known' ? value.value ?? '' : ''
 }

@@ -3,13 +3,13 @@ import type { MailDraftPreview } from '../types'
 export type MailExecutionState =
   | 'PREVIEW_READY' | 'CONFIRM_REQUIRED' | 'CREATING' | 'CREATED' | 'LOADING_MAIL' | 'MAIL_LOADED'
   | 'SAVE_CONFIRM_REQUIRED' | 'SAVING' | 'SAVED' | 'BINDING_FILES' | 'VERIFYING'
-  | 'COMPLETED' | 'PARTIAL_FAILURE' | 'UNKNOWN' | 'FAILED'
+  | 'COMPLETED' | 'PARTIAL_FAILURE' | 'BINDING_BLOCKED' | 'UNKNOWN' | 'FAILED'
 
 export type MailExecutionEvent =
   | 'REQUEST_CONFIRM' | 'CONFIRM_CREATE' | 'CREATE_SUCCEEDED' | 'CREATE_FAILED' | 'CREATE_UNKNOWN'
   | 'LOAD_STARTED' | 'MAIL_LOADED' | 'LOAD_FAILED'
   | 'REQUEST_SAVE' | 'CONFIRM_SAVE' | 'SAVE_SUCCEEDED' | 'SAVE_FAILED' | 'SAVE_UNKNOWN'
-  | 'BIND_STARTED' | 'BIND_SUCCEEDED' | 'BIND_FAILED'
+  | 'BIND_STARTED' | 'BIND_SUCCEEDED' | 'BIND_FAILED' | 'BIND_BLOCKED' | 'REVIEW_DIFFS'
   | 'VERIFIED' | 'VERIFY_MISMATCH'
 
 export interface KnownValue {
@@ -112,6 +112,8 @@ export interface MailExecutionRecord {
   stage: string
   lastError: string
   requestSent: boolean
+  /** 用户确认保存时必须带回的差异摘要。空字符串表示还没有可展示的差异。 */
+  diffDigest: string
   updatedAt: string
 }
 

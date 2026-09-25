@@ -40,16 +40,22 @@ const bridge: MessageBridge = {
           payload: await easyRuntime.loadDictionary(message.payload, signal) }
       case MessageType.CreateEasyMail:
         return { type: MessageType.MailExecutionResult, payload: {
-          view: message.payload.confirmed ? await easyRuntime.createEasyMail(message.payload.preview, message.payload.currentFingerprint) : null
+          view: message.payload.confirmed ? await easyRuntime.createEasyMail(message.payload.preview, message.payload.selection) : null
         } }
       case MessageType.SaveEasyMail:
         return { type: MessageType.MailExecutionResult, payload: {
-          view: message.payload.confirmed ? await easyRuntime.saveEasyMail(message.payload.executionId, message.payload.preview, message.payload.currentFingerprint) : null
+          view: message.payload.confirmed ? await easyRuntime.saveEasyMail(message.payload.executionId, message.payload.preview, message.payload.selection, message.payload.acknowledgedDigest) : null
         } }
       case MessageType.FindMailExecution:
         return { type: MessageType.MailExecutionResult, payload: { view: await easyRuntime.findMailExecution(message.payload.fingerprint) } }
       case MessageType.InspectEasyMail:
         return { type: MessageType.MailExecutionResult, payload: { view: await easyRuntime.inspectEasyMail(message.payload.executionId) } }
+      case MessageType.ReadWorkflow:
+        return { type: MessageType.WorkflowResult, payload: { view: await easyRuntime.readWorkflow(message.payload.mailId, message.payload.flowType) } }
+      case MessageType.RefreshWorkflow:
+        return { type: MessageType.WorkflowResult, payload: { view: await easyRuntime.refreshWorkflow(message.payload.executionId) } }
+      case MessageType.PreviewWorkflow:
+        return { type: MessageType.WorkflowResult, payload: { view: await easyRuntime.previewWorkflow(message.payload.executionId, message.payload) } }
       case MessageType.CancelFileSearch:
         easyRuntime.cancelFileSearch()
         return { type: MessageType.FileSearchCancelled, payload: { ok: true } }

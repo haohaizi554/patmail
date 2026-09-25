@@ -2,7 +2,9 @@ import type { EasyTransport } from '../../api/transport'
 import type { MailDraftPreview } from '../types'
 import { filesMatch } from './contracts'
 import { assessCreate, EasyMailCreateService } from './create-service'
-import { adaptMailDraft } from './adapter'
+import { adaptMailDraft, diffDigest } from './adapter'
+import { selectionFingerprint } from '../fingerprint'
+import type { SelectedPatentFile } from '../types'
 import type { MailWriteGate } from './gate'
 import { EasyMailReadService } from './read-service'
 import { EasyMailSaveService } from './save-service'
@@ -12,6 +14,29 @@ import type { FieldDiff, MailExecutionEvent, MailExecutionRecord, MailExecutionV
 
 function now(): string {
   return new Date().toISOString()
+}
+
+export interface SelectionClaim {
+  files: SelectedPatentFile[]
+  revision: number
+}
+
+function fileIdentity(file: SelectedPatentFile): string {
+  return [
+    file.fileId.trim(), file.fileName, file.fileDescription.trim(), file.fileDescriptionId ?? '',
+    file.customerName.trim(), file.customerProfileId ?? '',
+    file.customerBinding?.confirmed ? '1' : '0', file.customerBinding?.profileId ?? '',
+    file.customerBinding?.sourceCustomerName.trim() ?? ''
+  ].join('\u001f')
+}
+
+/** 用当前用户、站点和调用方给出的选择集重新计算，不采信调用方自带的指纹字符串。 */
+export function matchesClaim(origin: string, userId: string, preview: MailDraftPreview, claim: SelectionClaim): boolean {
+  if (!Number.isSafeInteger(claim.revision) || claim.revision < 0 || preview.files.length === 0) return false
+  const claimed = selectionFingerprint({ files: claim.files, revision: claim.revision, userId, origin })
+  if (claimed !== preview.fingerprint) return false
+  const keys = new Set(claim.files.map(fileIdentity))
+  return preview.files.every(file => keys.has(fileIdentity(file)))
 }
 
 function move(record: MailExecutionRecord, event: MailExecutionEvent, patch: Partial<MailExecutionRecord> = {}): MailExecutionRecord | null {
@@ -43,14 +68,18 @@ export class MailExecutionRuntime {
     return found ? this.view(found) : null
   }
 
-  async create(userId: string, preview: MailDraftPreview, currentFingerprint: string): Promise<MailExecutionView> {
-    if (!preview.fingerprint.startsWith(`${this.origin}\u001e${userId}\u001e`) || preview.fingerprint !== currentFingerprint) {
-      return this.refused(userId, preview, '预览和当前用户或站点不一致，不能创建。')
+  async create(userId: string, preview: MailDraftPreview, claim: SelectionClaim): Promise<MailExecutionView> {
+    if (!matchesClaim(this.origin, userId, preview, claim)) {
+      return this.refused(userId, preview, '按当前选择、规则、用户和站点重算后，预览已失效。')
     }
+    return this.store.exclusive(this.origin, userId, preview.fingerprint, () => this.createLocked(userId, preview))
+  }
+
+  private async createLocked(userId: string, preview: MailDraftPreview): Promise<MailExecutionView> {
     const records = await this.store.load(this.origin, userId)
     const blocking = records.find(item => item.fingerprint === preview.fingerprint && blocksAnotherCreate(item))
     if (blocking) return this.view(blocking, ['已有创建记录，不能再次创建同一预览。'])
-    const assessment = assessCreate(preview, this.gate, currentFingerprint)
+    const assessment = assessCreate(preview, this.gate)
     let record = this.blank(userId, preview)
     record = move(record, 'REQUEST_CONFIRM') ?? record
     if (!assessment.ok) {
@@ -71,15 +100,25 @@ export class MailExecutionRuntime {
     }
     record = move(record, 'CREATE_SUCCEEDED', { mailId: created.data.mailId, lastError: '' }) ?? record
     await this.persist(userId, records, record)
-    return this.loadInto(userId, records, record)
+    return this.loadInto(userId, records, record, preview)
   }
 
-  async save(userId: string, executionId: string, preview: MailDraftPreview, currentFingerprint: string): Promise<MailExecutionView> {
+  async save(userId: string, executionId: string, preview: MailDraftPreview, claim: SelectionClaim, acknowledgedDigest: string): Promise<MailExecutionView> {
+    if (!matchesClaim(this.origin, userId, preview, claim)) {
+      return this.refused(userId, preview, '按当前选择、规则、用户和站点重算后，预览已失效。')
+    }
+    return this.store.exclusive(this.origin, userId, preview.fingerprint, () => this.saveLocked(userId, executionId, preview, acknowledgedDigest))
+  }
+
+  private async saveLocked(userId: string, executionId: string, preview: MailDraftPreview, acknowledgedDigest: string): Promise<MailExecutionView> {
     const records = await this.store.load(this.origin, userId)
     const current = records.find(item => item.executionId === executionId && item.userId === userId && item.origin === this.origin)
     if (!current) return this.refused(userId, preview, '没有可保存的邮件执行记录。')
-    if (current.fingerprint !== preview.fingerprint || current.fingerprint !== currentFingerprint) {
+    if (current.fingerprint !== preview.fingerprint) {
       return this.view({ ...current, lastError: '预览已失效，不能保存。' }, ['预览已失效，不能保存。'])
+    }
+    if (!current.diffDigest || current.diffDigest !== acknowledgedDigest) {
+      return this.view({ ...current, lastError: '还没有确认当前这份差异，不能保存。' }, ['还没有确认当前这份差异，不能保存。'])
     }
     if (this.gate.blockers(preview.sendMode).length > 0) {
       const message = this.gate.blockers(preview.sendMode).join('')
@@ -98,7 +137,14 @@ export class MailExecutionRuntime {
       return this.view(record, [loaded.message])
     }
     const draft = adaptMailDraft(preview, loaded.snapshot)
+    const digest = diffDigest(draft.diffs)
     this.details.set(record.executionId, { diffs: draft.diffs, linkedFileIds: loaded.snapshot.files.map(file => file.fileId) })
+    if (digest !== acknowledgedDigest) {
+      record = { ...record, diffDigest: digest, lastError: '重新读取后差异已变化，请再次查看后再保存。', updatedAt: now() }
+      if (record.state === 'SAVE_CONFIRM_REQUIRED') record = move(record, 'REVIEW_DIFFS', { diffDigest: digest, lastError: record.lastError }) ?? record
+      await this.persist(userId, records, record)
+      return this.view(record, ['重新读取后差异已变化，请再次查看后再保存。'])
+    }
     if (!draft.canSave) {
       record = { ...record, lastError: draft.blockers.join(''), updatedAt: now() }
       await this.persist(userId, records, record)
@@ -120,6 +166,11 @@ export class MailExecutionRuntime {
     return this.bindAndVerify(userId, records, record, preview.fileIds)
   }
 
+  async hasVerifiedMail(userId: string, mailId: string): Promise<boolean> {
+    const records = await this.store.load(this.origin, userId)
+    return records.some(item => item.mailId.toLowerCase() === mailId.toLowerCase() && item.state === 'COMPLETED')
+  }
+
   async inspect(userId: string, executionId: string): Promise<MailExecutionView | null> {
     const records = await this.store.load(this.origin, userId)
     const record = records.find(item => item.executionId === executionId)
@@ -133,7 +184,7 @@ export class MailExecutionRuntime {
     return this.view(record)
   }
 
-  private async loadInto(userId: string, records: MailExecutionRecord[], record: MailExecutionRecord): Promise<MailExecutionView> {
+  private async loadInto(userId: string, records: MailExecutionRecord[], record: MailExecutionRecord, preview: MailDraftPreview): Promise<MailExecutionView> {
     const loading = move(record, 'LOAD_STARTED')
     if (!loading) return this.view(record)
     record = loading
@@ -144,16 +195,18 @@ export class MailExecutionRuntime {
       await this.persist(userId, records, record)
       return this.view(record, [loaded.message])
     }
-    record = move(record, 'MAIL_LOADED', { lastError: '' }) ?? record
-    this.details.set(record.executionId, { diffs: [], linkedFileIds: loaded.snapshot.files.map(file => file.fileId) })
+    const draft = adaptMailDraft(preview, loaded.snapshot)
+    record = move(record, 'MAIL_LOADED', { lastError: '', diffDigest: diffDigest(draft.diffs) }) ?? record
+    this.details.set(record.executionId, { diffs: draft.diffs, linkedFileIds: loaded.snapshot.files.map(file => file.fileId) })
     await this.persist(userId, records, record)
     return this.view(record)
   }
 
   private async bindAndVerify(userId: string, records: MailExecutionRecord[], record: MailExecutionRecord, fileIds: string[]): Promise<MailExecutionView> {
     if (this.gate.relatedFileIds(fileIds) === null) {
-      const message = '邮件已保存。文件关联格式还没核对，没有调用 SaveMailRalteCaseFile。'
-      record = { ...record, lastError: message, updatedAt: now() }
+      const message = '邮件已保存，但文件关联格式还没核对，没有调用 SaveMailRalteCaseFile。这不是完整成功。'
+      const blocked = move(record, 'BIND_BLOCKED', { lastError: message })
+      record = blocked ?? { ...record, lastError: message, updatedAt: now() }
       await this.persist(userId, records, record)
       return this.view(record, [message])
     }
@@ -199,7 +252,7 @@ export class MailExecutionRuntime {
       fileIds: [...preview.fileIds], mailTypeId: preview.mailTypeId,
       ruleRevision: preview.ruleVersions.policy ?? 0, fingerprint: preview.fingerprint,
       state: 'PREVIEW_READY', mailId: '', stage: 'PREVIEW_READY', lastError: '',
-      requestSent: false, updatedAt: now()
+      requestSent: false, diffDigest: '', updatedAt: now()
     }
   }
 

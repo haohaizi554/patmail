@@ -2,10 +2,11 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { productionGate } from '../mail/easy/gate'
 import type { MailExecutionState, MailExecutionView } from '../mail/easy/types'
-import type { MailDraftPreview } from '../mail/types'
+import type { MailDraftPreview, SelectedPatentFile } from '../mail/types'
 import { MessageType, type MessageBridge } from '../shared/message'
 
-const props = defineProps<{ bridge?: MessageBridge; draft: MailDraftPreview }>()
+const props = defineProps<{ bridge?: MessageBridge; draft: MailDraftPreview; files: SelectedPatentFile[]; revision: number }>()
+const emit = defineEmits<{ changed: [view: MailExecutionView | null] }>()
 const view = ref<MailExecutionView | null>(null)
 const local = ref<'preview' | 'confirm-create' | 'confirm-save' | 'busy'>('preview')
 const panelMessage = ref('')
@@ -24,6 +25,7 @@ const stageLabels: Record<MailExecutionState, string> = {
   VERIFYING: '正在核对关联文件',
   COMPLETED: '已核对保存结果',
   PARTIAL_FAILURE: '部分完成，邮件已保留',
+  BINDING_BLOCKED: '邮件已保存，文件关联未执行，不是完整成功',
   UNKNOWN: '结果未知，不能自动重试',
   FAILED: '这一步失败'
 }
@@ -33,9 +35,10 @@ const stage = computed(() => view.value?.record.state ?? 'PREVIEW_READY')
 const stageLabel = computed(() => stageLabels[stage.value])
 const canAskCreate = computed(() => props.draft.status === 'ready' && gateReasons.value.length === 0 &&
   !view.value?.record.requestSent && stage.value !== 'UNKNOWN' && stage.value !== 'COMPLETED')
-const canAskSave = computed(() => stage.value === 'MAIL_LOADED' || stage.value === 'SAVE_CONFIRM_REQUIRED')
+const canAskSave = computed(() => (stage.value === 'MAIL_LOADED' || stage.value === 'SAVE_CONFIRM_REQUIRED') && (view.value?.diffs.length ?? 0) > 0)
 const canInspect = computed(() => Boolean(view.value?.record.mailId) && local.value !== 'busy')
 
+watch(view, value => emit('changed', value))
 watch(() => props.draft.fingerprint, () => { local.value = 'preview'; void loadExisting() })
 onMounted(() => { void loadExisting() })
 
@@ -51,7 +54,7 @@ async function createMail(): Promise<void> {
   panelMessage.value = ''
   const response = await props.bridge.request({
     type: MessageType.CreateEasyMail,
-    payload: { preview: props.draft, currentFingerprint: props.draft.fingerprint, confirmed: true }
+    payload: { preview: props.draft, selection: { files: props.files, revision: props.revision }, confirmed: true }
   })
   local.value = 'preview'
   if (response.type !== MessageType.MailExecutionResult || !response.payload.view) {
@@ -68,7 +71,7 @@ async function saveMail(): Promise<void> {
   panelMessage.value = ''
   const response = await props.bridge.request({
     type: MessageType.SaveEasyMail,
-    payload: { executionId: view.value.record.executionId, preview: props.draft, currentFingerprint: props.draft.fingerprint, confirmed: true }
+    payload: { executionId: view.value.record.executionId, preview: props.draft, selection: { files: props.files, revision: props.revision }, acknowledgedDigest: view.value.record.diffDigest, confirmed: true }
   })
   local.value = 'preview'
   if (response.type !== MessageType.MailExecutionResult || !response.payload.view) {
@@ -107,10 +110,11 @@ async function inspect(): Promise<void> {
     <p v-else-if="draft.status !== 'ready'" class="hint">草稿还没通过校验，不能创建。</p>
 
     <table v-if="view?.diffs.length" class="mail-diff">
-      <thead><tr><th>字段</th><th>EASY 原值</th><th>PatMail 计划</th><th>拟保存</th></tr></thead>
+      <thead><tr><th>字段</th><th>EASY 原值</th><th>PatMail 计划</th><th>拟保存</th><th>来源</th><th>阻塞</th></tr></thead>
       <tbody>
         <tr v-for="diff in view.diffs" :key="diff.field">
           <td>{{ diff.label }}</td><td>{{ diff.easyValue }}</td><td>{{ diff.planValue }}</td><td>{{ diff.saveValue }}</td>
+          <td>{{ diff.source }}</td><td>{{ diff.blocksSave ? '是' : '否' }}</td>
         </tr>
       </tbody>
     </table>

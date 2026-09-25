@@ -8,10 +8,15 @@ import type { FileSearchResult } from './file-search-types'
 import { normalizeFileSearch } from './file-search-normalizer'
 import { SessionService, type SessionStatus, type SessionSummary } from './session'
 import { productionGate, type MailWriteGate } from '../mail/easy/gate'
-import { MailExecutionRuntime } from '../mail/easy/runtime'
+import { MailExecutionRuntime, type SelectionClaim } from '../mail/easy/runtime'
 import { ExecutionStore, type ExecutionArea } from '../mail/easy/store'
 import type { MailExecutionView } from '../mail/easy/types'
 import type { MailDraftPreview } from '../mail/types'
+import { productionWorkflowGate } from '../workflow/gate'
+import { WorkflowRuntime } from '../workflow/runtime'
+import { WorkflowStore } from '../workflow/store'
+import type { WorkflowView } from '../workflow/types'
+import type { PlanInput } from '../workflow/planner'
 import { EasyTransport, type TransportOptions } from './transport'
 import { apiError, type ApiResult } from './types'
 
@@ -29,12 +34,23 @@ function chromeExecutionArea(): ExecutionArea | null {
   }
 }
 
+function refusedWorkflow(message: string): WorkflowView {
+  return {
+    record: {
+      executionId: '', mailId: '', flowId: '', currentNodeId: '', nextNodeId: '', reviewerId: '',
+      status: 'BLOCKED', versionToken: '', submittedAt: '', lastVerifiedAt: '', lastError: message,
+      requestSent: false, userId: '', origin: ''
+    },
+    snapshot: null, plan: null, blockers: [message]
+  }
+}
+
 function refusedMailView(preview: MailDraftPreview, message: string, executionId = ''): MailExecutionView {
   return {
     record: {
       executionId, userId: '', origin: '', customerProfileId: preview.customerProfileId, fileIds: [...preview.fileIds],
       mailTypeId: preview.mailTypeId, ruleRevision: 0, fingerprint: preview.fingerprint, state: 'FAILED',
-      mailId: '', stage: 'FAILED', lastError: message, requestSent: false, updatedAt: new Date().toISOString()
+      mailId: '', stage: 'FAILED', lastError: message, requestSent: false, diffDigest: '', updatedAt: new Date().toISOString()
     },
     diffs: [], linkedFileIds: [], blockers: [message]
   }
@@ -52,6 +68,7 @@ export class EasyRuntime {
   private historyUserKey = ''
   private listColsel: string | null = null
   private readonly mail: MailExecutionRuntime
+  private readonly workflow: WorkflowRuntime
 
   constructor(pageOrigin: string, options: RuntimeOptions = {}) {
     this.transport = new EasyTransport(pageOrigin, options)
@@ -63,6 +80,13 @@ export class EasyRuntime {
       options.mailStore ?? new ExecutionStore(chromeExecutionArea()),
       options.mailGate ?? productionGate,
       pageOrigin
+    )
+    this.workflow = new WorkflowRuntime(
+      this.transport,
+      new WorkflowStore(chromeExecutionArea()),
+      productionWorkflowGate,
+      pageOrigin,
+      (userId, mailId) => this.mail.hasVerifiedMail(userId, mailId)
     )
   }
 
@@ -177,20 +201,34 @@ export class EasyRuntime {
     return this.mailUser().then(user => user.ok ? this.mail.find(user.userId, fingerprint) : null)
   }
 
-  createEasyMail(preview: MailDraftPreview, currentFingerprint: string): Promise<MailExecutionView> {
+  createEasyMail(preview: MailDraftPreview, claim: SelectionClaim): Promise<MailExecutionView> {
     return this.mailUser().then(user => user.ok
-      ? this.mail.create(user.userId, preview, currentFingerprint)
+      ? this.mail.create(user.userId, preview, claim)
       : refusedMailView(preview, user.message))
   }
 
-  saveEasyMail(executionId: string, preview: MailDraftPreview, currentFingerprint: string): Promise<MailExecutionView> {
+  saveEasyMail(executionId: string, preview: MailDraftPreview, claim: SelectionClaim, acknowledgedDigest: string): Promise<MailExecutionView> {
     return this.mailUser().then(user => user.ok
-      ? this.mail.save(user.userId, executionId, preview, currentFingerprint)
+      ? this.mail.save(user.userId, executionId, preview, claim, acknowledgedDigest)
       : refusedMailView(preview, user.message, executionId))
   }
 
   inspectEasyMail(executionId: string): Promise<MailExecutionView | null> {
     return this.mailUser().then(user => user.ok ? this.mail.inspect(user.userId, executionId) : null)
+  }
+
+  readWorkflow(mailId: string, flowType: string): Promise<WorkflowView> {
+    return this.mailUser().then(user => user.ok ? this.workflow.read(user.userId, mailId, flowType) : refusedWorkflow(user.message))
+  }
+
+  refreshWorkflow(executionId: string): Promise<WorkflowView> {
+    return this.mailUser().then(user => user.ok ? this.workflow.refresh(user.userId, executionId) : refusedWorkflow(user.message))
+  }
+
+  previewWorkflow(executionId: string, input: Omit<PlanInput, 'currentUserId' | 'pageFields'>): Promise<WorkflowView> {
+    return this.mailUser().then(user => user.ok
+      ? this.workflow.preview(user.userId, executionId, { ...input, currentUserId: user.userId, pageFields: null })
+      : refusedWorkflow(user.message))
   }
 
   cancelFileSearch(): void {
