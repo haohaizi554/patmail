@@ -2,6 +2,14 @@ export type SendMode = 'merge_by_customer_description' | 'single_file'
 export type DraftStatus = 'ready' | 'warning' | 'blocked'
 export type IssueSeverity = 'warning' | 'error'
 
+export interface CustomerBinding {
+  profileId: string
+  profileName: string
+  sourceCustomerName: string
+  confirmed: boolean
+  source: 'explicit'
+}
+
 export interface SelectedPatentFile {
   fileId: string
   fileName: string
@@ -10,6 +18,7 @@ export interface SelectedPatentFile {
   customerName: string
   customerId?: string
   customerProfileId?: string
+  customerBinding?: CustomerBinding
   caseId?: string
   caseVolume?: string
   applicationNo?: string
@@ -19,6 +28,9 @@ export interface SelectionSnapshot {
   selectedAt: string
   files: SelectedPatentFile[]
   configVersion: number
+  userId: string
+  origin: string
+  fingerprint: string
 }
 
 export interface CustomerMailPolicy {
@@ -127,6 +139,7 @@ export interface MailDraftPreview {
   status: DraftStatus
   issues: ValidationIssue[]
   ruleVersions: Record<string, number>
+  fingerprint: string
 }
 
 export interface MailTypeNode {

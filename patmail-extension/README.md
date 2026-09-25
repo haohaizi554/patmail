@@ -106,4 +106,4 @@ patmail-extension/
 
 浮窗 DOM/CSS 在独立 ShadowRoot 内，宿主以手动 Popover 放入顶层，避免目标页面 `transform`、`filter` 等影响固定定位。消息在扩展上下文中传递，Background Service Worker 负责连通性响应；没有向网页全局变量暴露消息总线。
 
-只读 Call 现为 `GetUserModel`、`GetSearchFiles`、`SearchQueryHisList`、`IPGetBasicData`、`GetFlowdirection`、`LoadFileTypeByCaseType`、`GetFieldColumn`、`LoadListColumn` 和 `LoadMailType`。没有任意 Call 入口，也不调用保存、删除、发文或下载。查询模板和客户配置写在 `chrome.storage.local`。发文规则单独保存；没有稳定用户 GUID 时不写入，也不会套用其他账号的规则。见 [Phase 2.4 报告](docs/phase2-4-report.md)。2026-09-24 已核对登录态和手工文件查询。历史模板、字典树、发文类型和草稿规划尚未在真实 EASY 会话里点过。审批、下载和真实发文未实现。
+查询仍只调用 `GetUserModel`、`GetSearchFiles`、`SearchQueryHisList`、`IPGetBasicData`、`GetFlowdirection`、`LoadFileTypeByCaseType`、`GetFieldColumn`、`LoadListColumn` 和 `LoadMailType`。Phase 2.5 另把邮件读取和 `MailCustomer`、`SaveMailInfo`、`SaveMailRalteCaseFile` 放进同一白名单；真实写操作默认关闭，页面消息不能打开它。没有任意 Call 入口，也不调用流程提交、发送、删除或下载。查询模板和客户配置写在 `chrome.storage.local`。发文规则和执行记录按用户 GUID 分开保存。见 [Phase 2.5 报告](docs/phase2-5-report.md)。2026-09-24 已核对登录态和手工文件查询。历史模板、字典树、发文类型、草稿规划和真实创建保存尚未在真实 EASY 会话里点过。

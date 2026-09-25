@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { CustomerQueryProfile } from '../customer/types'
-import { planDrafts, type MailDraftPreview, type MailRuleBundle, type SelectedPatentFile, MailRuleRepository, emptyMailRules } from '../mail'
+import { planDrafts, selectionFingerprint, upsertMapping, type MailDraftPreview, type MailRuleBundle, type SelectedPatentFile, MailRuleRepository, emptyMailRules } from '../mail'
+import MailExecutionPanel from './MailExecutionPanel.vue'
 import { ChromeBundleRepository, storageKey } from '../storage/query-bundle'
 import { MessageType, type MessageBridge } from '../shared/message'
 
@@ -17,6 +18,7 @@ const policyCustomer = ref('')
 const policyMode = ref<'merge_by_customer_description' | 'single_file'>('merge_by_customer_description')
 const mapText = ref('')
 const mapTypeId = ref('')
+const editingMapId = ref('')
 const recipientCustomer = ref('')
 const recipientTo = ref('')
 const recipientCc = ref('')
@@ -88,20 +90,26 @@ async function importRules(): Promise<void> {
 }
 function preview(): void {
   if (!bundle.value) return
+  const files = props.files.map(file => ({ ...file, ...(file.customerBinding ? { customerBinding: { ...file.customerBinding } } : {}) }))
+  const fingerprint = selectionFingerprint({ files, revision: bundle.value.revision, userId: owner.value, origin: location.origin })
   drafts.value = planDrafts({
     selectedAt: new Date().toISOString(),
-    files: props.files.map(file => ({ ...file })),
-    configVersion: bundle.value.revision
+    files,
+    configVersion: bundle.value.revision,
+    userId: owner.value,
+    origin: location.origin,
+    fingerprint
   }, bundle.value, customers.value, owner.value)
 }
 
 watch(() => props.userId, () => { void reloadCustomers(); void reloadRules() }, { immediate: true })
+watch(() => props.files, () => { drafts.value = [] }, { deep: true })
 </script>
 
 <template>
   <section class="card query-template" aria-label="发文规则">
     <strong>发文规则</strong>
-    <p class="hint">配置归属：{{ scopeLabel }}。这里只生成 PatMail 本地草稿，不会在 EASY 创建或发送邮件。</p>
+    <p class="hint">配置归属：{{ scopeLabel }}。本地预览不是 EASY 邮件。选择或规则变化后需要重新生成，旧预览不能拿去创建。</p>
     <p v-if="message" class="hint">{{ message }}</p>
     <label>客户发文方式
       <select v-model="policyCustomer">
@@ -132,8 +140,23 @@ watch(() => props.userId, () => { void reloadCustomers(); void reloadRules() }, 
     <button type="button" class="text-button" @click="save(draft => {
       const mailType = mailTypes.find(item => item.id === mapTypeId)
       if (!mapText.trim() || !mailType) return
-      draft.mappings.push({ id: newId('map'), fileDescriptionText: mapText.trim(), mailTypeId: mailType.id, mailTypeName: mailType.name, enabled: true, version: 1, updatedAt: new Date().toISOString() })
+      const result = upsertMapping(draft.mappings, { id: editingMapId || newId('map'), fileDescriptionText: mapText.trim(), mailTypeId: mailType.id, mailTypeName: mailType.name, enabled: true, version: 1, updatedAt: new Date().toISOString() })
+      if (!result.ok) throw new Error(result.message)
+      draft.mappings = result.mappings
+      editingMapId = ''
     })">保存描述映射</button>
+    <article v-for="item in bundle.mappings" :key="item.id" class="file-card">
+      <p class="hint">{{ item.fileDescriptionId || item.fileDescriptionText }} → {{ item.mailTypeName }}（{{ item.enabled ? '启用' : '禁用' }}，版本 {{ item.version }}）</p>
+      <button type="button" class="text-button" @click="editingMapId = item.id; mapText = item.fileDescriptionText ?? ''; mapTypeId = item.mailTypeId">编辑</button>
+      <button type="button" class="text-button" @click="save(draft => {
+        const current = draft.mappings.find(mapping => mapping.id === item.id)
+        if (!current) return
+        const result = upsertMapping(draft.mappings, { ...current, enabled: !current.enabled })
+        if (!result.ok) throw new Error(result.message)
+        draft.mappings = result.mappings
+      })">{{ item.enabled ? '禁用' : '启用' }}</button>
+      <button type="button" class="text-button" @click="save(draft => { draft.mappings = draft.mappings.filter(mapping => mapping.id !== item.id) })">删除本地映射</button>
+    </article>
 
     <label>收件人客户
       <select v-model="recipientCustomer">
@@ -184,6 +207,7 @@ watch(() => props.userId, () => { void reloadCustomers(); void reloadRules() }, 
       <p v-if="draft.signature" class="hint">签名：{{ draft.signature }}</p>
       <p class="hint">规则来源 {{ JSON.stringify(draft.ruleVersions) }}</p>
       <p v-for="issue in draft.issues" :key="issue.code + issue.field" class="hint">{{ issue.message }}</p>
+      <MailExecutionPanel :bridge="bridge" :draft="draft" />
     </article>
   </section>
 </template>

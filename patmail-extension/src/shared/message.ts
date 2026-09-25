@@ -7,6 +7,9 @@ import type { FileSearchResult } from '../api/file-search-types'
 import type { HistoryQueryDetail, HistoryQueryOption } from '../api/query-history'
 import type { SessionSummary } from '../api/session'
 import type { ApiResult } from '../api/types'
+import { isMailDraftPreview, isMailExecutionView } from '../mail/easy/guards'
+import type { MailDraftPreview } from '../mail/types'
+import type { MailExecutionView } from '../mail/easy/types'
 
 /** 所有通道共享的 JSON 消息信封；具体消息使用下方的可辨识联合类型。 */
 export interface Message<TPayload = unknown> {
@@ -37,6 +40,11 @@ export const MessageType = {
   HistoryQueryResult: 'HISTORY_QUERY_RESULT',
   LoadDictionary: 'LOAD_DICTIONARY',
   DictionaryResult: 'DICTIONARY_RESULT',
+  CreateEasyMail: 'CREATE_EASY_MAIL',
+  SaveEasyMail: 'SAVE_EASY_MAIL',
+  FindMailExecution: 'FIND_MAIL_EXECUTION',
+  InspectEasyMail: 'INSPECT_EASY_MAIL',
+  MailExecutionResult: 'MAIL_EXECUTION_RESULT',
   Error: 'ERROR'
 } as const
 
@@ -50,6 +58,10 @@ export type ContentRequest =
   | Response<'LIST_HISTORY_QUERIES', { force: boolean }>
   | Response<'GET_HISTORY_QUERY', { queryId: string }>
   | Response<'LOAD_DICTIONARY', DictionaryLoadRequest>
+  | Response<'CREATE_EASY_MAIL', { preview: MailDraftPreview; currentFingerprint: string; confirmed: true }>
+  | Response<'SAVE_EASY_MAIL', { executionId: string; preview: MailDraftPreview; currentFingerprint: string; confirmed: true }>
+  | Response<'FIND_MAIL_EXECUTION', { fingerprint: string }>
+  | Response<'INSPECT_EASY_MAIL', { executionId: string }>
 export type ErrorMessage = Response<'ERROR', { message: string }>
 export type BackgroundRequest = Request<'PING'>
 export type BackgroundResponse = Response<'PONG', { ok: true }> | ErrorMessage
@@ -64,6 +76,7 @@ export type ContentResponse =
   | Response<'HISTORY_QUERIES_RESULT', ApiResult<HistoryQueryOption[]>>
   | Response<'HISTORY_QUERY_RESULT', ApiResult<HistoryQueryDetail>>
   | Response<'DICTIONARY_RESULT', ApiResult<DictionarySnapshot>>
+  | Response<'MAIL_EXECUTION_RESULT', { view: MailExecutionView | null }>
   | BackgroundResponse
 export type AppMessage = ContentRequest | ContentResponse
 
@@ -86,6 +99,17 @@ export function isMessage(value: unknown): value is AppMessage {
       return isRecord(value.payload) && typeof value.payload.queryId === 'string' && Object.keys(value.payload).length === 1
     case MessageType.LoadDictionary:
       return isDictionaryRequest(value.payload)
+    case MessageType.CreateEasyMail:
+      return isConfirmedPreview(value.payload) && Object.keys(value.payload).length === 3
+    case MessageType.SaveEasyMail:
+      return isRecord(value.payload) && value.payload.confirmed === true && typeof value.payload.executionId === 'string' &&
+        typeof value.payload.currentFingerprint === 'string' && isMailDraftPreview(value.payload.preview) &&
+        Object.keys(value.payload).length === 4
+    case MessageType.FindMailExecution:
+      return isRecord(value.payload) && typeof value.payload.fingerprint === 'string' && value.payload.fingerprint.length <= 20000 &&
+        Object.keys(value.payload).length === 1
+    case MessageType.InspectEasyMail:
+      return isRecord(value.payload) && typeof value.payload.executionId === 'string' && Object.keys(value.payload).length === 1
     case MessageType.SearchFiles:
       return isRecord(value.payload) && isFileSearchQuery(value.payload.query) &&
         Object.keys(value.payload).length === 1
@@ -108,6 +132,9 @@ export function isMessage(value: unknown): value is AppMessage {
       return isHistoryDetailResult(value.payload)
     case MessageType.DictionaryResult:
       return isDictionaryResult(value.payload)
+    case MessageType.MailExecutionResult:
+      return isRecord(value.payload) && Object.keys(value.payload).length === 1 &&
+        (value.payload.view === null || isMailExecutionView(value.payload.view))
     case MessageType.Error:
       return isRecord(value.payload) && typeof value.payload.message === 'string'
     default:
@@ -122,8 +149,15 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.CheckSession || value.type === MessageType.CancelSessionCheck ||
     value.type === MessageType.SearchFiles || value.type === MessageType.CancelFileSearch ||
     value.type === MessageType.ListHistoryQueries || value.type === MessageType.GetHistoryQuery ||
-    value.type === MessageType.LoadDictionary
+    value.type === MessageType.LoadDictionary || value.type === MessageType.CreateEasyMail ||
+    value.type === MessageType.SaveEasyMail || value.type === MessageType.FindMailExecution ||
+    value.type === MessageType.InspectEasyMail
   )
+}
+
+function isConfirmedPreview(value: unknown): value is { preview: MailDraftPreview; currentFingerprint: string; confirmed: true } {
+  return isRecord(value) && value.confirmed === true && typeof value.currentFingerprint === 'string' &&
+    value.currentFingerprint.length <= 20000 && isMailDraftPreview(value.preview)
 }
 
 const DICTIONARY_KINDS = new Set(['basic', 'flow', 'fieldColumn', 'listColumn', 'fileType', 'mailType'])

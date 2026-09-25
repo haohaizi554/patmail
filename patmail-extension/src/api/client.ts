@@ -7,8 +7,38 @@ import type { HistoryQueryDetail, HistoryQueryOption } from './query-history'
 import type { FileSearchResult } from './file-search-types'
 import { normalizeFileSearch } from './file-search-normalizer'
 import { SessionService, type SessionStatus, type SessionSummary } from './session'
+import { productionGate, type MailWriteGate } from '../mail/easy/gate'
+import { MailExecutionRuntime } from '../mail/easy/runtime'
+import { ExecutionStore, type ExecutionArea } from '../mail/easy/store'
+import type { MailExecutionView } from '../mail/easy/types'
+import type { MailDraftPreview } from '../mail/types'
 import { EasyTransport, type TransportOptions } from './transport'
 import { apiError, type ApiResult } from './types'
+
+export interface RuntimeOptions extends TransportOptions {
+  mailStore?: ExecutionStore
+  mailGate?: MailWriteGate
+}
+
+function chromeExecutionArea(): ExecutionArea | null {
+  const area = globalThis.chrome?.storage?.local
+  if (!area) return null
+  return {
+    get: key => area.get(key) as Promise<Record<string, unknown>>,
+    set: items => area.set(items)
+  }
+}
+
+function refusedMailView(preview: MailDraftPreview, message: string, executionId = ''): MailExecutionView {
+  return {
+    record: {
+      executionId, userId: '', origin: '', customerProfileId: preview.customerProfileId, fileIds: [...preview.fileIds],
+      mailTypeId: preview.mailTypeId, ruleRevision: 0, fingerprint: preview.fingerprint, state: 'FAILED',
+      mailId: '', stage: 'FAILED', lastError: message, requestSent: false, updatedAt: new Date().toISOString()
+    },
+    diffs: [], linkedFileIds: [], blockers: [message]
+  }
+}
 
 export class EasyRuntime {
   private readonly transport: EasyTransport
@@ -21,12 +51,19 @@ export class EasyRuntime {
   private readonly dictionaries: DictionaryService
   private historyUserKey = ''
   private listColsel: string | null = null
+  private readonly mail: MailExecutionRuntime
 
-  constructor(pageOrigin: string, options: TransportOptions = {}) {
+  constructor(pageOrigin: string, options: RuntimeOptions = {}) {
     this.transport = new EasyTransport(pageOrigin, options)
     this.session = new SessionService(this.transport)
     this.history = new HistoryQueryService(this.transport)
     this.dictionaries = new DictionaryService(this.transport)
+    this.mail = new MailExecutionRuntime(
+      this.transport,
+      options.mailStore ?? new ExecutionStore(chromeExecutionArea()),
+      options.mailGate ?? productionGate,
+      pageOrigin
+    )
   }
 
   get sessionStatus(): SessionStatus { return this.session.status }
@@ -126,6 +163,34 @@ export class EasyRuntime {
       return Promise.resolve(apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。'))
     }
     return this.history.detail(this.historyUserKey, queryId, signal)
+  }
+
+  private async mailUser(): Promise<{ ok: true; userId: string } | { ok: false; message: string }> {
+    const session = await this.checkSession()
+    if (!session.ok || session.data.status !== 'authenticated' || !session.data.userId) {
+      return { ok: false, message: '请先在 EASY 原网站登录并检测登录状态。' }
+    }
+    return { ok: true, userId: session.data.userId }
+  }
+
+  findMailExecution(fingerprint: string): Promise<MailExecutionView | null> {
+    return this.mailUser().then(user => user.ok ? this.mail.find(user.userId, fingerprint) : null)
+  }
+
+  createEasyMail(preview: MailDraftPreview, currentFingerprint: string): Promise<MailExecutionView> {
+    return this.mailUser().then(user => user.ok
+      ? this.mail.create(user.userId, preview, currentFingerprint)
+      : refusedMailView(preview, user.message))
+  }
+
+  saveEasyMail(executionId: string, preview: MailDraftPreview, currentFingerprint: string): Promise<MailExecutionView> {
+    return this.mailUser().then(user => user.ok
+      ? this.mail.save(user.userId, executionId, preview, currentFingerprint)
+      : refusedMailView(preview, user.message, executionId))
+  }
+
+  inspectEasyMail(executionId: string): Promise<MailExecutionView | null> {
+    return this.mailUser().then(user => user.ok ? this.mail.inspect(user.userId, executionId) : null)
   }
 
   cancelFileSearch(): void {

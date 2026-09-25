@@ -6,9 +6,11 @@ export interface GroupingResult {
 }
 
 function identity(file: SelectedPatentFile): { customer: string; description: string; label: string } | null {
-  const customer = file.customerProfileId?.trim()
-    ? `profile:${file.customerProfileId.trim()}`
-    : file.customerId?.trim() ? `easy:${file.customerId.trim()}` : ''
+  const binding = file.customerBinding
+  const confirmed = binding?.confirmed === true && binding.profileId.trim() && binding.profileId === file.customerProfileId?.trim()
+  const customer = confirmed
+    ? `profile:${binding.profileId.trim()}|source:${binding.sourceCustomerName.trim()}`
+    : ''
   const description = file.fileDescriptionId?.trim()
     ? `id:${file.fileDescriptionId.trim()}`
     : file.fileDescription.trim() ? `text:${file.fileDescription.trim()}` : ''
@@ -41,7 +43,8 @@ export function planMailGroups(files: SelectedPatentFile[], policies: CustomerMa
     seen.add(file.fileId)
     const key = identity(file)
     if (!key) {
-      skipped.push({ file, code: file.customerProfileId || file.customerId ? 'MISSING_DESCRIPTION' : 'MISSING_CUSTOMER', message: file.customerProfileId || file.customerId ? '文件描述为空，不能自动分组。' : '客户身份不明确，不能自动合并。' })
+      const hasCustomer = Boolean(file.customerBinding?.confirmed && file.customerProfileId)
+      skipped.push({ file, code: hasCustomer ? 'MISSING_DESCRIPTION' : 'MISSING_CUSTOMER', message: hasCustomer ? '文件描述为空，不能自动分组。' : '客户身份尚未确认，不能自动合并。' })
       continue
     }
     const policy = modeFor(file, policies)

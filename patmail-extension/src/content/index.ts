@@ -38,6 +38,18 @@ const bridge: MessageBridge = {
       case MessageType.LoadDictionary:
         return { type: MessageType.DictionaryResult,
           payload: await easyRuntime.loadDictionary(message.payload, signal) }
+      case MessageType.CreateEasyMail:
+        return { type: MessageType.MailExecutionResult, payload: {
+          view: message.payload.confirmed ? await easyRuntime.createEasyMail(message.payload.preview, message.payload.currentFingerprint) : null
+        } }
+      case MessageType.SaveEasyMail:
+        return { type: MessageType.MailExecutionResult, payload: {
+          view: message.payload.confirmed ? await easyRuntime.saveEasyMail(message.payload.executionId, message.payload.preview, message.payload.currentFingerprint) : null
+        } }
+      case MessageType.FindMailExecution:
+        return { type: MessageType.MailExecutionResult, payload: { view: await easyRuntime.findMailExecution(message.payload.fingerprint) } }
+      case MessageType.InspectEasyMail:
+        return { type: MessageType.MailExecutionResult, payload: { view: await easyRuntime.inspectEasyMail(message.payload.executionId) } }
       case MessageType.CancelFileSearch:
         easyRuntime.cancelFileSearch()
         return { type: MessageType.FileSearchCancelled, payload: { ok: true } }

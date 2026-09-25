@@ -11,6 +11,10 @@ export function validateDraft(draft: Omit<MailDraftPreview, 'status' | 'issues'>
   const sameProfile = profiles.size === 1 && !profiles.has('')
   const customers = new Set(draft.files.map(file => file.customerId?.trim() || file.customerProfileId?.trim() || ''))
   if (!sameProfile && (customers.size !== 1 || customers.has(''))) add('CROSS_CUSTOMER', 'error', '草稿不能跨客户合并。', 'customer')
+  const sources = new Set(draft.files.map(file => file.customerBinding?.confirmed === true ? file.customerBinding.sourceCustomerName.trim() : ''))
+  if (draft.files.some(file => file.customerBinding?.confirmed !== true) || sources.size !== 1 || sources.has('')) {
+    add('UNCONFIRMED_CUSTOMER', 'error', '客户身份尚未逐项确认，不能合并发文。', 'customer')
+  }
   if (!draft.customerProfileId) add('MISSING_CUSTOMER', 'error', '客户身份不明确。', 'customer')
   if (draft.files.some(file => !file.fileDescription.trim() && !file.fileDescriptionId)) add('MISSING_DESCRIPTION', 'error', '文件描述不明确。', 'description')
   if (!draft.mailTypeId) add('MISSING_MAPPING', 'error', '缺少发文类型映射。', 'mailType')

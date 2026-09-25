@@ -114,4 +114,8 @@
 .pagination { display: flex; align-items: center; justify-content: space-between; gap: 5px; margin-top: 12px; color: #8c7492; font-size: 11px; }
 .pagination button { padding: 5px 8px; border: 1px solid #e9d5e9; border-radius: 7px; background: #faf4fc; color: #926d9b; font: inherit; cursor: pointer; }
 .pagination button:disabled { opacity: .5; cursor: not-allowed; }
+.mail-stage { margin: 8px 0; padding: 7px 8px; border-radius: 8px; background: #fff4f9; color: #9a4d78; font-size: 12px; font-weight: 650; }
+.mail-diff { width: 100%; margin-top: 8px; border-collapse: collapse; font-size: 11px; }
+.mail-diff th, .mail-diff td { padding: 4px; border-bottom: 1px solid #f0e4f0; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.mail-diff th { color: #a38ca5; font-weight: 600; }
 .actions button:focus-visible, .buttons button:focus-visible { outline: 2px solid #b86da6; outline-offset: 2px; }

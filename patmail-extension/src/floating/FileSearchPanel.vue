@@ -3,7 +3,8 @@ import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref } from 'vue
 import { assessQueryScope, type FileSearchQuery } from '../api/file-search-params'
 import type { FileSearchResult } from '../api/file-search-types'
 import type { SessionStatus } from '../api/session'
-import { bindCustomer, selectPage, toSelectedFile, toggleSelected, type SelectedPatentFile } from '../mail'
+import { applyConfirmedBind, reviewCustomerBind, selectPage, toSelectedFile, toggleSelected, type SelectedPatentFile } from '../mail'
+import type { BindReviewGroup } from '../mail/selection'
 import MailWorkspace from './MailWorkspace.vue'
 import QueryTemplateSection from './QueryTemplateSection.vue'
 import SchemaQueryForm from './SchemaQueryForm.vue'
@@ -31,6 +32,8 @@ const showSelected = ref(false)
 const showMail = ref(false)
 const bindProfileId = ref('')
 const bindCustomers = ref<Array<{ id: string; name: string }>>([])
+const bindReview = ref<BindReviewGroup[]>([])
+const acceptedSources = ref<Record<string, boolean>>({})
 let generation = 0
 let sessionGeneration = 0
 
@@ -167,6 +170,27 @@ function changePageSize(): void {
   if (!lastQuery.value || !canSearch.value || ![20, 50, 100].includes(pageSize.value)) return
   void executeSearch({ ...lastQuery.value, pageIndex: 1, pageSize: pageSize.value })
 }
+function startBind(): void {
+  const profile = bindCustomers.value.find(item => item.id === bindProfileId.value)
+  if (!profile) return
+  const groups = reviewCustomerBind(Object.values(selected.value), profile.id, profile.name)
+  const mismatches = groups.filter(group => !group.nameMatches)
+  if (mismatches.length === 0) {
+    selected.value = applyConfirmedBind(selected.value, profile.id, profile.name, groups.map(group => group.sourceCustomerName))
+    bindReview.value = []
+    return
+  }
+  bindReview.value = groups
+  acceptedSources.value = Object.fromEntries(groups.map(group => [group.sourceCustomerName, group.nameMatches]))
+}
+function confirmBindReview(): void {
+  const profile = bindCustomers.value.find(item => item.id === bindProfileId.value)
+  if (!profile) return
+  const accepted = bindReview.value.filter(group => acceptedSources.value[group.sourceCustomerName]).map(group => group.sourceCustomerName)
+  selected.value = applyConfirmedBind(selected.value, profile.id, profile.name, accepted)
+  bindReview.value = []
+}
+
 async function loadBindCustomers(): Promise<void> {
   if (!sessionUserId.value || typeof chrome === 'undefined' || !chrome.storage?.local) return
   const { ChromeBundleRepository, storageKey } = await import('../storage/query-bundle')
@@ -258,7 +282,12 @@ onBeforeUnmount(() => {
               <option v-for="item in bindCustomers" :key="item.id" :value="item.id">{{ item.name }}</option>
             </select>
           </label>
-          <button type="button" class="text-button" :disabled="!bindProfileId" @click="selected = bindCustomer(selected, Object.keys(selected), bindProfileId)">绑定已选文件</button>
+          <button type="button" class="text-button" :disabled="!bindProfileId" @click="startBind">绑定已选文件</button>
+          <article v-for="group in bindReview" :key="group.sourceCustomerName" class="file-card">
+            <p class="hint">文件客户「{{ group.sourceCustomerName || '空' }}」与配置「{{ group.profileName }}」{{ group.nameMatches ? '一致' : '不一致' }}，共 {{ group.fileIds.length }} 个文件。</p>
+            <label v-if="!group.nameMatches" class="check-line"><input v-model="acceptedSources[group.sourceCustomerName]" type="checkbox" />确认仍绑定这一组</label>
+          </article>
+          <button v-if="bindReview.length" type="button" class="text-button" @click="confirmBindReview">确认已核对的绑定</button>
         </section>
         <MailWorkspace v-if="showMail" :bridge="bridge" :user-id="sessionUserId" :files="Object.values(selected)" />
       </template>

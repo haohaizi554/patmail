@@ -4,6 +4,8 @@ import { apiError, type ApiResult } from './types'
 export type EasyOperation =
   | 'session' | 'fileSearch' | 'historyQuery'
   | 'basicData' | 'flowDirection' | 'fileTypeTree' | 'fieldColumn' | 'listColumn' | 'mailType'
+  | 'mailCustomer' | 'mailInfoInit' | 'getMailInfo' | 'getMailFile' | 'getMailCase'
+  | 'getMailRule' | 'getCustomerContact' | 'getSignature' | 'saveMailInfo' | 'saveMailRelatedFiles'
 
 export interface TransportOptions {
   fetcher?: typeof fetch
@@ -19,7 +21,17 @@ const ROUTES: Record<EasyOperation, { path: string; call: string }> = {
   fileTypeTree: { path: '/AjaxServers/Common.ashx', call: 'LoadFileTypeByCaseType' },
   fieldColumn: { path: '/AjaxServers/PatentAction.ashx', call: 'GetFieldColumn' },
   listColumn: { path: '/AjaxServers/Common.ashx', call: 'LoadListColumn' },
-  mailType: { path: '/AjaxServers/Common.ashx', call: 'LoadMailType' }
+  mailType: { path: '/AjaxServers/Common.ashx', call: 'LoadMailType' },
+  mailCustomer: { path: '/AjaxServers/Notice.ashx', call: 'MailCustomer' },
+  mailInfoInit: { path: '/AjaxServers/Mail.ashx', call: 'MailinfoInit' },
+  getMailInfo: { path: '/AjaxServers/Mail.ashx', call: 'GetMailInfo' },
+  getMailFile: { path: '/AjaxServers/Mail.ashx', call: 'GetMailFile' },
+  getMailCase: { path: '/AjaxServers/Mail.ashx', call: 'GetMailCase' },
+  getMailRule: { path: '/AjaxServers/Mail.ashx', call: 'GetMailRule' },
+  getCustomerContact: { path: '/AjaxServers/Mail.ashx', call: 'GetCustomerContact' },
+  getSignature: { path: '/AjaxServers/Mail.ashx', call: 'GetSignature' },
+  saveMailInfo: { path: '/AjaxServers/Mail.ashx', call: 'SaveMailInfo' },
+  saveMailRelatedFiles: { path: '/AjaxServers/Mail.ashx', call: 'SaveMailRalteCaseFile' }
 }
 
 function loginRedirect(response: Response, origin: string): boolean {

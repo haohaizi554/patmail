@@ -5,8 +5,9 @@ import { EasyTransport } from '../src/api/transport'
 import type { ApiResult } from '../src/api/types'
 import { resolveFileDescriptionDisplay } from '../src/schema/resolver'
 import { buildFileTypeTree } from '../src/schema/file-type-tree'
+import { selectionFingerprint } from '../src/mail/fingerprint'
 import {
-  bindCustomer, buildBody, buildSubject, emptyMailRules, injectCount, MailRuleRepository, mailStorageKey,
+  applyConfirmedBind, bindCustomer, buildBody, buildSubject, emptyMailRules, injectCount, MailRuleRepository, mailStorageKey,
   matchMailType, planDrafts, planMailGroups, selectPage, toSelectedFile, toggleSelected, uniqueAddresses
 } from '../src/mail'
 import type { CustomerMailPolicy, DescriptionMailTypeMapping, MailRuleBundle, SelectedPatentFile } from '../src/mail/types'
@@ -20,7 +21,15 @@ const mailType = guid('cccccccc')
 const client = { ClientInfo: { IsLogin: true, Status: true, Result: false, Message: null } }
 
 function file(id: string, customer: string, description: string, extra: Partial<SelectedPatentFile> = {}): SelectedPatentFile {
-  return { fileId: id, fileName: `文件${id}`, fileDescription: description, customerName: '客户名', customerProfileId: customer, ...extra }
+  return {
+    fileId: id, fileName: `文件${id}`, fileDescription: description, customerName: '客户名', customerProfileId: customer,
+    ...(customer ? { customerBinding: { profileId: customer, profileName: '客户名', sourceCustomerName: '客户名', confirmed: true, source: 'explicit' as const } } : {}),
+    ...extra
+  }
+}
+function snap(files: SelectedPatentFile[], revision: number, configVersion = revision) {
+  const base = { selectedAt: '2026-09-24T00:00:00.000Z', files, configVersion, userId: user, origin: 'http://easy', fingerprint: '' }
+  return { ...base, fingerprint: selectionFingerprint({ files, revision, userId: user, origin: 'http://easy' }) }
 }
 function policy(customer: string, sendMode: CustomerMailPolicy['sendMode'] = 'merge_by_customer_description'): CustomerMailPolicy {
   return { customerProfileId: customer, sendMode, enabled: true, version: 1, updatedAt: '2026-09-24T00:00:00.000Z' }
@@ -96,6 +105,9 @@ describe('文件选择', () => {
     expect(selected.f2).toBeUndefined()
     selected = bindCustomer({ f3: selected.f3! }, ['f3'], 'profile-a')
     expect(selected.f3?.customerProfileId).toBe('profile-a')
+    expect(selected.f3?.customerBinding).toBeUndefined()
+    selected = applyConfirmedBind(selected, 'profile-a', '客户A', ['客户A'])
+    expect(selected.f3?.customerBinding?.confirmed).toBe(true)
     expect(first.fileId).toBe('f1')
   })
 })
@@ -137,7 +149,7 @@ describe('发文类型映射和草稿', () => {
       subject: { template: '关于{文件名称}的通知', countInjection: true, anchor: '关于', missingAnchor: 'confirm', version: 1 },
       body: { template: '请查收{文件数量}个文件。', supplement: '{不存在}', version: 1 }
     })
-    const snapshot = { selectedAt: '2026-09-24T00:00:00.000Z', files: [file('1', 'a', '专利证书'), file('2', 'a', '专利证书')], configVersion: bundle.revision }
+    const snapshot = snap([file('1', 'a', '专利证书'), file('2', 'a', '专利证书')], bundle.revision)
     const drafts = planDrafts(snapshot, bundle, [profile('a', '客户A')], user)
     expect(drafts).toHaveLength(1)
     expect(drafts[0]?.mailTypeId).toBe(mailType)
@@ -152,7 +164,7 @@ describe('发文类型映射和草稿', () => {
     expect(warned[0]?.status).toBe('warning')
     const otherSignature = planDrafts(snapshot, bundle, [profile('a', '客户A')], other)
     expect(otherSignature[0]?.signature).toBe('')
-    const stale = planDrafts({ ...snapshot, configVersion: 99 }, bundle, [profile('a', '客户A')], user)
+    const stale = planDrafts(snap(snapshot.files, bundle.revision, 99), bundle, [profile('a', '客户A')], user)
     expect(stale[0]?.issues.some(issue => issue.code === 'STALE_RULE')).toBe(true)
     const missing = planDrafts(snapshot, rules({ policies: [policy('a')], recipients: bundle.recipients }), [profile('a', '客户A')], user)
     expect(missing[0]?.status).toBe('blocked')

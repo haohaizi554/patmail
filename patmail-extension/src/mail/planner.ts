@@ -1,5 +1,6 @@
 import type { CustomerQueryProfile } from '../customer/types'
-import { matchMailType } from './rules/description-mapping'
+import { selectionFingerprint } from './fingerprint'
+import { resolveMailType } from './rules/description-mapping'
 import { planMailGroups } from './rules/grouping'
 import { resolveRecipients, uniqueAddresses } from './rules/recipient-resolver'
 import { buildSubject } from './rules/subject-builder'
@@ -13,9 +14,14 @@ function customerName(profileId: string, profiles: CustomerQueryProfile[]): stri
 
 /** 只在本地计算草稿，不会在 EASY 创建邮件。 */
 export function planDrafts(snapshot: SelectionSnapshot, rules: MailRuleBundle, profiles: CustomerQueryProfile[], operatorId: string): MailDraftPreview[] {
+  const fingerprint = selectionFingerprint({
+    files: snapshot.files, revision: rules.revision, userId: snapshot.userId, origin: snapshot.origin
+  })
+  const staleSnapshot = snapshot.fingerprint !== fingerprint
   const grouped = planMailGroups(snapshot.files, rules.policies)
   const drafts: MailDraftPreview[] = grouped.groups.map(group => {
-    const mapping = matchMailType(group, rules.mappings)
+    const resolved = resolveMailType(group, rules.mappings)
+    const mapping = resolved.mapping
     const policy = rules.policies.find(item => item.customerProfileId === group.customerProfileId && item.enabled)
     const recipient = resolveRecipients(group.customerProfileId, rules.recipients, policy?.recipientTemplateId)
     const to = recipient ? uniqueAddresses(recipient.to) : { addresses: [], invalid: [] as string[] }
@@ -34,15 +40,18 @@ export function planDrafts(snapshot: SelectionSnapshot, rules: MailRuleBundle, p
     if (subject.needsConfirm) {
       issues.push({ code: 'SUBJECT_NEEDS_CONFIRM', severity: 'warning', message: '标题里没有配置的锚点，需要人工确认。', field: 'subject', draftId: group.id })
     }
-    if (rules.revision !== snapshot.configVersion) {
-      issues.push({ code: 'STALE_RULE', severity: 'warning', message: '选择文件后规则版本已变化，请重新生成预览。', field: 'version', draftId: group.id })
+    if (resolved.conflict) {
+      issues.push({ code: 'MAPPING_CONFLICT', severity: 'error', message: '同一文件描述存在多个发文类型映射。', field: 'mailType', draftId: group.id })
+    }
+    if (rules.revision !== snapshot.configVersion || staleSnapshot) {
+      issues.push({ code: 'STALE_RULE', severity: 'error', message: '预览已经失效，不能继续创建邮件。', field: 'version', draftId: group.id })
     }
     const base = {
       id: group.id,
       customerProfileId: group.customerProfileId,
       fileIds: group.files.map(file => file.fileId),
       files: group.files.map(file => ({ ...file })),
-      mailTypeId: mapping?.mailTypeId ?? '',
+      mailTypeId: resolved.conflict ? '' : mapping?.mailTypeId ?? '',
       mailTypeName: mapping?.mailTypeName ?? '',
       to: to.addresses,
       cc: cc.addresses,
@@ -57,7 +66,8 @@ export function planDrafts(snapshot: SelectionSnapshot, rules: MailRuleBundle, p
         signature: signature?.version ?? 0,
         subject: rules.subject.version,
         body: rules.body.version
-      }
+      },
+      fingerprint
     }
     const allIssues = validateDraft({ ...base, issues })
     return { ...base, issues: allIssues, status: statusFrom(allIssues) }
@@ -68,7 +78,7 @@ export function planDrafts(snapshot: SelectionSnapshot, rules: MailRuleBundle, p
     drafts.push({
       id, customerProfileId: skipped.file.customerProfileId ?? '', fileIds: skipped.file.fileId ? [skipped.file.fileId] : [],
       files: [skipped.file], mailTypeId: '', mailTypeName: '', to: [], cc: [], subject: '', body: '', signature: '',
-      sendMode: 'single_file', status: 'blocked', issues, ruleVersions: { subject: rules.subject.version, body: rules.body.version }
+      sendMode: 'single_file', status: 'blocked', issues, ruleVersions: { subject: rules.subject.version, body: rules.body.version }, fingerprint
     })
   }
   return drafts
