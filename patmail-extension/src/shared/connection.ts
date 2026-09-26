@@ -16,6 +16,14 @@ export interface EasyConnectionContext {
   connectionVersion: number
 }
 
+/** 一次读取或保存开始时冻结的账号。后续异步不能再改用当时的连接对象。 */
+export interface AccountContextSnapshot {
+  easyOrigin: string
+  operatorId: string
+  easyTabId: number
+  connectionVersion: number
+}
+
 /** 调用方声称自己当时看到的账号。Background 只把它当预期，不把它当身份。 */
 export interface ExpectedAccountScope {
   easyOrigin: string
@@ -238,6 +246,24 @@ export function sameConnectionSnapshot(left: ConnectionSnapshot | null, right: C
   if (!left) return false
   return left.easyOrigin === right.easyOrigin && left.easyTabId === right.easyTabId &&
     left.lastOperatorId === right.lastOperatorId && left.connectionVersion === right.connectionVersion
+}
+
+export function freezeAccount(context: EasyConnectionContext): AccountContextSnapshot | null {
+  if (context.sessionStatus !== 'authenticated' || context.easyTabId == null || !context.operatorId) return null
+  return {
+    easyOrigin: context.easyOrigin,
+    operatorId: context.operatorId,
+    easyTabId: context.easyTabId,
+    connectionVersion: context.connectionVersion
+  }
+}
+
+export function sameAccountContext(context: EasyConnectionContext, frozen: AccountContextSnapshot): boolean {
+  return context.sessionStatus === 'authenticated' &&
+    context.easyOrigin === frozen.easyOrigin &&
+    context.operatorId === frozen.operatorId &&
+    context.easyTabId === frozen.easyTabId &&
+    context.connectionVersion === frozen.connectionVersion
 }
 
 export function accountScopeMatches(context: EasyConnectionContext, scope: ExpectedAccountScope): boolean {

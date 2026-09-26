@@ -75,12 +75,12 @@ export async function deleteQueryTemplateAccount(area: LocalArea, origin: string
   await repository.delete(id)
 }
 
-export async function refreshStaleTasks(store: TaskStore, origin: string, operatorId: string, rules: MailRuleBundle, profiles: CustomerQueryProfile[]): Promise<number> {
+export async function refreshStaleTasks(store: TaskStore, origin: string, operatorId: string, rules: MailRuleBundle, profiles: CustomerQueryProfile[], templates: QueryTemplate[] = []): Promise<number> {
   const tasks = await store.list(origin, operatorId)
   let changed = 0
   for (const task of tasks) {
     const next = validateTask(task, {
-      origin, operatorId, files: task.selectedFiles, rules, profiles, queryTemplateVersion: task.queryTemplateVersion
+      origin, operatorId, files: task.selectedFiles, rules, profiles, templates, queryTemplateVersion: task.queryTemplateVersion
     })
     if (next.status !== task.status || next.readonly !== task.readonly) {
       await store.save(next)
@@ -117,7 +117,7 @@ export async function saveRuleAccount(area: LocalArea, origin: string, operatorI
   })
   if (tasks) {
     const account = await loadAccount(area, origin, operatorId)
-    await refreshStaleTasks(tasks, origin, operatorId, saved, account.customers)
+    await refreshStaleTasks(tasks, origin, operatorId, saved, account.customers, account.templates)
   }
   return saved
   })

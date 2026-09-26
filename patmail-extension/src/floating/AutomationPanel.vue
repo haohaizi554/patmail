@@ -103,10 +103,19 @@ async function plan(): Promise<void> {
     queryTemplateVersion: props.queryTemplateVersion,
     expectedScope: scope
   })
-  const saved = Boolean(response?.ok)
+  const saved = Boolean(response?.ok && response.contextError !== 'STALE_CONTEXT' && response.createdTask)
   persisted.value = saved
-  message.value = saved ? (response?.message || '已保存。') : (response?.message || '任务保存失败。')
-  if (saved) {
+  message.value = response?.contextError === 'STALE_CONTEXT'
+    ? '会话已变化，这次计划不能显示到当前账号。'
+    : saved ? `已保存 · 任务 ${response?.createdTask?.taskId ?? ''}` : (response?.message || '任务保存失败。')
+  if (saved && response?.createdTask && checked.value) {
+    checked.value = {
+      ...checked.value,
+      taskId: response.createdTask.taskId,
+      taskFingerprint: response.createdTask.taskFingerprint,
+      status: response.createdTask.status as typeof checked.value.status,
+      createdAt: response.createdTask.createdAt
+    }
     await reload()
     await useWorkspace().call({ action: 'load' })
   }

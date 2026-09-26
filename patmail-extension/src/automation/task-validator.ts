@@ -1,4 +1,5 @@
 import { isQueryGuid } from '../query/query-validator'
+import { buildQueryDependencies, sameQueryDependencies } from './query-dependency'
 import { customerIdentities } from './snapshot'
 import { taskFingerprint, type TaskBuildInput } from './task-builder'
 import type { AutomationTask } from './types'
@@ -20,6 +21,14 @@ export function validateTask(task: AutomationTask, current: TaskBuildInput): Aut
     const live = taskFingerprint({ ...current, identities: customerIdentities(current.files, current.profiles) })
     if (frozen !== live || task.taskFingerprint !== frozen) {
       issues.push({ code: 'STALE_TASK', message: '文件、客户绑定或规则内容已经变化，需要重新生成计划。', itemId: '' })
+    }
+    if (task.queryDependencies && task.queryDependencies.length > 0 && current.templates) {
+      const liveDependencies = buildQueryDependencies(current.profiles, current.templates)
+      const referenced = new Set(task.queryDependencies.map(item => item.customerProfileId))
+      const relevant = liveDependencies.filter(item => referenced.has(item.customerProfileId))
+      if (!sameQueryDependencies(task.queryDependencies, relevant)) {
+        issues.push({ code: 'STALE_TASK', message: '查询模板或客户覆盖已经变化，旧计划已过期。', itemId: '' })
+      }
     }
   }
   const sent = task.status === 'UNKNOWN' || task.readonly || task.checkpoints.some(item => item.requestSent)

@@ -48,15 +48,16 @@ async function run(): Promise<void> {
     return
   }
   const compared = row.matchedWithUi === true ? '已对照原网页' : '未与原网页对照'
+  const source = row.evidenceSource === 'MANUAL_EXPECTATION' ? ' · 手工期望' : row.evidenceSource === 'API_RESPONSE' ? ' · 接口响应' : row.evidenceSource === 'MOCK' ? ' · Mock' : ''
   const level = typeof row.evidenceLevel === 'string' ? ` · ${row.evidenceLevel}` : ''
-  resultText.value = `${String(row.call)} ${String(row.result)} · ${String(row.reason ?? '')} · ${compared}${level}`
+  resultText.value = `${String(row.call)} ${String(row.result)} · ${String(row.reason ?? '')} · ${compared}${source}${level}`
 }
 </script>
 
 <template>
   <section class="pm-card">
     <h2>接口验收</h2>
-    <p class="hint">只读请求由已绑定的 EASY 标签页发出。缺少业务参数或契约未确认时显示 BLOCKED，不会发出请求。HTTP 200 只说明传输层有响应。只读响应结构通过与原网页对照通过是两件不同的事。</p>
+    <p class="hint">只读请求由已绑定的 EASY 标签页发出。缺少业务参数或契约未确认时显示 BLOCKED，不会发出请求。HTTP 200 只说明传输层有响应。手工填写的对照字段只能说明接口响应和手工期望一致，不能记成原网页对照。</p>
     <p v-if="!ready" class="empty">尚未确认 EASY 用户，不能执行验收。</p>
     <div v-else class="pm-form">
       <label>接口

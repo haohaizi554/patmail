@@ -509,7 +509,9 @@ try {
     await app.getByLabel('名称').fill('测试客户')
     await app.getByLabel('查询覆盖').fill('case_volume=ABC')
     await app.getByRole('button', { name: '保存到当前账号' }).click()
+    await app.getByRole('button', { name: '刷新标签页' }).click()
     await app.getByText('客户配置已保存。', { exact: true }).waitFor()
+    assert.equal(await app.getByRole('button', { name: '编辑' }).count(), 1)
     await app.getByText('case_volume=ABC').waitFor()
     await app.getByRole('button', { name: '编辑' }).click()
     await app.getByLabel('名称').fill('测试客户甲')
@@ -522,6 +524,21 @@ try {
     await app.getByLabel('名称').fill('测试客户')
     await app.getByRole('button', { name: '保存到当前账号' }).click()
     await app.getByText('客户配置已保存。', { exact: true }).waitFor()
+    const other = await context.newPage()
+    await other.goto(`chrome-extension://${extensionId}/app.html#/customers`)
+    await other.getByText('测试客户').waitFor()
+    await app.bringToFront()
+    await app.getByRole('button', { name: '编辑' }).click()
+    await app.getByLabel('名称').fill('测试客户同步')
+    await app.getByRole('button', { name: '保存到当前账号' }).click()
+    await app.getByText('客户配置已保存。', { exact: true }).waitFor()
+    await other.bringToFront()
+    await other.getByText('测试客户同步').waitFor()
+    await app.getByRole('button', { name: '编辑' }).click()
+    await app.getByLabel('名称').fill('测试客户')
+    await app.getByRole('button', { name: '保存到当前账号' }).click()
+    await app.getByText('客户配置已保存。', { exact: true }).waitFor()
+    await other.close()
     await app.getByRole('link', { name: '文件查询' }).click()
     await app.getByLabel('我方文号').fill('A+123')
     await app.getByRole('button', { name: '查询文件' }).click()
@@ -534,17 +551,70 @@ try {
     await app.getByLabel('绑定到已有客户配置').selectOption({ label: '测试客户' })
     await app.getByRole('button', { name: '绑定已选文件' }).click()
     await app.getByRole('button', { name: '生成发文计划' }).click()
+    const templateReady = await app.evaluate(async () => {
+      const loaded = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'load' } })
+      const connection = loaded.payload.connection
+      return chrome.runtime.sendMessage({
+        type: 'WORKSPACE',
+        payload: {
+          action: 'saveQueryTemplate',
+          expectedVersion: null,
+          expectedScope: {
+            easyOrigin: connection.easyOrigin,
+            operatorId: connection.operatorId,
+            easyTabId: connection.easyTabId,
+            connectionVersion: connection.connectionVersion
+          },
+          template: {
+            id: 'manual', name: '基础模板', source: 'local', queryType: 'FileSearch',
+            fields: { filetype: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+            version: 1, createdAt: '2026-09-26T00:00:00.000Z', updatedAt: '2026-09-26T00:00:00.000Z'
+          }
+        }
+      })
+    })
+    assert.equal(templateReady.payload.ok, true)
     await app.getByRole('button', { name: '生成计划' }).click()
-    await app.getByText(/已保存 · 任务 /).waitFor()
+    await app.getByText(/已保存 · 任务 /).first().waitFor()
+    const taskId = (await app.getByText(/已保存 · 任务 /).first().innerText()).split('任务').pop().trim()
+    assert.match(taskId, /^[0-9a-f-]{36}$/i)
+    const templated = await app.evaluate(async (id) => {
+      const loaded = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'load' } })
+      const connection = loaded.payload.connection
+      const saved = await chrome.runtime.sendMessage({
+        type: 'WORKSPACE',
+        payload: {
+          action: 'saveQueryTemplate',
+          expectedVersion: 1,
+          expectedScope: {
+            easyOrigin: connection.easyOrigin,
+            operatorId: connection.operatorId,
+            easyTabId: connection.easyTabId,
+            connectionVersion: connection.connectionVersion
+          },
+          template: {
+            id: 'manual', name: '基础模板', source: 'local', queryType: 'FileSearch',
+            fields: { filetype: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' },
+            version: 1, createdAt: '2026-09-26T00:00:00.000Z', updatedAt: '2026-09-26T00:00:00.000Z'
+          }
+        }
+      })
+      const again = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'load' } })
+      return { ok: saved.payload.ok, status: again.payload.tasks.find((item) => item.taskId === id)?.status }
+    }, taskId)
+    assert.equal(templated.ok, true)
+    assert.equal(templated.status, 'STALE')
     await app.getByRole('link', { name: '发文任务' }).click()
-    await app.getByText('测试客户').waitFor()
+    await app.waitForURL(/#\/tasks/)
     await app.getByRole('button', { name: '详情' }).click()
+    await app.getByText(taskId).waitFor()
     await app.getByText('Origin http://183.36.43.66:88').waitFor()
     await app.getByText('文件 2').waitFor()
     const taskUrl = app.url()
     await app.reload()
-    await app.getByText('测试客户').waitFor()
+    await app.waitForURL(/#\/tasks/)
     await app.getByRole('button', { name: '详情' }).click()
+    await app.getByText(taskId).waitFor()
     await app.getByText('Origin http://183.36.43.66:88').waitFor()
     await app.getByRole('link', { name: '发文规则' }).click()
     await app.getByLabel('标题模板').fill('阶段三标题{文件名称}')
@@ -552,6 +622,51 @@ try {
     await app.getByText('发文规则已保存。内容变化的旧任务会标记为过期。').first().waitFor()
     await app.getByRole('link', { name: '发文任务' }).click()
     await app.getByText('计划已过期').waitFor()
+    const protectedTask = await app.evaluate(async () => {
+      const loaded = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'load' } })
+      const connection = loaded.payload.connection
+      const taskId = loaded.payload.tasks[0].taskId
+      const got = await chrome.runtime.sendMessage({ type: 'GET_TASK', payload: { origin: connection.easyOrigin, operatorId: connection.operatorId, taskId } })
+      const task = got.payload.task
+      const mailId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+      task.status = 'UNKNOWN'
+      task.checkpoints = [{ stage: 'MAIL_CREATE', itemId: '', requestSent: true, responseReceived: false, verified: false, easyMailId: mailId, at: '2026-09-26T00:00:00.000Z', note: 'sent' }]
+      if (Array.isArray(task.items) && task.items[0]) task.items[0].easyMailId = mailId
+      const key = `${connection.easyOrigin}\u0000${connection.operatorId}`
+      await new Promise((resolve, reject) => {
+        const request = indexedDB.open('patmail-automation-tasks', 1)
+        request.onerror = () => reject(request.error)
+        request.onsuccess = () => {
+          const database = request.result
+          const tx = database.transaction('bundles', 'readwrite')
+          const store = tx.objectStore('bundles')
+          const current = store.get(key)
+          current.onsuccess = () => {
+            const raw = current.result || { version: 2, tasks: [], migrations: [] }
+            const tasks = Array.isArray(raw.tasks) ? raw.tasks.map((item) => item.taskId === task.taskId ? task : item) : [task]
+            if (!tasks.some((item) => item.taskId === task.taskId)) tasks.push(task)
+            store.put({ ...raw, version: 2, tasks }, key)
+          }
+          tx.oncomplete = () => resolve(true)
+          tx.onerror = () => reject(tx.error)
+        }
+      })
+      const incoming = { ...task, status: 'READY', checkpoints: [], items: (task.items || []).map((item) => ({ ...item, easyMailId: '' })) }
+      const saved = await chrome.runtime.sendMessage({ type: 'SAVE_TASK', payload: { task: incoming } })
+      const again = await chrome.runtime.sendMessage({ type: 'GET_TASK', payload: { origin: connection.easyOrigin, operatorId: connection.operatorId, taskId } })
+      return {
+        ok: saved.payload.ok,
+        message: saved.payload.message,
+        status: again.payload.task.status,
+        requestSent: again.payload.task.checkpoints?.[0]?.requestSent,
+        easyMailId: again.payload.task.checkpoints?.[0]?.easyMailId
+      }
+    })
+    assert.equal(protectedTask.ok, false)
+    assert.match(protectedTask.message, /不能覆盖已有执行证据/)
+    assert.equal(protectedTask.status, 'UNKNOWN')
+    assert.equal(protectedTask.requestSent, true)
+    assert.equal(protectedTask.easyMailId, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
     const mailCalls = () => apiCalls.filter(item => item.path === '/AjaxServers/Mail.ashx').length
     const beforeMail = mailCalls()
     await app.getByRole('link', { name: '接口验收' }).click()
@@ -573,6 +688,13 @@ try {
     await app.getByRole('button', { name: '执行只读验收' }).click()
     await app.getByText('GetUserModel PASS').first().waitFor()
     await app.getByText('未与原网页对照').first().waitFor()
+    await app.getByLabel('对照字段').fill('userId=11111111-1111-1111-1111-111111111111')
+    await app.getByRole('button', { name: '执行只读验收' }).click()
+    await app.getByText(/GetUserModel PASS · .*手工期望/).waitFor()
+    const manual = await app.getByText(/GetUserModel PASS · .*手工期望/).innerText()
+    assert.equal(manual.includes('UI_COMPARED'), false)
+    assert.match(manual, /未与原网页对照/)
+    assert.match(manual, /GetUserModel PASS/)
     const storedKey = 'patmail.mail.v1:http://183.36.43.66:88:11111111-1111-1111-1111-111111111111'
     const stale = await app.evaluate(async (key) => {
       const stored = await chrome.storage.local.get(key)

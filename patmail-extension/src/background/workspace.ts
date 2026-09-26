@@ -7,10 +7,11 @@ import type { CustomerQueryProfile } from '../customer/types'
 import { readMailRules } from '../mail/repository'
 import type { MailRuleBundle } from '../mail/types'
 import type { QueryTemplate } from '../query/query-types'
-import { isMessage, MessageType, type AppMessage, type BackgroundResponse } from '../shared/message'
-import { chooseAppTab, EasyConnectionController, emptyConnection, accountScopeMatches, tabOrigin, type BrowserTabRef, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope } from '../shared/connection'
+import { chooseAppTab, EasyConnectionController, emptyConnection, accountScopeMatches, freezeAccount, sameAccountContext, tabOrigin, type AccountContextSnapshot, type BrowserTabRef, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope } from '../shared/connection'
+import { isMessage, MessageType, type AppMessage, type BackgroundResponse, type CreatedTaskResult } from '../shared/message'
 import { loadAccount, deleteCustomerAccount, deleteQueryTemplateAccount, refreshStaleTasks, saveCustomerAccount, saveQueryTemplateAccount, saveRuleAccount, type LocalArea } from './account-data'
 import { planTrustedTask } from '../automation/task-planner'
+import type { AutomationTask } from '../automation/types'
 
 export interface WorkspacePayload {
   ok: boolean
@@ -23,6 +24,8 @@ export interface WorkspacePayload {
   tasks: { taskId: string; createdAt: string; customerName: string; fileCount: number; mailCount: number; status: string; verifiedAt: string; updatedAt: string }[]
   forwarded: AppMessage | null
   appTab: { tabId: number; created: boolean } | null
+  createdTask: CreatedTaskResult | null
+  contextError?: 'STALE_CONTEXT'
 }
 
 export function workspaceResult(partial: Partial<WorkspacePayload> & { connection: EasyConnectionContext }): BackgroundResponse {
@@ -36,7 +39,9 @@ export function workspaceResult(partial: Partial<WorkspacePayload> & { connectio
     rules: partial.rules ?? null,
     tasks: partial.tasks ?? [],
     forwarded: partial.forwarded ?? null,
-    appTab: partial.appTab ?? null
+    appTab: partial.appTab ?? null,
+    createdTask: partial.createdTask ?? null,
+    ...(partial.contextError ? { contextError: partial.contextError } : {})
   }
   return { type: MessageType.WorkspaceResult, payload }
 }
@@ -63,11 +68,17 @@ export interface WorkspaceHost {
   persist?(context: EasyConnectionContext): void
 }
 
-async function accountPayload(host: WorkspaceHost): Promise<Pick<WorkspacePayload, 'customers' | 'templates' | 'rules' | 'tasks'>> {
-  const connection = host.connection.context
-  if (connection.sessionStatus !== 'authenticated') return { customers: [], templates: [], rules: null, tasks: [] }
-  const account = await loadAccount(host.area, connection.easyOrigin, connection.operatorId)
-  const tasks = host.tasks ? await host.tasks.list(connection.easyOrigin, connection.operatorId) : []
+class StaleContextError extends Error {
+  constructor() { super('STALE_CONTEXT') }
+}
+
+async function accountPayload(host: WorkspaceHost, frozen?: AccountContextSnapshot): Promise<Pick<WorkspacePayload, 'customers' | 'templates' | 'rules' | 'tasks'>> {
+  const start = frozen ?? freezeAccount(host.connection.context)
+  if (!start) return { customers: [], templates: [], rules: null, tasks: [] }
+  if (!sameAccountContext(host.connection.context, start)) throw new StaleContextError()
+  const account = await loadAccount(host.area, start.easyOrigin, start.operatorId)
+  const tasks = host.tasks ? await host.tasks.list(start.easyOrigin, start.operatorId) : []
+  if (!sameAccountContext(host.connection.context, start)) throw new StaleContextError()
   return {
     customers: account.customers,
     templates: account.templates,
@@ -77,6 +88,36 @@ async function accountPayload(host: WorkspaceHost): Promise<Pick<WorkspacePayloa
       fileCount: task.selectedFiles.length, mailCount: task.items.length, status: task.status,
       verifiedAt: task.verifiedAt, updatedAt: task.updatedAt
     }))
+  }
+}
+
+async function readAccount(host: WorkspaceHost, frozen?: AccountContextSnapshot): Promise<Pick<WorkspacePayload, 'customers' | 'templates' | 'rules' | 'tasks'> | null> {
+  try {
+    return await accountPayload(host, frozen)
+  } catch (error) {
+    if (error instanceof StaleContextError) return null
+    throw error
+  }
+}
+
+function staleResult(host: WorkspaceHost): BackgroundResponse {
+  return workspaceResult({
+    ok: false,
+    message: 'STALE_CONTEXT',
+    contextError: 'STALE_CONTEXT',
+    connection: host.connection.context
+  })
+}
+
+function createdOf(task: AutomationTask): CreatedTaskResult {
+  return {
+    taskId: task.taskId,
+    taskFingerprint: task.taskFingerprint,
+    status: task.status,
+    createdAt: task.createdAt,
+    itemCount: task.items.length,
+    persisted: true,
+    fileSource: 'FILE_SOURCE_UNVERIFIED'
   }
 }
 
@@ -104,25 +145,29 @@ async function boundTab(host: WorkspaceHost): Promise<{ ok: true; tabId: number 
   }
 }
 
-/** 写操作前重新读取登录身份，并核对调用方看到的账号版本。 */
-async function mutationGuard(host: WorkspaceHost, scope: ExpectedAccountScope): Promise<BackgroundResponse | null> {
+/** 写操作前重新读取登录身份，并返回冻结后的账号。 */
+async function mutationGuard(host: WorkspaceHost, scope: ExpectedAccountScope): Promise<{ ok: true; account: AccountContextSnapshot } | { ok: false; response: BackgroundResponse }> {
   const gate = await recheckBoundSession(host)
   if (gate !== 'same') {
-    const account = await accountPayload(host)
-    return workspaceResult({ ok: false, message: gate === 'changed' ? '会话已变化，请重新读取后再保存。' : (host.connection.context.message || '尚未确认 EASY 用户。'), connection: host.connection.context, ...account })
+    const account = await readAccount(host)
+    return { ok: false, response: workspaceResult({ ok: false, message: gate === 'changed' ? '会话已变化，请重新读取后再保存。' : (host.connection.context.message || '尚未确认 EASY 用户。'), connection: host.connection.context, ...(account ?? {}) }) }
   }
   if (!accountScopeMatches(host.connection.context, scope)) {
-    const account = await accountPayload(host)
-    return workspaceResult({ ok: false, message: '保存时的账号与当前会话不一致，已拒绝。', connection: host.connection.context, ...account })
+    const account = await readAccount(host)
+    return { ok: false, response: workspaceResult({ ok: false, message: '保存时的账号与当前会话不一致，已拒绝。', connection: host.connection.context, ...(account ?? {}) }) }
   }
-  return null
+  const frozen = freezeAccount(host.connection.context)
+  if (!frozen) {
+    return { ok: false, response: workspaceResult({ ok: false, message: host.connection.context.message || '尚未确认 EASY 用户。', connection: host.connection.context }) }
+  }
+  return { ok: true, account: frozen }
 }
 
-async function recheckTasks(host: WorkspaceHost): Promise<void> {
-  if (!host.tasks) return
-  const account = await loadAccount(host.area, host.connection.context.easyOrigin, host.connection.context.operatorId)
-  if (!account.rules) return
-  await refreshStaleTasks(host.tasks, host.connection.context.easyOrigin, host.connection.context.operatorId, account.rules, account.customers)
+async function recheckTasks(host: WorkspaceHost, frozen: AccountContextSnapshot): Promise<void> {
+  if (!host.tasks || !sameAccountContext(host.connection.context, frozen)) return
+  const account = await loadAccount(host.area, frozen.easyOrigin, frozen.operatorId)
+  if (!account.rules || !sameAccountContext(host.connection.context, frozen)) return
+  await refreshStaleTasks(host.tasks, frozen.easyOrigin, frozen.operatorId, account.rules, account.customers, account.templates)
 }
 export async function recheckBoundSession(host: WorkspaceHost): Promise<'same' | 'changed' | 'invalid'> {
   if (host.connection.context.easyTabId == null) return 'invalid'
@@ -162,98 +207,122 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
     const begun = host.connection.beginBind(chosen)
     if (!begun.ok) return workspaceResult({ ok: false, message: begun.message, connection: host.connection.context, tabs })
     await readBoundSession(host)
-    const account = await accountPayload(host)
+    const account = await readAccount(host)
+    if (!account) return staleResult(host)
     return workspaceResult({ ok: host.connection.context.sessionStatus === 'authenticated', message: host.connection.context.message, connection: host.connection.context, tabs, ...account })
   }
   if (action.action === 'refreshSession') {
     await readBoundSession(host)
-    const account = await accountPayload(host)
+    const account = await readAccount(host)
+    if (!account) return staleResult(host)
     return workspaceResult({ ok: host.connection.context.sessionStatus === 'authenticated', message: host.connection.context.message || '已重新检测会话。', connection: host.connection.context, ...account })
   }
   if (action.action === 'load') {
     if (host.connection.context.easyTabId != null) await readBoundSession(host)
-    const account = await accountPayload(host)
+    const account = await readAccount(host)
+    if (!account) return staleResult(host)
     return workspaceResult({ ok: true, message: host.connection.context.message, connection: host.connection.context, ...account })
   }
+  let frozenAccount: AccountContextSnapshot | null = null
   if (action.action === 'saveCustomer' || action.action === 'deleteCustomer' || action.action === 'saveQueryTemplate' || action.action === 'deleteQueryTemplate' || action.action === 'saveRules' || action.action === 'createTaskPlan') {
-    const denied = await mutationGuard(host, action.expectedScope)
-    if (denied) return denied
+    const gate = await mutationGuard(host, action.expectedScope)
+    if (!gate.ok) return gate.response
+    frozenAccount = gate.account
+  }
+  const frozenNow = (): AccountContextSnapshot => {
+    if (!frozenAccount || !sameAccountContext(host.connection.context, frozenAccount)) throw new StaleContextError()
+    return frozenAccount
+  }
+  const failWrite = async (message: string): Promise<BackgroundResponse> => {
+    if (!frozenAccount || !sameAccountContext(host.connection.context, frozenAccount)) return staleResult(host)
+    const account = await readAccount(host, frozenAccount)
+    if (!account) return staleResult(host)
+    return workspaceResult({ ok: false, message, connection: host.connection.context, ...account })
+  }
+  const finishWrite = async (message: string, createdTask: CreatedTaskResult | null = null): Promise<BackgroundResponse> => {
+    if (!frozenAccount || !sameAccountContext(host.connection.context, frozenAccount)) return staleResult(host)
+    const account = await readAccount(host, frozenAccount)
+    if (!account) return staleResult(host)
+    return workspaceResult({ ok: true, message, connection: host.connection.context, createdTask, ...account })
   }
   if (action.action === 'saveCustomer') {
     try {
-      await saveCustomerAccount(host.area, host.connection.context.easyOrigin, host.connection.context.operatorId, action.profile, action.expectedRevision)
-      await recheckTasks(host)
+      const frozen = frozenNow()
+      await saveCustomerAccount(host.area, frozen.easyOrigin, frozen.operatorId, action.profile, action.expectedRevision)
+      await recheckTasks(host, frozen)
+      return await finishWrite('客户配置已保存。名称或 EASY GUID 变化的任务会重新核验。')
     } catch (error) {
-      const account = await accountPayload(host)
-      return workspaceResult({ ok: false, message: error instanceof Error ? error.message : '客户没有保存。', connection: host.connection.context, ...account })
+      if (error instanceof StaleContextError) return staleResult(host)
+      return failWrite(error instanceof Error ? error.message : '客户没有保存。')
     }
-    const account = await accountPayload(host)
-    return workspaceResult({ ok: true, message: '客户配置已保存。名称或 EASY GUID 变化的任务会重新核验。', connection: host.connection.context, ...account })
   }
   if (action.action === 'deleteCustomer') {
     try {
-      await deleteCustomerAccount(host.area, host.connection.context.easyOrigin, host.connection.context.operatorId, action.id, action.expectedRevision)
-      await recheckTasks(host)
+      const frozen = frozenNow()
+      await deleteCustomerAccount(host.area, frozen.easyOrigin, frozen.operatorId, action.id, action.expectedRevision)
+      await recheckTasks(host, frozen)
+      return await finishWrite('客户配置已删除。相关任务会重新核验。')
     } catch (error) {
-      const account = await accountPayload(host)
-      return workspaceResult({ ok: false, message: error instanceof Error ? error.message : '客户没有删除。', connection: host.connection.context, ...account })
+      if (error instanceof StaleContextError) return staleResult(host)
+      return failWrite(error instanceof Error ? error.message : '客户没有删除。')
     }
-    const account = await accountPayload(host)
-    return workspaceResult({ ok: true, message: '客户配置已删除。相关任务会重新核验。', connection: host.connection.context, ...account })
   }
   if (action.action === 'saveQueryTemplate') {
     try {
-      await saveQueryTemplateAccount(host.area, host.connection.context.easyOrigin, host.connection.context.operatorId, action.template, action.expectedVersion)
-      await recheckTasks(host)
+      const frozen = frozenNow()
+      await saveQueryTemplateAccount(host.area, frozen.easyOrigin, frozen.operatorId, action.template, action.expectedVersion)
+      await recheckTasks(host, frozen)
+      return await finishWrite('本地模板已保存。原网站历史模板没有被写入。')
     } catch (error) {
-      const account = await accountPayload(host)
-      return workspaceResult({ ok: false, message: error instanceof Error ? error.message : '模板没有保存。', connection: host.connection.context, ...account })
+      if (error instanceof StaleContextError) return staleResult(host)
+      return failWrite(error instanceof Error ? error.message : '模板没有保存。')
     }
-    const account = await accountPayload(host)
-    return workspaceResult({ ok: true, message: '本地模板已保存。原网站历史模板没有被写入。', connection: host.connection.context, ...account })
   }
   if (action.action === 'deleteQueryTemplate') {
     try {
-      await deleteQueryTemplateAccount(host.area, host.connection.context.easyOrigin, host.connection.context.operatorId, action.id)
-      await recheckTasks(host)
+      const frozen = frozenNow()
+      await deleteQueryTemplateAccount(host.area, frozen.easyOrigin, frozen.operatorId, action.id)
+      await recheckTasks(host, frozen)
+      return await finishWrite('本地模板已删除。')
     } catch (error) {
-      const account = await accountPayload(host)
-      return workspaceResult({ ok: false, message: error instanceof Error ? error.message : '模板没有删除。', connection: host.connection.context, ...account })
+      if (error instanceof StaleContextError) return staleResult(host)
+      return failWrite(error instanceof Error ? error.message : '模板没有删除。')
     }
-    const account = await accountPayload(host)
-    return workspaceResult({ ok: true, message: '本地模板已删除。', connection: host.connection.context, ...account })
   }
   if (action.action === 'saveRules') {
-    const checked = readMailRules(action.bundle, host.connection.context.operatorId)
-    if (!checked.writable) {
-      return workspaceResult({ ok: false, message: checked.warning ?? '发文配置未通过校验。', connection: host.connection.context })
-    }
     try {
-      await saveRuleAccount(host.area, host.connection.context.easyOrigin, host.connection.context.operatorId, checked.bundle, host.tasks)
+      const frozen = frozenNow()
+      const checked = readMailRules(action.bundle, frozen.operatorId)
+      if (!checked.writable) return failWrite(checked.warning ?? '发文配置未通过校验。')
+      await saveRuleAccount(host.area, frozen.easyOrigin, frozen.operatorId, checked.bundle, host.tasks)
+      return await finishWrite('发文规则已保存。内容变化的旧任务会标记为过期。')
     } catch (error) {
-      const account = await accountPayload(host)
-      return workspaceResult({ ok: false, message: error instanceof Error ? error.message : '规则没有保存。', connection: host.connection.context, ...account })
+      if (error instanceof StaleContextError) return staleResult(host)
+      return failWrite(error instanceof Error ? error.message : '规则没有保存。')
     }
-    const account = await accountPayload(host)
-    return workspaceResult({ ok: true, message: '发文规则已保存。内容变化的旧任务会标记为过期。', connection: host.connection.context, ...account })
   }
   if (action.action === 'createTaskPlan') {
-    const accountNow = await loadAccount(host.area, host.connection.context.easyOrigin, host.connection.context.operatorId)
-    if (!accountNow.rules || !host.tasks) {
-      return workspaceResult({ ok: false, message: '没有可核验的发文规则，任务未保存。', connection: host.connection.context })
-    }
     try {
+      const frozen = frozenNow()
+      const accountNow = await loadAccount(host.area, frozen.easyOrigin, frozen.operatorId)
+      if (!sameAccountContext(host.connection.context, frozen)) return staleResult(host)
+      if (!accountNow.rules || !host.tasks) {
+        return workspaceResult({ ok: false, message: '没有可核验的发文规则，任务未保存。', connection: host.connection.context })
+      }
       const task = planTrustedTask({
-        origin: host.connection.context.easyOrigin,
-        operatorId: host.connection.context.operatorId,
+        origin: frozen.easyOrigin,
+        operatorId: frozen.operatorId,
         files: action.files,
         rules: accountNow.rules,
-        profiles: accountNow.customers
+        profiles: accountNow.customers,
+        templates: accountNow.templates
       })
+      if (!sameAccountContext(host.connection.context, frozen)) return staleResult(host)
       await host.tasks.save(task)
-      const account = await accountPayload(host)
-      return workspaceResult({ ok: true, message: `已保存 · 任务 ${task.taskId}`, connection: host.connection.context, ...account })
+      if (!sameAccountContext(host.connection.context, frozen)) return staleResult(host)
+      return await finishWrite(`已保存 · 任务 ${task.taskId}`, createdOf(task))
     } catch (error) {
+      if (error instanceof StaleContextError) return staleResult(host)
       return workspaceResult({ ok: false, message: error instanceof Error ? error.message : '任务没有保存。', connection: host.connection.context })
     }
   }
@@ -358,6 +427,7 @@ async function readBoundSession(host: WorkspaceHost): Promise<void> {
       return
     }
     if (!response.payload.ok) {
+      if (response.payload.error.code === 'REQUEST_ABORTED') return
       host.connection.applySession({
         ok: false,
         status: response.payload.error.code === 'SESSION_EXPIRED' ? 'expired' : 'error',

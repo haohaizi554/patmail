@@ -176,6 +176,16 @@ export type WorkspaceAction =
   | { action: 'forward'; message: ContentRequest }
   | { action: 'runAcceptance'; call: string; caseTypeId?: string; mailId?: string; flowType?: string; expectedFields?: Record<string, string> }
 
+export interface CreatedTaskResult {
+  taskId: string
+  taskFingerprint: string
+  status: string
+  createdAt: string
+  itemCount: number
+  persisted: true
+  fileSource: 'FILE_SOURCE_UNVERIFIED'
+}
+
 export interface WorkspaceResultPayload {
   ok: boolean
   message: string
@@ -187,6 +197,8 @@ export interface WorkspaceResultPayload {
   tasks: TaskSummary[]
   forwarded: AppMessage | null
   appTab: { tabId: number; created: boolean } | null
+  createdTask: CreatedTaskResult | null
+  contextError?: 'STALE_CONTEXT'
 }
 
 export interface TaskSummary {
@@ -411,7 +423,15 @@ function isWorkspaceResult(value: unknown): value is WorkspaceResultPayload {
   if (value.rules !== null && !isRuleBundle(value.rules)) return false
   if (!Array.isArray(value.tasks) || !value.tasks.every(isTaskSummary)) return false
   if (!isForwardedMessage(value.forwarded)) return false
+  if (value.createdTask != null && !isCreatedTask(value.createdTask)) return false
+  if (value.contextError !== undefined && value.contextError !== 'STALE_CONTEXT') return false
   return value.appTab === null || (isRecord(value.appTab) && typeof value.appTab.tabId === 'number' && typeof value.appTab.created === 'boolean')
+}
+
+function isCreatedTask(value: unknown): boolean {
+  return isRecord(value) && typeof value.taskId === 'string' && typeof value.taskFingerprint === 'string' &&
+    typeof value.status === 'string' && typeof value.createdAt === 'string' &&
+    typeof value.itemCount === 'number' && value.persisted === true && value.fileSource === 'FILE_SOURCE_UNVERIFIED'
 }
 
 function isEasyTab(value: unknown): value is EasyTabCandidate {

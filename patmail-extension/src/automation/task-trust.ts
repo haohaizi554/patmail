@@ -26,3 +26,13 @@ export function clientTaskRejection(task: AutomationTask): string {
   if (rebuilt !== task.taskFingerprint) return '任务指纹与业务内容不一致。'
   return ''
 }
+
+/** 已有执行证据的任务不能被同 taskId 的新内容替换。新编号仍可插入。 */
+export function executionOverwriteRejection(existing: AutomationTask | null): string {
+  if (!existing) return ''
+  const sent = existing.checkpoints.some(item => item.requestSent)
+  const mailed = existing.items.some(item => item.easyMailId || item.workflowExecutionId)
+  const locked = existing.status === 'UNKNOWN' || existing.status === 'RUNNING' || existing.status === 'PARTIAL_FAILURE'
+  if (locked || sent || mailed) return '不能覆盖已有执行证据。'
+  return ''
+}

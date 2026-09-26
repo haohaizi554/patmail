@@ -27,6 +27,7 @@ export interface LiveAcceptanceRecord {
   validatedFields: string[]
   matchedWithUi: boolean
   evidenceLevel?: AcceptanceEvidenceLevel
+  evidenceSource?: 'MANUAL_EXPECTATION' | 'EASY_UI_OBSERVED' | 'API_RESPONSE' | 'HAR_CAPTURE' | 'MOCK'
   result: AcceptanceResult
   reason: string
   evidenceHash: string
@@ -63,7 +64,7 @@ function record(partial: Omit<LiveAcceptanceRecord, 'evidenceHash' | 'evidenceLe
       ? (partial.httpStatus > 0 ? 'REQUEST_OBSERVED' : 'NONE')
       : partial.result === 'FAIL'
         ? 'RESPONSE_OBSERVED'
-        : partial.result === 'PASS' && partial.matchedWithUi
+        : partial.result === 'PASS' && partial.matchedWithUi && partial.evidenceSource === 'EASY_UI_OBSERVED'
           ? 'UI_COMPARED'
           : partial.result === 'PASS'
             ? 'RESPONSE_OBSERVED'
@@ -105,7 +106,7 @@ export class LiveEasyAcceptanceRunner {
       return record({ ...base, result: 'BLOCKED', reason: '只读验收不能调用写接口。' })
     }
     if (this.exchange.kind !== 'live') {
-      return record({ ...base, result: 'BLOCKED', reason: 'Mock 响应不能作为现场证据。' })
+      return record({ ...base, result: 'BLOCKED', reason: 'Mock 响应不能作为现场证据。', evidenceSource: 'MOCK' })
     }
     const response = await this.exchange.call(input.call)
     const fields = cleanFields(response.fields)
@@ -131,11 +132,12 @@ export class LiveEasyAcceptanceRunner {
       reason = `字段不一致：${mismatches.join('、')}`
     } else if (Object.keys(expected).length > 0) {
       result = 'PASS'
-      reason = '与原网站 UI 对照通过。'
+      reason = 'API 响应与手工期望一致。'
     } else if (input.call === 'GetUserModel' && fields.userId) {
       result = 'PASS'
       reason = '只读响应结构通过。'
     }
+    const evidenceSource = Object.keys(expected).length > 0 ? 'MANUAL_EXPECTATION' as const : 'API_RESPONSE' as const
     return record({
       ...base,
       finishedAt,
@@ -143,7 +145,8 @@ export class LiveEasyAcceptanceRunner {
       businessStatus: result === 'PASS' ? 'matched' : 'unconfirmed',
       responseShape: response.shape,
       validatedFields: Object.keys(expected).length > 0 ? Object.keys(expected) : Object.keys(fields),
-      matchedWithUi: result === 'PASS' && Object.keys(expected).length > 0,
+      matchedWithUi: false,
+      evidenceSource,
       result,
       reason
     })

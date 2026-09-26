@@ -3,9 +3,11 @@ import { selectionFingerprint } from '../mail/fingerprint'
 import { planDrafts } from '../mail/planner'
 import { planMailGroups } from '../mail/rules/grouping'
 import type { MailRuleBundle, SelectedPatentFile } from '../mail/types'
+import { buildQueryDependencies } from './query-dependency'
 import { sha256Hex } from './sha256'
 import { customerIdentities, createTaskSnapshot, emptyIdentity } from './snapshot'
-import type { AutomationIssue, AutomationTask, AutomationTaskItem, CustomerIdentitySnapshot, TaskCustomer } from './types'
+import type { AutomationIssue, AutomationTask, AutomationTaskItem, CustomerIdentitySnapshot, TaskCustomer, VerifiedSelectionSnapshot } from './types'
+import type { QueryTemplate } from '../query/query-types'
 
 export interface TaskBuildInput {
   origin: string
@@ -13,6 +15,7 @@ export interface TaskBuildInput {
   files: SelectedPatentFile[]
   rules: MailRuleBundle
   profiles: CustomerQueryProfile[]
+  templates?: QueryTemplate[]
   queryTemplateVersion: number
   now?: string
 }
@@ -120,6 +123,16 @@ export function buildTask(input: TaskBuildInput): AutomationTask {
   const warning = new Set(['UNRESOLVED_VARIABLE', 'SUBJECT_NEEDS_CONFIRM'])
   const blocked = items.length === 0 || items.some(item => item.status === 'BLOCKED') || issues.some(item => !warning.has(item.code))
   const sole = customers.length === 1 ? customers[0] : undefined
+  const verifiedSelection: VerifiedSelectionSnapshot[] = files.map(file => ({
+    fileId: file.fileId,
+    querySource: 'FILE_SEARCH_PAGE',
+    customerProfileId: file.customerProfileId ?? '',
+    fileDescription: file.fileDescription,
+    fetchedAt: now,
+    easyOrigin: input.origin,
+    operatorId: input.operatorId,
+    verification: 'FILE_SOURCE_UNVERIFIED'
+  }))
   return {
     taskId, name: `${customers.length > 1 ? '多个客户' : sole?.name || '未绑定客户'} · ${input.files.length} 个文件`,
     origin: input.origin, operatorId: input.operatorId,
@@ -128,6 +141,8 @@ export function buildTask(input: TaskBuildInput): AutomationTask {
     ruleSnapshot: rules, verifiedAt: '',
     selectionFingerprint: selection, taskFingerprint: fingerprint, selectedFiles: files,
     mailRuleRevision: rules.revision, queryTemplateVersion: input.queryTemplateVersion,
+    queryDependencies: buildQueryDependencies(profiles, input.templates ?? []),
+    fileSource: 'FILE_SOURCE_UNVERIFIED', verifiedSelection,
     mailGroups: grouped.groups, mailDrafts: drafts, status: blocked ? 'BLOCKED' : 'DRY_RUN_COMPLETED',
     createdAt: now, updatedAt: now, checkpoints: [], issues, items
   }

@@ -1,4 +1,5 @@
 import type { MailDraftPreview, MailGroup, MailRuleBundle, SelectedPatentFile } from '../mail/types'
+import type { QueryDependencySnapshot } from './query-dependency'
 
 export type AutomationTaskState =
   | 'CREATED' | 'VALIDATING' | 'READY' | 'DRY_RUNNING' | 'DRY_RUN_COMPLETED' | 'CONFIRM_REQUIRED'
@@ -44,6 +45,18 @@ export interface Checkpoint {
   easyMailId: string
   at: string
   note: string
+}
+
+/** 文件选择当时能核对到的范围。没有单文件回读契约时 verification 保持未验证。 */
+export interface VerifiedSelectionSnapshot {
+  fileId: string
+  querySource: 'FILE_SEARCH_PAGE'
+  customerProfileId: string
+  fileDescription: string
+  fetchedAt: string
+  easyOrigin: string
+  operatorId: string
+  verification: 'FILE_SOURCE_UNVERIFIED'
 }
 
 export interface TaskCustomer {
@@ -116,6 +129,11 @@ export interface AutomationTask {
   selectedFiles: SelectedPatentFile[]
   mailRuleRevision: number
   queryTemplateVersion: number
+  /** 实际引用的模板和客户覆盖摘要。旧任务可以没有这份快照。 */
+  queryDependencies?: QueryDependencySnapshot[]
+  /** 页面选择的文件没有按 ID 回读。允许本地规划，不能升级成真实可写任务。 */
+  fileSource?: 'FILE_SOURCE_UNVERIFIED' | 'VERIFIED'
+  verifiedSelection?: VerifiedSelectionSnapshot[]
   mailGroups: MailGroup[]
   mailDrafts: MailDraftPreview[]
   status: AutomationTaskState

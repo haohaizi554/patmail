@@ -51,7 +51,7 @@ function overrideFingerprint(overrides: Record<string, string> | undefined): str
   return Object.keys(overrides).sort().map(key => `${key}=${overrides[key]}`).join('\n')
 }
 
-/** 与发文计划页面使用同一算法，保证后台重算的模板版本和页面一致。 */
-export function queryTemplateVersionOf(profiles: Array<{ id: string; updatedAt: string }>): number {
-  return profiles.map(item => `${item.id}:${item.updatedAt}`).join('|').split('').reduce((sum, char) => sum + char.charCodeAt(0), 0)
+/** 字符码求和已废弃，不能用来判断模板是否变化。模板变化看 queryDependencies。 */
+export function queryTemplateVersionOf(_profiles: Array<{ id: string; updatedAt: string }>): number {
+  return 0
 }
