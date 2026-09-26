@@ -1,3 +1,4 @@
+import { emptyIdentity } from './snapshot'
 import type { AutomationTask, AutomationTaskState, Checkpoint } from './types'
 
 export interface TaskArea {
@@ -28,6 +29,7 @@ export function migrateTask(task: AutomationTask): { task: AutomationTask; migra
   const normalized: AutomationTask = {
     ...task,
     customers: task.customers ?? [],
+    identitySnapshot: task.identitySnapshot ?? [],
     legacyTaskId: task.legacyTaskId ?? '',
     archived: task.archived === true,
     readonly: task.readonly === true || sent,
@@ -37,7 +39,8 @@ export function migrateTask(task: AutomationTask): { task: AutomationTask; migra
       responseReceived: item.responseReceived === true, verified: item.verified === true,
       easyMailId: item.easyMailId ?? '', at: item.at ?? '', note: item.note ?? ''
     })),
-    status: sent ? 'UNKNOWN' : task.status
+    status: sent ? 'UNKNOWN' : task.status,
+    items: task.items.map(item => ({ ...item, customerIdentity: item.customerIdentity ?? emptyIdentity(), easyMailId: item.easyMailId ?? '' }))
   }
   if (UUID.test(task.taskId)) return { task: normalized, migration: null }
   if (!task.taskId || !Array.isArray(task.items)) {
@@ -51,7 +54,7 @@ export function migrateTask(task: AutomationTask): { task: AutomationTask; migra
       taskId: nextId,
       legacyTaskId: task.taskId,
       readonly: sent || normalized.readonly,
-      items: task.items.map(item => ({ ...item, taskId: nextId, easyMailId: item.easyMailId ?? '' }))
+      items: task.items.map(item => ({ ...item, taskId: nextId, easyMailId: item.easyMailId ?? '', customerIdentity: item.customerIdentity ?? emptyIdentity() }))
     },
     migration: { from: task.taskId, to: nextId, at }
   }

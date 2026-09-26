@@ -19,7 +19,7 @@ import type { WorkflowView } from '../workflow/types'
 import type { PlanInput } from '../workflow/planner'
 import { EasyMailReadService } from '../mail/easy/read-service'
 import type { ExistingMailDiagnostic } from '../shared/message'
-import { EasyTransport, type TransportOptions } from './transport'
+import { EasyTransport, type EasyOperation, type TransportOptions } from './transport'
 import { apiError, type ApiResult } from './types'
 
 export interface RuntimeOptions extends TransportOptions {
@@ -34,6 +34,26 @@ function chromeExecutionArea(): ExecutionArea | null {
     get: key => area.get(key) as Promise<Record<string, unknown>>,
     set: items => area.set(items)
   }
+}
+
+const ACCEPTANCE_ROUTE: Record<string, EasyOperation> = {
+  GetUserModel: 'session',
+  GetSearchFiles: 'fileSearch',
+  IPGetBasicData: 'basicData',
+  GetFlowdirection: 'flowDirection',
+  LoadFileTypeByCaseType: 'fileTypeTree',
+  LoadMailType: 'mailType',
+  GetMailInfo: 'getMailInfo',
+  GetMailFile: 'getMailFile',
+  GetMailCase: 'getMailCase',
+  GetMailRule: 'getMailRule',
+  GetCustomerContact: 'getCustomerContact',
+  GetSignature: 'getSignature',
+  GetFlowInfo: 'getFlowInfo',
+  GetFlowHistory: 'getFlowHistory',
+  GetUrgencyList: 'getUrgencyList',
+  GetFlowSubmit: 'getFlowSubmit',
+  GetFlowLastStatus: 'getFlowLastStatus'
 }
 
 function refusedWorkflow(message: string): WorkflowView {
@@ -235,6 +255,30 @@ export class EasyRuntime {
 
   restoreWorkflow(mailId: string): Promise<WorkflowView | null> {
     return this.mailUser().then(user => user.ok ? this.workflow.restore(user.userId, mailId) : null)
+  }
+
+  /** 只读验收探测。写接口不在表内，不会发请求。 */
+  async probeReadonly(call: string): Promise<{ httpStatus: number; sessionOk: boolean; fields: Record<string, string>; shape: string }> {
+    const operation = ACCEPTANCE_ROUTE[call]
+    if (!operation) return { httpStatus: 0, sessionOk: false, fields: {}, shape: 'blocked' }
+    const response = await this.transport.post(operation, new URLSearchParams({ Call: call }))
+    if (!response.ok) {
+      return {
+        httpStatus: response.error.status ?? (response.error.code === 'SESSION_EXPIRED' ? 401 : 0),
+        sessionOk: response.error.code !== 'SESSION_EXPIRED',
+        fields: {},
+        shape: response.error.code
+      }
+    }
+    const data = response.data
+    const fields: Record<string, string> = {}
+    if (data && typeof data === 'object') {
+      const model = (data as { UserModel?: { user_id?: unknown; Name?: unknown } }).UserModel
+      if (model && typeof model.user_id === 'string') fields.userId = model.user_id
+      if (model && typeof model.Name === 'string') fields.displayName = model.Name.slice(0, 80)
+    }
+    const shape = data && typeof data === 'object' ? `object(${Object.keys(data as object).sort().join(',')})` : typeof data
+    return { httpStatus: 200, sessionOk: true, fields, shape }
   }
 
   /** 只读核验一封已有邮件。不保存、不提交。 */

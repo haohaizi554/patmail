@@ -10,8 +10,15 @@ export function sendToBackground(message: BackgroundRequest): Promise<Background
     }
     try {
       chrome.runtime.sendMessage(message, (response: unknown) => {
-        if (chrome.runtime.lastError || !isMessage(response) ||
-          (response.type !== MessageType.Pong && response.type !== MessageType.Error)) {
+        if (chrome.runtime.lastError || !isMessage(response)) {
+          finish(null)
+          return
+        }
+        const accepted = response.type === MessageType.Pong || response.type === MessageType.Error ||
+          response.type === MessageType.ExecutionLease || response.type === MessageType.ExecutionRecovered ||
+          response.type === MessageType.TaskResult || response.type === MessageType.AcceptanceResult ||
+          response.type === MessageType.EvidenceResult
+        if (!accepted) {
           finish(null)
           return
         }

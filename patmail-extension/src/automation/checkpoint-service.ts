@@ -1,4 +1,4 @@
-import { markRequestSent, markUnknown } from './checkpoint'
+import { appendCheckpoint, markRequestSent, markUnknown } from './checkpoint'
 import { STAGES } from './state'
 import type { AutomationTask, StageId } from './types'
 
@@ -12,11 +12,12 @@ export class CheckpointService {
 
   prepare(task: AutomationTask, itemId: string, stage: StageId): Promise<{ ok: boolean; task: AutomationTask; reason: string }> {
     if (STAGES[stage].sideEffect !== 'write') return Promise.resolve({ ok: true, task, reason: '这个阶段没有写请求。' })
-    return this.persist(task, markRequestSent(task, stage, itemId))
+    return this.persist(task, appendCheckpoint(task, stage, 'PREPARED', false, itemId))
   }
 
   markRequestSent(task: AutomationTask, itemId: string, stage: StageId): Promise<{ ok: boolean; task: AutomationTask; reason: string }> {
-    return this.prepare(task, itemId, stage)
+    if (STAGES[stage].sideEffect !== 'write') return Promise.resolve({ ok: true, task, reason: '这个阶段没有写请求。' })
+    return this.persist(task, markRequestSent(task, stage, itemId))
   }
 
   markResponseReceived(task: AutomationTask, itemId: string, stage: StageId): Promise<{ ok: boolean; task: AutomationTask; reason: string }> {

@@ -55,9 +55,29 @@ export const MessageType = {
   DiagnoseExistingMail: 'DIAGNOSE_EXISTING_MAIL',
   ExistingMailDiagnostic: 'EXISTING_MAIL_DIAGNOSTIC',
   ClaimExecution: 'CLAIM_EXECUTION',
+  MarkExecutionPrepared: 'MARK_EXECUTION_PREPARED',
+  MarkExecutionSent: 'MARK_EXECUTION_SENT',
+  MarkExecutionResponse: 'MARK_EXECUTION_RESPONSE',
+  MarkExecutionVerified: 'MARK_EXECUTION_VERIFIED',
+  CompleteExecution: 'COMPLETE_EXECUTION',
+  ReleaseExecution: 'RELEASE_EXECUTION',
+  MarkExecutionUnknown: 'MARK_EXECUTION_UNKNOWN',
   ExecutionLease: 'EXECUTION_LEASE',
   RecoverExecution: 'RECOVER_EXECUTION',
   ExecutionRecovered: 'EXECUTION_RECOVERED',
+  ListTasks: 'LIST_TASKS',
+  GetTask: 'GET_TASK',
+  SaveTask: 'SAVE_TASK',
+  ArchiveTask: 'ARCHIVE_TASK',
+  ValidateTaskMetadata: 'VALIDATE_TASK_METADATA',
+  TaskResult: 'TASK_RESULT',
+  SaveAcceptance: 'SAVE_ACCEPTANCE',
+  ListAcceptance: 'LIST_ACCEPTANCE',
+  AcceptanceResult: 'ACCEPTANCE_RESULT',
+  SaveEvidence: 'SAVE_EVIDENCE',
+  ListEvidence: 'LIST_EVIDENCE',
+  EvidenceResult: 'EVIDENCE_RESULT',
+  RunReadonlyAcceptance: 'RUN_READONLY_ACCEPTANCE',
   WorkflowResult: 'WORKFLOW_RESULT',
   Error: 'ERROR'
 } as const
@@ -81,6 +101,7 @@ export type ContentRequest =
   | Response<'PREVIEW_WORKFLOW', { executionId: string; nodeId: string; reviewerId: string; auditType: 'submit' | 'handover'; remark: string; urgencyId: string }>
   | Response<'RESTORE_WORKFLOW', { mailId: string }>
   | Response<'DIAGNOSE_EXISTING_MAIL', { mailId: string; flowType: string }>
+  | Response<'RUN_READONLY_ACCEPTANCE', { call: string; expected: Record<string, string> }>
 export type ErrorMessage = Response<'ERROR', { message: string }>
 export interface ExistingMailDiagnostic {
   mailId: string
@@ -98,12 +119,50 @@ export interface ExecutionLeasePayload {
 export type BackgroundRequest =
   | Request<'PING'>
   | Response<'CLAIM_EXECUTION', { origin: string; operatorId: string; taskFingerprint: string }>
+  | Response<'MARK_EXECUTION_PREPARED', LeaseCommand>
+  | Response<'MARK_EXECUTION_SENT', LeaseCommand>
+  | Response<'MARK_EXECUTION_RESPONSE', LeaseCommand>
+  | Response<'MARK_EXECUTION_VERIFIED', LeaseCommand>
+  | Response<'COMPLETE_EXECUTION', LeaseCommand>
+  | Response<'RELEASE_EXECUTION', LeaseCommand>
+  | Response<'MARK_EXECUTION_UNKNOWN', LeaseCommand>
   | Response<'RECOVER_EXECUTION', { origin: string; operatorId: string }>
+  | Response<'LIST_TASKS', { origin: string; operatorId: string }>
+  | Response<'GET_TASK', { origin: string; operatorId: string; taskId: string }>
+  | Response<'SAVE_TASK', { task: Record<string, unknown> }>
+  | Response<'ARCHIVE_TASK', { origin: string; operatorId: string; taskId: string }>
+  | Response<'VALIDATE_TASK_METADATA', { origin: string; operatorId: string; taskId: string }>
+  | Response<'SAVE_ACCEPTANCE', { record: Record<string, unknown> }>
+  | Response<'LIST_ACCEPTANCE', { origin: string; operatorId: string }>
+  | Response<'SAVE_EVIDENCE', { record: Record<string, unknown> }>
+  | Response<'LIST_EVIDENCE', { origin: string; call: string }>
 export type BackgroundResponse =
   | Response<'PONG', { ok: true }>
   | Response<'EXECUTION_LEASE', ExecutionLeasePayload>
   | Response<'EXECUTION_RECOVERED', { leases: ExecutionLeasePayload['lease'][] }>
+  | Response<'TASK_RESULT', { ok: boolean; message: string; tasks: TaskSummary[]; task: Record<string, unknown> | null }>
+  | Response<'ACCEPTANCE_RESULT', { records: Record<string, unknown>[] }>
+  | Response<'EVIDENCE_RESULT', { records: Record<string, unknown>[] }>
   | ErrorMessage
+
+export interface LeaseCommand {
+  origin: string
+  operatorId: string
+  taskFingerprint: string
+  executionId: string
+  leaseVersion: number
+}
+
+export interface TaskSummary {
+  taskId: string
+  createdAt: string
+  customerName: string
+  fileCount: number
+  mailCount: number
+  status: string
+  verifiedAt: string
+  updatedAt: string
+}
 export type ContentResponse =
   | Response<'SCAN_RESULT', PageSnapshot>
   | Response<'PAGE_INFO', PageInfo>
@@ -158,11 +217,34 @@ export function isMessage(value: unknown): value is AppMessage {
     case MessageType.DiagnoseExistingMail:
       return isRecord(value.payload) && isFlowId(value.payload.mailId) && isFlowType(value.payload.flowType) &&
         Object.keys(value.payload).length === 2
+    case MessageType.RunReadonlyAcceptance:
+      return isReadonlyProbe(value.payload)
     case MessageType.ClaimExecution:
       return isClaim(value.payload)
+    case MessageType.MarkExecutionPrepared:
+    case MessageType.MarkExecutionSent:
+    case MessageType.MarkExecutionResponse:
+    case MessageType.MarkExecutionVerified:
+    case MessageType.CompleteExecution:
+    case MessageType.ReleaseExecution:
+    case MessageType.MarkExecutionUnknown:
+      return isLeaseCommand(value.payload)
     case MessageType.RecoverExecution:
-      return isRecord(value.payload) && typeof value.payload.origin === 'string' && value.payload.origin.length <= 200 &&
-        typeof value.payload.operatorId === 'string' && value.payload.operatorId.length <= 80 && Object.keys(value.payload).length === 2
+    case MessageType.ListTasks:
+    case MessageType.ListAcceptance:
+      return isOperatorScope(value.payload)
+    case MessageType.GetTask:
+    case MessageType.ArchiveTask:
+    case MessageType.ValidateTaskMetadata:
+      return isTaskAddress(value.payload)
+    case MessageType.SaveTask:
+      return isRecord(value.payload) && isStoredTask(value.payload.task) && Object.keys(value.payload).length === 1
+    case MessageType.SaveAcceptance:
+    case MessageType.SaveEvidence:
+      return isRecord(value.payload) && isPlainRecord(value.payload.record) && Object.keys(value.payload).length === 1
+    case MessageType.ListEvidence:
+      return isRecord(value.payload) && typeof value.payload.origin === 'string' && typeof value.payload.call === 'string' &&
+        value.payload.origin.length <= 200 && value.payload.call.length <= 80 && Object.keys(value.payload).length === 2
     case MessageType.PreviewWorkflow:
       return isWorkflowPreview(value.payload)
     case MessageType.FindMailExecution:
@@ -205,6 +287,13 @@ export function isMessage(value: unknown): value is AppMessage {
         (value.payload.lease === null || isLeaseSummary(value.payload.lease))
     case MessageType.ExecutionRecovered:
       return isRecord(value.payload) && Array.isArray(value.payload.leases) && value.payload.leases.every(item => item === null || isLeaseSummary(item))
+    case MessageType.TaskResult:
+      return isRecord(value.payload) && typeof value.payload.ok === 'boolean' && typeof value.payload.message === 'string' &&
+        Array.isArray(value.payload.tasks) && value.payload.tasks.every(isTaskSummary) &&
+        (value.payload.task === null || isStoredTask(value.payload.task))
+    case MessageType.AcceptanceResult:
+    case MessageType.EvidenceResult:
+      return isRecord(value.payload) && Array.isArray(value.payload.records) && value.payload.records.every(isPlainRecord)
     case MessageType.Error:
       return isRecord(value.payload) && typeof value.payload.message === 'string'
     default:
@@ -223,8 +312,51 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.SaveEasyMail || value.type === MessageType.FindMailExecution ||
     value.type === MessageType.InspectEasyMail || value.type === MessageType.ReadWorkflow ||
     value.type === MessageType.RefreshWorkflow || value.type === MessageType.PreviewWorkflow ||
-    value.type === MessageType.RestoreWorkflow || value.type === MessageType.DiagnoseExistingMail
+    value.type === MessageType.RestoreWorkflow || value.type === MessageType.DiagnoseExistingMail ||
+    value.type === MessageType.RunReadonlyAcceptance
   )
+}
+
+function isOperatorScope(value: unknown): value is { origin: string; operatorId: string } {
+  return isRecord(value) && typeof value.origin === 'string' && value.origin.length > 0 && value.origin.length <= 200 &&
+    typeof value.operatorId === 'string' && value.operatorId.length <= 80 && Object.keys(value).length === 2
+}
+
+function isTaskAddress(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.taskId !== 'string' || value.taskId.length > 80 || Object.keys(value).length !== 3) return false
+  return typeof value.origin === 'string' && typeof value.operatorId === 'string' && isOperatorScope({ origin: value.origin, operatorId: value.operatorId })
+}
+
+function isLeaseCommand(value: unknown): value is LeaseCommand {
+  return isRecord(value) && typeof value.origin === 'string' && value.origin.length <= 200 &&
+    typeof value.operatorId === 'string' && value.operatorId.length <= 80 &&
+    typeof value.taskFingerprint === 'string' && value.taskFingerprint.length > 0 && value.taskFingerprint.length <= 128 &&
+    typeof value.executionId === 'string' && value.executionId.length <= 80 &&
+    typeof value.leaseVersion === 'number' && Number.isInteger(value.leaseVersion) &&
+    Object.keys(value).length === 5
+}
+
+function isStoredTask(value: unknown): value is Record<string, unknown> {
+  return isPlainRecord(value) && typeof value.taskId === 'string' && typeof value.operatorId === 'string' &&
+    typeof value.origin === 'string' && typeof value.taskFingerprint === 'string' && Array.isArray(value.items)
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) return false
+  const keys = Object.keys(value).join(',')
+  return !/cookie|authorization|password|token/i.test(keys)
+}
+
+function isTaskSummary(value: unknown): boolean {
+  return isRecord(value) && typeof value.taskId === 'string' && typeof value.customerName === 'string' &&
+    typeof value.status === 'string' && typeof value.createdAt === 'string' && typeof value.fileCount === 'number' &&
+    typeof value.mailCount === 'number'
+}
+
+function isReadonlyProbe(value: unknown): boolean {
+  return isRecord(value) && typeof value.call === 'string' && value.call.length <= 80 &&
+    isRecord(value.expected) && Object.values(value.expected).every(item => typeof item === 'string') &&
+    Object.keys(value.expected).length <= 20 && Object.keys(value).length === 2
 }
 
 function isClaim(value: unknown): value is { origin: string; operatorId: string; taskFingerprint: string } {

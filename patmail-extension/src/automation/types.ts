@@ -51,6 +51,15 @@ export interface TaskCustomer {
   name: string
 }
 
+/** 冻结的客户身份。easyCustomerId 只来自已确认的 EASY GUID，不用本地 Profile 编号代替。 */
+export interface CustomerIdentitySnapshot {
+  profileId: string
+  profileName: string
+  easyCustomerId: string
+  bindingSource: string
+  confirmed: boolean
+}
+
 export type EvidenceLevel = 'UNKNOWN' | 'REQUEST_OBSERVED' | 'RESPONSE_OBSERVED' | 'READBACK_VERIFIED'
 
 export interface AutomationStagePlan {
@@ -70,6 +79,7 @@ export interface AutomationTaskItem {
   itemId: string
   taskId: string
   customerProfileId: string
+  customerIdentity: CustomerIdentitySnapshot
   fileIds: string[]
   fileNames: string[]
   fileDescriptionIdentity: string
@@ -92,6 +102,7 @@ export interface AutomationTask {
   customerProfileId: string
   customerName: string
   customers: TaskCustomer[]
+  identitySnapshot: CustomerIdentitySnapshot[]
   legacyTaskId: string
   archived: boolean
   readonly: boolean
@@ -128,7 +139,7 @@ export interface ExecutionLease {
   executionId: string
   taskFingerprint: string
   owner: string
-  status: 'RUNNING' | 'UNKNOWN' | 'RELEASED'
+  status: 'CLAIMED' | 'PREPARED' | 'REQUEST_SENT' | 'RESPONSE_RECEIVED' | 'VERIFIED' | 'COMPLETED' | 'UNKNOWN' | 'RELEASED' | 'RUNNING'
   requestSent: boolean
   easyMailId: string
   startedAt: string

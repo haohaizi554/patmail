@@ -3,6 +3,7 @@ import { sendToBackground } from '../utils/runtime'
 import { injectPanel } from './injector'
 import { readPageInfo, scanPage } from './scanner'
 import { EasyRuntime } from '../api/client'
+import { LiveEasyAcceptanceRunner } from '../automation/acceptance-runner'
 
 // API 请求始终由目标页面同源的 Content Script 发起，沿用浏览器已有会话。
 const easyRuntime = new EasyRuntime(location.origin)
@@ -60,6 +61,19 @@ const bridge: MessageBridge = {
         return { type: MessageType.WorkflowResult, payload: { view: await easyRuntime.restoreWorkflow(message.payload.mailId) } }
       case MessageType.DiagnoseExistingMail:
         return { type: MessageType.ExistingMailDiagnostic, payload: await easyRuntime.diagnoseExistingMail(message.payload.mailId, message.payload.flowType) }
+      case MessageType.RunReadonlyAcceptance: {
+        const runner = new LiveEasyAcceptanceRunner({
+          kind: 'live',
+          call: () => easyRuntime.probeReadonly(message.payload.call)
+        })
+        const row = await runner.run({
+          origin: location.origin,
+          operatorId: '',
+          call: message.payload.call,
+          expected: message.payload.expected
+        })
+        return { type: MessageType.AcceptanceResult, payload: { records: [row as unknown as Record<string, unknown>] } }
+      }
       case MessageType.CancelFileSearch:
         easyRuntime.cancelFileSearch()
         return { type: MessageType.FileSearchCancelled, payload: { ok: true } }

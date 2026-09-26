@@ -4,6 +4,8 @@ import type { CustomerQueryProfile } from '../customer/types'
 import { planDrafts, selectionFingerprint, upsertMapping, type MailDraftPreview, type MailRuleBundle, type SelectedPatentFile, MailRuleRepository, emptyMailRules } from '../mail'
 import type { MailExecutionState } from '../mail/easy/types'
 import AutomationPanel from './AutomationPanel.vue'
+import ControlledExecutionPanel from './ControlledExecutionPanel.vue'
+import LiveAcceptancePanel from './LiveAcceptancePanel.vue'
 import MailExecutionPanel from './MailExecutionPanel.vue'
 import WorkflowPanel from './WorkflowPanel.vue'
 import { ChromeBundleRepository, storageKey } from '../storage/query-bundle'
@@ -204,6 +206,8 @@ watch(() => props.files, () => { drafts.value = [] }, { deep: true })
     <button type="button" class="text-button" @click="importRules">导入配置</button>
     <button type="button" class="search-submit" :disabled="files.length === 0" @click="preview">重新生成预览</button>
     <AutomationPanel :bridge="bridge" :user-id="userId" :files="files" :rules="bundle" :profiles="customers" :query-template-version="queryTemplateVersion" />
+    <LiveAcceptancePanel :bridge="bridge" :user-id="userId" />
+    <ControlledExecutionPanel :bridge="bridge" :user-id="userId" :files="files" :rules="bundle" :profiles="customers" :query-template-version="queryTemplateVersion" />
     <article v-for="draft in drafts" :key="draft.id" class="file-card">
       <strong>{{ draft.status === 'ready' ? '可核对' : draft.status === 'warning' ? '需确认' : '不能发文' }} · {{ draft.sendMode === 'single_file' ? '单个来文' : '同描述合并' }}</strong>
       <p class="hint">客户配置 {{ draft.customerProfileId || '未绑定' }} · {{ draft.files.length }} 个文件 · {{ draft.mailTypeName || '未映射发文类型' }}</p>

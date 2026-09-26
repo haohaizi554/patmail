@@ -1,20 +1,21 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { productionWriteAllowed } from '../automation/contract-capture'
 import { runDryRun } from '../automation/dry-run'
 import { LIVE_EASY_ACCEPTANCE } from '../automation/easy-acceptance'
-import { createBrowserTaskStore } from '../automation/indexed-store'
 import { exportDiagnostic } from '../automation/logger'
+import { isConfirmedOperator } from '../automation/operator'
 import { recoverTask } from '../automation/recovery'
 import { buildStagePlans } from '../automation/stage-plan'
-import { AutomationTaskService } from '../automation/task-service'
+import { validateTask } from '../automation/task-validator'
 import type { AutomationTask } from '../automation/types'
+import { sendToBackground } from '../utils/runtime'
 import { EASY_MAIL_WRITES_ENABLED } from '../mail/easy/gate'
 import type { CustomerQueryProfile } from '../customer/types'
 import type { MailRuleBundle, SelectedPatentFile } from '../mail/types'
 import { MAIL_FLOW_TYPE } from '../workflow/contracts'
 import { WORKFLOW_WRITES_ENABLED } from '../workflow/gate'
-import { MessageType, type ExistingMailDiagnostic, type MessageBridge } from '../shared/message'
+import { MessageType, type ExistingMailDiagnostic, type MessageBridge, type TaskSummary } from '../shared/message'
 
 const props = defineProps<{
   bridge?: MessageBridge
@@ -25,8 +26,7 @@ const props = defineProps<{
   queryTemplateVersion: number
 }>()
 
-const service = new AutomationTaskService(createBrowserTaskStore())
-const history = ref<AutomationTask[]>([])
+const history = ref<TaskSummary[]>([])
 const checked = ref<AutomationTask | null>(null)
 const persisted = ref(false)
 const showBlockers = ref(false)
@@ -43,10 +43,12 @@ const recovery = computed(() => checked.value ? recoverTask(checked.value) : nul
 const blockedPlans = computed(() => checked.value ? buildStagePlans(checked.value).filter(item => item.itemId === (active.value?.itemId ?? '') && !item.canExecute).slice(0, 8) : [])
 const customerLabel = computed(() => checked.value?.customers.map(item => item.name).join('、') || checked.value?.customerName || '未绑定')
 
+const identityReady = computed(() => isConfirmedOperator(props.userId))
+
 function currentInput() {
   return {
     origin: location.origin,
-    operatorId: props.userId || 'session',
+    operatorId: props.userId,
     files: props.files,
     rules: props.rules,
     profiles: props.profiles,
@@ -55,10 +57,21 @@ function currentInput() {
 }
 
 async function reload(): Promise<void> {
-  history.value = await service.listTasks(location.origin, props.userId || 'session')
+  if (!identityReady.value) {
+    history.value = []
+    return
+  }
+  const response = await sendToBackground({ type: MessageType.ListTasks, payload: { origin: location.origin, operatorId: props.userId } })
+  history.value = response?.type === MessageType.TaskResult ? response.payload.tasks : []
 }
 
 onMounted(() => { void reload() })
+watch(() => props.userId, () => {
+  checked.value = null
+  persisted.value = false
+  history.value = []
+  void reload()
+})
 
 async function plan(): Promise<void> {
   const input = currentInput()
@@ -67,23 +80,39 @@ async function plan(): Promise<void> {
     message.value = '计划包含写请求，已停止。'
     return
   }
-  const task = service.validateTask(result.task, input)
-  const saved = await service.saveTask(task)
-  persisted.value = saved.ok
+  const task = validateTask(result.task, input)
   checked.value = task
   selectedItem.value = result.task.items[0]?.itemId ?? ''
-  message.value = saved.ok ? '计划已保存。没有发出写请求。' : saved.message
-  if (saved.ok) await reload()
+  if (!identityReady.value) {
+    persisted.value = false
+    message.value = '当前 EASY 用户身份尚未确认。计划不会持久化，也不能执行。'
+    return
+  }
+  const response = await sendToBackground({ type: MessageType.SaveTask, payload: { task: task as unknown as Record<string, unknown> } })
+  const saved = response?.type === MessageType.TaskResult && response.payload.ok
+  persisted.value = saved
+  message.value = saved ? '计划已保存。没有发出写请求。' : response?.type === MessageType.TaskResult ? response.payload.message : '任务保存失败。'
+  if (saved) await reload()
 }
 
 async function recheck(): Promise<void> {
   if (!checked.value) return
-  checked.value = service.validateTask(checked.value, currentInput())
+  checked.value = validateTask(checked.value, currentInput())
   message.value = checked.value.status === 'UNKNOWN' ? '结果未知，只做只读核对，没有改回可执行。' : checked.value.status === 'STALE' ? '当前文件或规则内容已经变化，旧计划不能继续。' : '已按当前配置重新核对。'
 }
 
-function openHistory(task: AutomationTask): void {
-  checked.value = service.validateTask(task, currentInput())
+async function openHistory(item: TaskSummary): Promise<void> {
+  if (!identityReady.value) return
+  const response = await sendToBackground({
+    type: MessageType.GetTask,
+    payload: { origin: location.origin, operatorId: props.userId, taskId: item.taskId }
+  })
+  if (response?.type !== MessageType.TaskResult || !response.payload.task) {
+    message.value = '没有读到这个任务。'
+    return
+  }
+  const task = validateTask(response.payload.task as unknown as AutomationTask, currentInput())
+  checked.value = task
   persisted.value = true
   selectedItem.value = task.items[0]?.itemId ?? ''
 }
@@ -129,12 +158,13 @@ async function diagnose(): Promise<void> {
     <button type="button" class="text-button" :disabled="!checked" @click="showBlockers = !showBlockers">查看阻塞项</button>
     <button type="button" class="text-button" :disabled="!checked" @click="recheck">重新核对</button>
     <button type="button" class="text-button" :disabled="!checked" @click="copyDiagnostic">复制脱敏诊断</button>
+    <p v-if="!identityReady" class="hint">当前 EASY 用户身份尚未确认。计划不会持久化，也不能执行。</p>
     <p class="hint">现场只读验收：{{ acceptance.status }}。{{ acceptance.reason }}</p>
     <p class="hint">写门禁保持关闭。静态契约目录不能手动改成已验证。</p>
     <p v-if="message" class="hint">{{ message }}</p>
     <ul v-if="history.length">
       <li v-for="item in history" :key="item.taskId">
-        <button type="button" class="text-button" @click="openHistory(item)">{{ item.taskId }} · {{ item.customerName || '未绑定' }} · 文件 {{ item.selectedFiles.length }} · 邮件 {{ item.items.length }} · {{ item.status }} · 创建 {{ item.createdAt }} · 核对 {{ item.verifiedAt || item.updatedAt }}</button>
+        <button type="button" class="text-button" @click="openHistory(item)">{{ item.taskId }} · {{ item.customerName || '未绑定' }} · 文件 {{ item.fileCount }} · 邮件 {{ item.mailCount }} · {{ item.status }} · 创建 {{ item.createdAt }} · 核对 {{ item.verifiedAt || item.updatedAt }}</button>
       </li>
     </ul>
     <article v-if="checked" class="file-card">

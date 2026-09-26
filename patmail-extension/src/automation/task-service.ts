@@ -1,3 +1,4 @@
+import { isConfirmedOperator } from './operator'
 import { recoverTask, type RecoveryAction } from './recovery'
 import type { MemoryTaskRepository, TaskRepository } from './repository'
 import { buildTask, type TaskBuildInput } from './task-builder'
@@ -16,6 +17,9 @@ export class AutomationTaskService {
 
   createTask(input: TaskBuildInput): Promise<{ ok: true; task: AutomationTask; persisted: true } | { ok: false; task: AutomationTask; persisted: false; message: string }> {
     const task = validateTask(buildTask(input), input)
+    if (!isConfirmedOperator(input.operatorId)) {
+      return Promise.resolve({ ok: false, task, persisted: false, message: '当前 EASY 用户身份尚未确认。计划不会持久化，也不能执行。' })
+    }
     return this.store.save(task).then(() => this.store.list(task.origin, task.operatorId, true).then(tasks => {
       if (!tasks.some(item => item.taskId === task.taskId)) {
         return { ok: false as const, task, persisted: false as const, message: '任务没有写入存储。' }
@@ -25,6 +29,7 @@ export class AutomationTaskService {
   }
 
   listTasks(origin: string, operatorId: string): Promise<AutomationTask[]> {
+    if (!isConfirmedOperator(operatorId)) return Promise.resolve([])
     return this.store.list(origin, operatorId)
   }
 
@@ -34,6 +39,9 @@ export class AutomationTaskService {
   }
 
   async saveTask(task: AutomationTask): Promise<{ ok: boolean; message: string }> {
+    if (!isConfirmedOperator(task.operatorId)) {
+      return { ok: false, message: '当前 EASY 用户身份尚未确认。计划不会持久化，也不能执行。' }
+    }
     try {
       await this.store.save(task)
       return { ok: true, message: '' }
