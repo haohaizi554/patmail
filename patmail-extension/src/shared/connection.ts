@@ -16,6 +16,14 @@ export interface EasyConnectionContext {
   connectionVersion: number
 }
 
+/** 调用方声称自己当时看到的账号。Background 只把它当预期，不把它当身份。 */
+export interface ExpectedAccountScope {
+  easyOrigin: string
+  operatorId: string
+  easyTabId: number
+  connectionVersion: number
+}
+
 /** 只保存可恢复的候选绑定。不含 Cookie、Token 或完整用户模型。 */
 export interface ConnectionSnapshot {
   easyOrigin: string
@@ -223,5 +231,29 @@ export class EasyConnectionController {
       lastOperatorId: this.context.operatorId || this.context.lastOperatorId,
       connectionVersion: this.context.connectionVersion
     }
+  }
+}
+
+export function sameConnectionSnapshot(left: ConnectionSnapshot | null, right: ConnectionSnapshot): boolean {
+  if (!left) return false
+  return left.easyOrigin === right.easyOrigin && left.easyTabId === right.easyTabId &&
+    left.lastOperatorId === right.lastOperatorId && left.connectionVersion === right.connectionVersion
+}
+
+export function accountScopeMatches(context: EasyConnectionContext, scope: ExpectedAccountScope): boolean {
+  return context.sessionStatus === 'authenticated' &&
+    context.easyOrigin === scope.easyOrigin &&
+    context.operatorId === scope.operatorId &&
+    context.easyTabId === scope.easyTabId &&
+    context.connectionVersion === scope.connectionVersion
+}
+
+export function scopeFromConnection(context: EasyConnectionContext): ExpectedAccountScope | null {
+  if (context.sessionStatus !== 'authenticated' || context.easyTabId == null || !context.operatorId) return null
+  return {
+    easyOrigin: context.easyOrigin,
+    operatorId: context.operatorId,
+    easyTabId: context.easyTabId,
+    connectionVersion: context.connectionVersion
   }
 }

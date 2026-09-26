@@ -22,6 +22,7 @@ export function downgradeClientAcceptance(record: LiveAcceptanceRecord): LiveAcc
     ...record,
     result: record.result === 'PASS' ? 'BLOCKED' : record.result,
     matchedWithUi: false,
+    evidenceLevel: record.result === 'PASS' ? 'NONE' : record.evidenceLevel,
     reason: record.result === 'PASS' ? '界面提交不能成为验收通过证明。' : record.reason,
     businessStatus: record.result === 'PASS' ? 'unconfirmed' : record.businessStatus
   }

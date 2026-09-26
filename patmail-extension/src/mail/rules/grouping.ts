@@ -8,8 +8,9 @@ export interface GroupingResult {
 function identity(file: SelectedPatentFile): { customer: string; description: string; label: string } | null {
   const binding = file.customerBinding
   const confirmed = binding?.confirmed === true && binding.profileId.trim() && binding.profileId === file.customerProfileId?.trim()
+  const easy = (file.customerId ?? '').trim()
   const customer = confirmed
-    ? `profile:${binding.profileId.trim()}|source:${binding.sourceCustomerName.trim()}`
+    ? `profile:${binding.profileId.trim()}|easy:${easy}|source:${binding.sourceCustomerName.trim()}`
     : ''
   const description = file.fileDescriptionId?.trim()
     ? `id:${file.fileDescriptionId.trim()}`

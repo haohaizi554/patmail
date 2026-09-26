@@ -3,6 +3,7 @@ import { downgradeClientAcceptance, downgradeClientEvidence } from '../automatio
 import { type EvidenceRepository, type EvidenceSource, type StoredEvidence } from '../automation/evidence-store'
 import { ExecutionLedger } from '../automation/ledger'
 import { isConfirmedOperator } from '../automation/operator'
+import { clientTaskRejection } from '../automation/task-trust'
 import type { TaskStore } from '../automation/task-service'
 import type { AutomationTask } from '../automation/types'
 import { MessageType, type AppMessage, type BackgroundResponse, type TaskSummary } from '../shared/message'
@@ -93,6 +94,8 @@ export async function handleAuthorityMessage(message: AppMessage, deps: Authorit
     if (!isConfirmedOperator(task.operatorId)) {
       return { type: MessageType.TaskResult, payload: { ok: false, message: '当前 EASY 用户身份尚未确认。计划不会持久化，也不能执行。', tasks: [], task: null } }
     }
+    const rejection = clientTaskRejection(task)
+    if (rejection) return { type: MessageType.TaskResult, payload: { ok: false, message: rejection, tasks: [], task: null } }
     await deps.tasks.save(task)
     return { type: MessageType.TaskResult, payload: { ok: true, message: '', tasks: [], task: null } }
   }

@@ -4,6 +4,7 @@ import { plainClone } from '../../automation/snapshot'
 import { upsertMapping } from '../../mail'
 import type { MailRuleBundle } from '../../mail/types'
 import { isQueryGuid } from '../../query/query-validator'
+import { scopeFromConnection, type ExpectedAccountScope } from '../../shared/connection'
 import { useWorkspace } from '../composables/useWorkspace'
 import CustomerPolicyEditor from '../components/rules/CustomerPolicyEditor.vue'
 import DescriptionMailTypeEditor from '../components/rules/DescriptionMailTypeEditor.vue'
@@ -12,22 +13,28 @@ import SignatureEditor from '../components/rules/SignatureEditor.vue'
 import SubjectRuleEditor from '../components/rules/SubjectRuleEditor.vue'
 import BodyRuleEditor from '../components/rules/BodyRuleEditor.vue'
 
-const { connection, customers, rules, call } = useWorkspace()
+const { connection, customers, rules, accountEpoch, call } = useWorkspace()
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
 const draft = ref<MailRuleBundle | null>(null)
+const draftScope = ref<ExpectedAccountScope | null>(null)
 const message = ref('')
 const importText = ref('')
 
 watch(rules, (bundle) => {
   draft.value = bundle ? plainClone(bundle) : null
+  draftScope.value = scopeFromConnection(connection.value)
 }, { immediate: true })
+watch(accountEpoch, () => { importText.value = '' })
 
 async function persist(mutate: (bundle: MailRuleBundle) => void): Promise<void> {
-  if (!draft.value) return
+  if (!draft.value || !draftScope.value) {
+    message.value = '尚未确认账号，未保存。'
+    return
+  }
   const next = plainClone(draft.value)
   mutate(next)
   next.ownerId = connection.value.operatorId
-  const result = await call({ action: 'saveRules', bundle: next })
+  const result = await call({ action: 'saveRules', bundle: next, expectedScope: draftScope.value })
   message.value = result?.message || '规则没有保存。'
   if (result?.rules) draft.value = plainClone(result.rules)
 }

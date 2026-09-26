@@ -22,6 +22,7 @@ export class CustomerQueryService {
       baseTemplateId: input.baseTemplateId.trim(),
       overrides: { ...input.overrides },
       enabled: input.enabled,
+      revision: input.revision ?? existing?.revision ?? 1,
       createdAt: existing?.createdAt ?? this.now(),
       updatedAt: this.now()
     }

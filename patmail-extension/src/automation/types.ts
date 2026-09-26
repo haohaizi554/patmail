@@ -58,6 +58,9 @@ export interface CustomerIdentitySnapshot {
   easyCustomerId: string
   bindingSource: string
   confirmed: boolean
+  baseTemplateId: string
+  overrideFingerprint: string
+  enabled: boolean
 }
 
 export type EvidenceLevel = 'UNKNOWN' | 'REQUEST_OBSERVED' | 'RESPONSE_OBSERVED' | 'READBACK_VERIFIED'

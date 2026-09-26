@@ -8,11 +8,13 @@ import ControlledExecutionPanel from './ControlledExecutionPanel.vue'
 import LiveAcceptancePanel from './LiveAcceptancePanel.vue'
 import MailExecutionPanel from './MailExecutionPanel.vue'
 import WorkflowPanel from './WorkflowPanel.vue'
-import { plainClone } from '../automation/snapshot'
+import { plainClone, queryTemplateVersionOf } from '../automation/snapshot'
 import { isConfirmedOperator } from '../automation/operator'
 import { ChromeBundleRepository, storageKey } from '../storage/query-bundle'
+import { scopeFromConnection } from '../shared/connection'
 import { MessageType, type MessageBridge } from '../shared/message'
 import { sendToBackground } from '../utils/runtime'
+import { useWorkspace } from '../app/composables/useWorkspace'
 
 const props = defineProps<{ bridge?: MessageBridge; userId: string; files: SelectedPatentFile[]; pageOrigin?: string }>()
 const accountOrigin = computed(() => props.pageOrigin || location.origin)
@@ -42,7 +44,7 @@ const bodySupplement = ref('')
 const importText = ref('')
 
 const owner = computed(() => props.userId || 'session')
-const queryTemplateVersion = computed(() => customers.value.map(item => `${item.id}:${item.updatedAt}`).join('|').split('').reduce((sum, char) => sum + char.charCodeAt(0), 0))
+const queryTemplateVersion = computed(() => queryTemplateVersionOf(customers.value))
 const scopeLabel = computed(() => scope.value === 'account' ? '当前账号' : '本次页面，未套用其他账号配置')
 
 async function reloadCustomers(): Promise<void> {
@@ -80,7 +82,12 @@ async function save(mutate: (draft: MailRuleBundle) => void): Promise<void> {
   const draft = plainClone(bundle.value)
   mutate(draft)
   draft.ownerId = isConfirmedOperator(props.userId) ? props.userId : owner.value
-  const response = await sendToBackground({ type: MessageType.Workspace, payload: { action: 'saveRules', bundle: draft } }, 30_000)
+  const scope = scopeFromConnection(useWorkspace().connection.value)
+  if (!scope || scope.operatorId !== props.userId) {
+    message.value = '当前页面账号与已绑定会话不一致，未保存。'
+    return
+  }
+  const response = await sendToBackground({ type: MessageType.Workspace, payload: { action: 'saveRules', bundle: draft, expectedScope: scope } }, 30_000)
   if (!response || response.type !== MessageType.WorkspaceResult || !response.payload.ok || !response.payload.rules) {
     if (response?.type === MessageType.WorkspaceResult && response.payload.rules) bundle.value = response.payload.rules
     message.value = response?.type === MessageType.WorkspaceResult ? response.payload.message : '保存失败，原配置未覆盖。'
@@ -129,7 +136,11 @@ function preview(): void {
   }, bundle.value, customers.value, owner.value)
 }
 
-watch(() => [props.userId, accountOrigin.value], () => { void reloadCustomers(); void reloadRules() }, { immediate: true })
+watch(() => [props.userId, accountOrigin.value], () => {
+  drafts.value = []
+  void reloadCustomers()
+  void reloadRules()
+}, { immediate: true })
 watch(() => props.files, () => { drafts.value = [] }, { deep: true })
 </script>
 

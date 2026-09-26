@@ -8,8 +8,9 @@ import { readMailRules } from '../mail/repository'
 import type { MailRuleBundle } from '../mail/types'
 import type { QueryTemplate } from '../query/query-types'
 import { isMessage, MessageType, type AppMessage, type BackgroundResponse } from '../shared/message'
-import { chooseAppTab, EasyConnectionController, emptyConnection, tabOrigin, type BrowserTabRef, type EasyConnectionContext, type EasyTabCandidate } from '../shared/connection'
-import { loadAccount, refreshStaleTasks, saveCustomerAccount, saveRuleAccount, type LocalArea } from './account-data'
+import { chooseAppTab, EasyConnectionController, emptyConnection, accountScopeMatches, tabOrigin, type BrowserTabRef, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope } from '../shared/connection'
+import { loadAccount, deleteCustomerAccount, deleteQueryTemplateAccount, refreshStaleTasks, saveCustomerAccount, saveQueryTemplateAccount, saveRuleAccount, type LocalArea } from './account-data'
+import { planTrustedTask } from '../automation/task-planner'
 
 export interface WorkspacePayload {
   ok: boolean
@@ -103,7 +104,26 @@ async function boundTab(host: WorkspaceHost): Promise<{ ok: true; tabId: number 
   }
 }
 
-/** 写操作前重新读取登录身份。账号变化或版本变化时不能提交旧请求。 */
+/** 写操作前重新读取登录身份，并核对调用方看到的账号版本。 */
+async function mutationGuard(host: WorkspaceHost, scope: ExpectedAccountScope): Promise<BackgroundResponse | null> {
+  const gate = await recheckBoundSession(host)
+  if (gate !== 'same') {
+    const account = await accountPayload(host)
+    return workspaceResult({ ok: false, message: gate === 'changed' ? '会话已变化，请重新读取后再保存。' : (host.connection.context.message || '尚未确认 EASY 用户。'), connection: host.connection.context, ...account })
+  }
+  if (!accountScopeMatches(host.connection.context, scope)) {
+    const account = await accountPayload(host)
+    return workspaceResult({ ok: false, message: '保存时的账号与当前会话不一致，已拒绝。', connection: host.connection.context, ...account })
+  }
+  return null
+}
+
+async function recheckTasks(host: WorkspaceHost): Promise<void> {
+  if (!host.tasks) return
+  const account = await loadAccount(host.area, host.connection.context.easyOrigin, host.connection.context.operatorId)
+  if (!account.rules) return
+  await refreshStaleTasks(host.tasks, host.connection.context.easyOrigin, host.connection.context.operatorId, account.rules, account.customers)
+}
 export async function recheckBoundSession(host: WorkspaceHost): Promise<'same' | 'changed' | 'invalid'> {
   if (host.connection.context.easyTabId == null) return 'invalid'
   const version = host.connection.context.connectionVersion
@@ -155,30 +175,55 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
     const account = await accountPayload(host)
     return workspaceResult({ ok: true, message: host.connection.context.message, connection: host.connection.context, ...account })
   }
+  if (action.action === 'saveCustomer' || action.action === 'deleteCustomer' || action.action === 'saveQueryTemplate' || action.action === 'deleteQueryTemplate' || action.action === 'saveRules' || action.action === 'createTaskPlan') {
+    const denied = await mutationGuard(host, action.expectedScope)
+    if (denied) return denied
+  }
   if (action.action === 'saveCustomer') {
-    const gate = await recheckBoundSession(host)
-    if (gate !== 'same') {
-      const account = await accountPayload(host)
-      return workspaceResult({ ok: false, message: gate === 'changed' ? '会话已变化，请重新读取后再保存。' : (host.connection.context.message || '尚未确认 EASY 用户，不能保存客户。'), connection: host.connection.context, ...account })
-    }
     try {
-      await saveCustomerAccount(host.area, host.connection.context.easyOrigin, host.connection.context.operatorId, action.profile)
-      const accountNow = await loadAccount(host.area, host.connection.context.easyOrigin, host.connection.context.operatorId)
-      if (host.tasks && accountNow.rules) {
-        await refreshStaleTasks(host.tasks, host.connection.context.easyOrigin, host.connection.context.operatorId, accountNow.rules, accountNow.customers)
-      }
+      await saveCustomerAccount(host.area, host.connection.context.easyOrigin, host.connection.context.operatorId, action.profile, action.expectedRevision)
+      await recheckTasks(host)
     } catch (error) {
-      return workspaceResult({ ok: false, message: error instanceof Error ? error.message : '客户没有保存。', connection: host.connection.context })
+      const account = await accountPayload(host)
+      return workspaceResult({ ok: false, message: error instanceof Error ? error.message : '客户没有保存。', connection: host.connection.context, ...account })
     }
     const account = await accountPayload(host)
     return workspaceResult({ ok: true, message: '客户配置已保存。名称或 EASY GUID 变化的任务会重新核验。', connection: host.connection.context, ...account })
   }
-  if (action.action === 'saveRules') {
-    const gate = await recheckBoundSession(host)
-    if (gate !== 'same') {
+  if (action.action === 'deleteCustomer') {
+    try {
+      await deleteCustomerAccount(host.area, host.connection.context.easyOrigin, host.connection.context.operatorId, action.id, action.expectedRevision)
+      await recheckTasks(host)
+    } catch (error) {
       const account = await accountPayload(host)
-      return workspaceResult({ ok: false, message: gate === 'changed' ? '会话已变化，请重新读取后再保存。' : (host.connection.context.message || '尚未确认 EASY 用户，不能保存规则。'), connection: host.connection.context, ...account })
+      return workspaceResult({ ok: false, message: error instanceof Error ? error.message : '客户没有删除。', connection: host.connection.context, ...account })
     }
+    const account = await accountPayload(host)
+    return workspaceResult({ ok: true, message: '客户配置已删除。相关任务会重新核验。', connection: host.connection.context, ...account })
+  }
+  if (action.action === 'saveQueryTemplate') {
+    try {
+      await saveQueryTemplateAccount(host.area, host.connection.context.easyOrigin, host.connection.context.operatorId, action.template, action.expectedVersion)
+      await recheckTasks(host)
+    } catch (error) {
+      const account = await accountPayload(host)
+      return workspaceResult({ ok: false, message: error instanceof Error ? error.message : '模板没有保存。', connection: host.connection.context, ...account })
+    }
+    const account = await accountPayload(host)
+    return workspaceResult({ ok: true, message: '本地模板已保存。原网站历史模板没有被写入。', connection: host.connection.context, ...account })
+  }
+  if (action.action === 'deleteQueryTemplate') {
+    try {
+      await deleteQueryTemplateAccount(host.area, host.connection.context.easyOrigin, host.connection.context.operatorId, action.id)
+      await recheckTasks(host)
+    } catch (error) {
+      const account = await accountPayload(host)
+      return workspaceResult({ ok: false, message: error instanceof Error ? error.message : '模板没有删除。', connection: host.connection.context, ...account })
+    }
+    const account = await accountPayload(host)
+    return workspaceResult({ ok: true, message: '本地模板已删除。', connection: host.connection.context, ...account })
+  }
+  if (action.action === 'saveRules') {
     const checked = readMailRules(action.bundle, host.connection.context.operatorId)
     if (!checked.writable) {
       return workspaceResult({ ok: false, message: checked.warning ?? '发文配置未通过校验。', connection: host.connection.context })
@@ -191,6 +236,26 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
     }
     const account = await accountPayload(host)
     return workspaceResult({ ok: true, message: '发文规则已保存。内容变化的旧任务会标记为过期。', connection: host.connection.context, ...account })
+  }
+  if (action.action === 'createTaskPlan') {
+    const accountNow = await loadAccount(host.area, host.connection.context.easyOrigin, host.connection.context.operatorId)
+    if (!accountNow.rules || !host.tasks) {
+      return workspaceResult({ ok: false, message: '没有可核验的发文规则，任务未保存。', connection: host.connection.context })
+    }
+    try {
+      const task = planTrustedTask({
+        origin: host.connection.context.easyOrigin,
+        operatorId: host.connection.context.operatorId,
+        files: action.files,
+        rules: accountNow.rules,
+        profiles: accountNow.customers
+      })
+      await host.tasks.save(task)
+      const account = await accountPayload(host)
+      return workspaceResult({ ok: true, message: `已保存 · 任务 ${task.taskId}`, connection: host.connection.context, ...account })
+    } catch (error) {
+      return workspaceResult({ ok: false, message: error instanceof Error ? error.message : '任务没有保存。', connection: host.connection.context })
+    }
   }
   if (action.action === 'forward') {
     if (action.message.type !== MessageType.CheckSession && action.message.type !== MessageType.CancelSessionCheck) {

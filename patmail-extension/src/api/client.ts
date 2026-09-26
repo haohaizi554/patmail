@@ -1,4 +1,4 @@
-import { acceptanceForm } from '../automation/acceptance-context'
+import { extractReadonlyEvidence, readonlyContract } from '../automation/readonly-contracts'
 import { CURRENT_ENVIRONMENT } from './config'
 import { DictionaryService } from './dictionaries'
 import type { DictionaryLoadRequest, DictionarySnapshot } from './dictionaries'
@@ -261,8 +261,9 @@ export class EasyRuntime {
   /** 只读验收探测。写接口不在表内，不会发请求。 */
   async probeReadonly(call: string, context: { caseTypeId?: string; mailId?: string; flowType?: string } = {}): Promise<{ httpStatus: number; sessionOk: boolean; fields: Record<string, string>; shape: string }> {
     const operation = ACCEPTANCE_ROUTE[call]
-    if (!operation) return { httpStatus: 0, sessionOk: false, fields: {}, shape: 'blocked' }
-    const response = await this.transport.post(operation, acceptanceForm(call, context))
+    const decision = readonlyContract(call, context)
+    if (!operation || decision.state !== 'ready') return { httpStatus: 0, sessionOk: true, fields: {}, shape: decision.state === 'pending' ? 'CONTRACT_PENDING' : 'blocked' }
+    const response = await this.transport.post(operation, decision.params)
     if (!response.ok) {
       return {
         httpStatus: response.error.status ?? (response.error.code === 'SESSION_EXPIRED' ? 401 : 0),
@@ -272,14 +273,9 @@ export class EasyRuntime {
       }
     }
     const data = response.data
-    const fields: Record<string, string> = {}
-    if (data && typeof data === 'object') {
-      const model = (data as { UserModel?: { user_id?: unknown; Name?: unknown } }).UserModel
-      if (model && typeof model.user_id === 'string') fields.userId = model.user_id
-      if (model && typeof model.Name === 'string') fields.displayName = model.Name.slice(0, 80)
-    }
+    const fields = extractReadonlyEvidence(call, data)
     const shape = data && typeof data === 'object' ? `object(${Object.keys(data as object).sort().join(',')})` : typeof data
-    return { httpStatus: 200, sessionOk: true, fields, shape }
+    return { httpStatus: 200, sessionOk: fields.clientLogin !== 'false' && fields.loginPage !== 'true', fields, shape }
   }
 
   /** 只读核验一封已有邮件。不保存、不提交。 */

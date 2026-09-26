@@ -32,7 +32,10 @@ export function customerIdentities(files: SelectedPatentFile[], profiles: Custom
       profileName: profile?.name || file.customerBinding?.profileName || '',
       easyCustomerId,
       bindingSource: file.customerBinding?.source || '',
-      confirmed: file.customerBinding?.confirmed === true
+      confirmed: file.customerBinding?.confirmed === true,
+      baseTemplateId: profile?.baseTemplateId ?? '',
+      overrideFingerprint: overrideFingerprint(profile?.overrides),
+      enabled: profile ? profile.enabled : false
     }
     rows.set([row.profileId, row.easyCustomerId, row.bindingSource, row.confirmed ? '1' : '0'].join('\u0000'), row)
   }
@@ -40,5 +43,15 @@ export function customerIdentities(files: SelectedPatentFile[], profiles: Custom
 }
 
 export function emptyIdentity(): CustomerIdentitySnapshot {
-  return { profileId: '', profileName: '', easyCustomerId: '', bindingSource: '', confirmed: false }
+  return { profileId: '', profileName: '', easyCustomerId: '', bindingSource: '', confirmed: false, baseTemplateId: '', overrideFingerprint: '', enabled: false }
+}
+
+function overrideFingerprint(overrides: Record<string, string> | undefined): string {
+  if (!overrides) return ''
+  return Object.keys(overrides).sort().map(key => `${key}=${overrides[key]}`).join('\n')
+}
+
+/** 与发文计划页面使用同一算法，保证后台重算的模板版本和页面一致。 */
+export function queryTemplateVersionOf(profiles: Array<{ id: string; updatedAt: string }>): number {
+  return profiles.map(item => `${item.id}:${item.updatedAt}`).join('|').split('').reduce((sum, char) => sum + char.charCodeAt(0), 0)
 }

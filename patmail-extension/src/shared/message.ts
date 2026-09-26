@@ -4,9 +4,9 @@ import { EASY_ORIGIN } from '../api/config'
 import { isCustomerProfile } from '../customer/guards'
 import type { CustomerQueryProfile } from '../customer/types'
 import type { MailRuleBundle } from '../mail/types'
-import { isQueryTemplate } from '../query/query-validator'
+import { isQueryGuid, isQueryTemplate } from '../query/query-validator'
 import type { QueryTemplate } from '../query/query-types'
-import { isEasyConnection, type EasyConnectionContext, type EasyTabCandidate } from './connection'
+import { isEasyConnection, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope } from './connection'
 import { isDictionaryResult, isFileSearchApiResult, isFileSearchQuery, isHistoryDetailResult, isHistoryListResult, isSessionResult } from '../api/message-guards'
 import type { DictionaryLoadRequest, DictionarySnapshot } from '../api/dictionaries'
 import type { FileSearchQuery } from '../api/file-search-params'
@@ -16,7 +16,7 @@ import type { SessionSummary } from '../api/session'
 import type { ApiResult } from '../api/types'
 import { isMailDraftPreview, isMailExecutionView, isSelectionClaim } from '../mail/easy/guards'
 import type { SelectionClaim } from '../mail/easy/runtime'
-import type { MailDraftPreview } from '../mail/types'
+import type { MailDraftPreview, SelectedPatentFile } from '../mail/types'
 import type { MailExecutionView } from '../mail/easy/types'
 import { isWorkflowView } from '../workflow/guards'
 import type { WorkflowView } from '../workflow/types'
@@ -167,8 +167,12 @@ export interface LeaseCommand {
 export type WorkspaceAction =
   | { action: 'focus' } | { action: 'listTabs' } | { action: 'refreshSession' } | { action: 'openLogin' } | { action: 'load' }
   | { action: 'bind'; tabId: number }
-  | { action: 'saveCustomer'; profile: CustomerQueryProfile }
-  | { action: 'saveRules'; bundle: MailRuleBundle }
+  | { action: 'saveCustomer'; profile: CustomerQueryProfile; expectedScope: ExpectedAccountScope; expectedRevision?: number }
+  | { action: 'deleteCustomer'; id: string; expectedScope: ExpectedAccountScope; expectedRevision: number }
+  | { action: 'saveQueryTemplate'; template: QueryTemplate; expectedScope: ExpectedAccountScope; expectedVersion: number | null }
+  | { action: 'deleteQueryTemplate'; id: string; expectedScope: ExpectedAccountScope }
+  | { action: 'saveRules'; bundle: MailRuleBundle; expectedScope: ExpectedAccountScope }
+  | { action: 'createTaskPlan'; files: SelectedPatentFile[]; queryTemplateVersion: number; expectedScope: ExpectedAccountScope }
   | { action: 'forward'; message: ContentRequest }
   | { action: 'runAcceptance'; call: string; caseTypeId?: string; mailId?: string; flowType?: string; expectedFields?: Record<string, string> }
 
@@ -355,14 +359,45 @@ export function isContentRequest(value: unknown): value is ContentRequest {
 
 const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
 
+function isExpectedScope(value: unknown): value is ExpectedAccountScope {
+  return isRecord(value) && value.easyOrigin === EASY_ORIGIN && typeof value.operatorId === 'string' && isQueryGuid(value.operatorId) &&
+    typeof value.easyTabId === 'number' && Number.isInteger(value.easyTabId) &&
+    typeof value.connectionVersion === 'number' && Number.isInteger(value.connectionVersion) && value.connectionVersion >= 0
+}
+
+function isPlanFiles(value: unknown): value is SelectedPatentFile[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 100) return false
+  return value.every(item => isRecord(item) && typeof item.fileId === 'string' && item.fileId.trim().length > 0 && item.fileId.length <= 200 &&
+    typeof item.fileName === 'string' && item.fileName.length <= 300)
+}
+
 function isWorkspaceAction(value: unknown): value is WorkspaceAction {
   if (!isRecord(value) || typeof value.action !== 'string') return false
   if (value.action === 'focus' || value.action === 'listTabs' || value.action === 'refreshSession' || value.action === 'openLogin' || value.action === 'load') {
     return Object.keys(value).length === 1
   }
   if (value.action === 'bind') return typeof value.tabId === 'number' && Number.isInteger(value.tabId) && Object.keys(value).length === 2
-  if (value.action === 'saveCustomer') return isCustomerProfile(value.profile) && Object.keys(value).length === 2
-  if (value.action === 'saveRules') return isRuleBundle(value.bundle) && Object.keys(value).length === 2
+  if (value.action === 'saveCustomer') {
+    const keys = Object.keys(value)
+    const revisionOk = value.expectedRevision === undefined || (Number.isSafeInteger(value.expectedRevision) && Number(value.expectedRevision) >= 1)
+    return isCustomerProfile(value.profile) && isExpectedScope(value.expectedScope) && revisionOk && (keys.length === 3 || keys.length === 4)
+  }
+  if (value.action === 'deleteCustomer') {
+    return typeof value.id === 'string' && value.id.length > 0 && value.id.length <= 80 && isExpectedScope(value.expectedScope) &&
+      Number.isSafeInteger(value.expectedRevision) && Number(value.expectedRevision) >= 1 && Object.keys(value).length === 4
+  }
+  if (value.action === 'saveQueryTemplate') {
+    const versionOk = value.expectedVersion === null || (Number.isSafeInteger(value.expectedVersion) && Number(value.expectedVersion) >= 1)
+    return isQueryTemplate(value.template) && isExpectedScope(value.expectedScope) && versionOk && Object.keys(value).length === 4
+  }
+  if (value.action === 'deleteQueryTemplate') {
+    return typeof value.id === 'string' && value.id.length > 0 && value.id.length <= 80 && isExpectedScope(value.expectedScope) && Object.keys(value).length === 3
+  }
+  if (value.action === 'saveRules') return isRuleBundle(value.bundle) && isExpectedScope(value.expectedScope) && Object.keys(value).length === 3
+  if (value.action === 'createTaskPlan') {
+    return isPlanFiles(value.files) && Number.isSafeInteger(value.queryTemplateVersion) && Number(value.queryTemplateVersion) >= 0 &&
+      isExpectedScope(value.expectedScope) && Object.keys(value).length === 4 && JSON.stringify(value).length <= 200_000
+  }
   if (value.action === 'runAcceptance') return isAcceptanceAction(value)
   if (value.action === 'forward') return Object.keys(value).length === 2 && isMessage(value.message) && PAGE_FORWARD.has(String(value.message.type))
   return false

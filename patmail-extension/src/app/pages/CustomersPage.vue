@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { isFileSearchBusinessField } from '../../api/file-search-params'
 import { isQueryGuid } from '../../query/query-validator'
+import { scopeFromConnection, type ExpectedAccountScope } from '../../shared/connection'
 import { useWorkspace } from '../composables/useWorkspace'
 
-const { connection, customers, call } = useWorkspace()
+const { connection, customers, accountEpoch, call } = useWorkspace()
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
 const name = ref('')
 const easyId = ref('')
@@ -16,6 +17,8 @@ const overrides = ref<Record<string, string>>({})
 const overrideText = ref('')
 const resetOverrides = ref(false)
 const formMessage = ref('')
+const formScope = ref<ExpectedAccountScope | null>(null)
+const formRevision = ref(1)
 
 const preview = computed(() => Object.entries(overrides.value))
 
@@ -31,6 +34,8 @@ function edit(id: string): void {
   overrides.value = { ...profile.overrides }
   overrideText.value = Object.entries(profile.overrides).map(([key, value]) => `${key}=${value}`).join('\n')
   resetOverrides.value = false
+  formScope.value = scopeFromConnection(connection.value)
+  formRevision.value = profile.revision ?? 1
   formMessage.value = ''
 }
 
@@ -44,6 +49,7 @@ function cancel(): void {
   overrides.value = {}
   overrideText.value = ''
   resetOverrides.value = false
+  formScope.value = null
   formMessage.value = ''
 }
 
@@ -68,6 +74,8 @@ async function save(): Promise<void> {
   if (easyId.value.trim() && !isQueryGuid(easyId.value.trim())) { formMessage.value = 'EASY 客户 GUID 还没有确认。'; return }
   const parsed = parseOverrides(overrideText.value)
   if (!parsed) { formMessage.value = '查询覆盖只能使用已登记的文件查询字段，格式为 字段=值。'; return }
+  const scope = editingId.value ? formScope.value : scopeFromConnection(connection.value)
+  if (!scope) { formMessage.value = '尚未确认账号，未保存。'; return }
   const now = new Date().toISOString()
   const nextOverrides = !editingId.value || resetOverrides.value ? (resetOverrides.value ? {} : parsed) : { ...overrides.value, ...parsed }
   const result = await call({
@@ -80,8 +88,11 @@ async function save(): Promise<void> {
       overrides: nextOverrides,
       enabled: enabled.value,
       createdAt: createdAt.value || now,
-      updatedAt: now
-    }
+      updatedAt: now,
+      ...(editingId.value ? { revision: formRevision.value } : {})
+    },
+    expectedScope: scope,
+    ...(editingId.value ? { expectedRevision: formRevision.value } : {})
   })
   if (!result?.ok) {
     formMessage.value = result?.message || '客户没有保存。'
@@ -91,6 +102,12 @@ async function save(): Promise<void> {
   cancel()
   formMessage.value = '客户配置已保存。'
 }
+
+watch(accountEpoch, () => {
+  if (!editingId.value && !name.value) return
+  cancel()
+  formMessage.value = '账号已变化，未保存的客户表单已清除。'
+})
 </script>
 
 <template>

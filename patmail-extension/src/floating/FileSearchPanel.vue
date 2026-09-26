@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { assessQueryScope, type FileSearchQuery } from '../api/file-search-params'
 import type { FileSearchResult } from '../api/file-search-types'
 import type { SessionStatus } from '../api/session'
@@ -9,9 +9,11 @@ import MailWorkspace from './MailWorkspace.vue'
 import QueryTemplateSection from './QueryTemplateSection.vue'
 import SchemaQueryForm from './SchemaQueryForm.vue'
 import { MessageType, type MessageBridge } from '../shared/message'
+import { useWorkspace } from '../app/composables/useWorkspace'
 
 const props = defineProps<{ pageOrigin?: string }>()
 const bridge = inject<MessageBridge>('bridge')
+const workspace = useWorkspace()
 const accountOrigin = computed(() => props.pageOrigin || location.origin)
 const sessionStatus = ref<SessionStatus>('unknown')
 const sessionName = ref('')
@@ -194,11 +196,23 @@ function confirmBindReview(): void {
 }
 
 async function loadBindCustomers(): Promise<void> {
-  if (!sessionUserId.value || typeof chrome === 'undefined' || !chrome.storage?.local) return
-  const { ChromeBundleRepository, storageKey } = await import('../storage/query-bundle')
-  const loaded = await new ChromeBundleRepository(storageKey(accountOrigin.value, sessionUserId.value)).load()
-  bindCustomers.value = loaded.bundle.customers.map(item => ({ id: item.id, name: item.name }))
+  const payload = await workspace.call({ action: 'load' })
+  if (!payload || payload.connection.operatorId !== sessionUserId.value) {
+    bindCustomers.value = []
+    return
+  }
+  bindCustomers.value = payload.customers.map(item => ({ id: item.id, name: item.name }))
 }
+
+watch(() => workspace.connection.value.operatorId, (next, previous) => {
+  if (!previous || next === previous) return
+  selected.value = {}
+  result.value = null
+  lastQuery.value = null
+  bindProfileId.value = ''
+  bindCustomers.value = []
+  showMail.value = false
+})
 
 function page(delta: number): void {
   if (!lastQuery.value || !result.value || searchState.value === 'loading') return

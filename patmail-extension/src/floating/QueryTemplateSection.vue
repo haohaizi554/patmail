@@ -3,15 +3,16 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { hasExplicitFileSearchFilter, isFileSearchBusinessField, FILE_SEARCH_REQUEST_FIELDS, FILE_SEARCH_SYSTEM_FIELDS, type FileSearchQuery } from '../api/file-search-params'
 import type { NormalizedDictionary } from '../api/dictionaries'
 import type { HistoryQueryOption } from '../api/query-history'
-import { CustomerQueryService, BundleCustomerRepository, type CustomerQueryProfile } from '../customer'
+import type { CustomerQueryProfile } from '../customer/types'
 import { fieldLabel, parseQueryXml, resolveQueryTemplate } from '../query'
 import { TemplateLoadCoordinator } from '../query/load-coordinator'
 import { optionsForCaseType, resolveFileDescriptionDisplay, resolveInternalIdDisplay } from '../schema'
 import type { FileTypeNode } from '../api/dictionaries'
-import { BundleTemplateRepository } from '../query/repository'
 import type { QueryTemplate } from '../query/query-types'
-import { ChromeBundleRepository, MemoryBundleRepository, storageKey, type QueryBundleRepository } from '../storage/query-bundle'
+import { isQueryGuid } from '../query/query-validator'
+import { scopeFromConnection, type ExpectedAccountScope } from '../shared/connection'
 import { MessageType, type MessageBridge } from '../shared/message'
+import { useWorkspace } from '../app/composables/useWorkspace'
 
 const props = defineProps<{
   bridge?: MessageBridge
@@ -50,11 +51,15 @@ const draftEnabled = ref(true)
 const draftEasyId = ref('')
 const draftCustomerId = ref('')
 const editingTemplateId = ref('')
+const draftCustomerRevision = ref(1)
+const draftTemplateVersion = ref<number | null>(null)
+const openedScope = ref<ExpectedAccountScope | null>(null)
 const loadingHistory = ref(false)
 const fileTypeNodes = ref<FileTypeNode[]>([])
 const basicDictionaries = ref<Record<string, NormalizedDictionary>>({})
 const flowDictionaries = ref<Record<string, NormalizedDictionary>>({})
 const loads = new TemplateLoadCoordinator()
+const workspace = useWorkspace()
 onBeforeUnmount(() => loads.dispose())
 
 const TEMP_FIELDS = [
@@ -64,14 +69,6 @@ const TEMP_FIELDS = [
 ] as const
 const PREVIEW_FIELDS = ['case_type', 'filetype', 'customer_name_vague', 'case_volume', 'app_no']
 const businessFields = FILE_SEARCH_REQUEST_FIELDS.filter(field => !FILE_SEARCH_SYSTEM_FIELDS.has(field))
-
-const bundles = computed<QueryBundleRepository>(() => {
-  const key = storageKey(props.origin || location.origin, props.userId || null)
-  if (typeof chrome !== 'undefined' && chrome.storage?.local) return new ChromeBundleRepository(key)
-  return new MemoryBundleRepository()
-})
-const templates = computed(() => new BundleTemplateRepository(bundles.value))
-const customerService = computed(() => new CustomerQueryService(new BundleCustomerRepository(bundles.value)))
 const scopedUser = computed(() => Boolean(props.userId))
 const devMode = import.meta.env.DEV
 const canSubmit = computed(() => props.canSearch && !baseMissing.value &&
@@ -141,17 +138,25 @@ function previewText(key: string): string {
 }
 
 async function reloadLocal(): Promise<void> {
-  try {
-    const loaded = await bundles.value.load()
-    localTemplates.value = loaded.bundle.templates
-    customers.value = loaded.bundle.customers
-    storageMessage.value = loaded.warning ?? (scopedUser.value ? '' : '当前没有稳定用户 ID。查询模板保存在未分区空间；发文规则不会写入该空间，也不会套用其他账号的配置。')
-    if (typeof chrome === 'undefined' || !chrome.storage?.local) {
-      storageMessage.value = '当前环境不能使用扩展本地存储，模板只留在本次页面内存中。'
-    }
-  } catch {
-    storageMessage.value = '读取本地模板失败。'
+  const payload = await workspace.call({ action: 'load' })
+  if (!payload || payload.connection.operatorId !== props.userId) {
+    localTemplates.value = []
+    customers.value = []
+    if (payload?.connection.sessionStatus === 'authenticated') storageMessage.value = '账号已变化，已清除上一账号的模板和客户。'
+    return
   }
+  localTemplates.value = payload.templates.filter(item => item.source === 'local')
+  customers.value = payload.customers
+  storageMessage.value = scopedUser.value ? '' : '当前没有稳定用户 ID。查询模板不会写入未分区空间。'
+}
+
+function liveScope(): ExpectedAccountScope | null {
+  const scope = scopeFromConnection(workspace.connection.value)
+  if (!scope || scope.operatorId !== props.userId) {
+    storageMessage.value = '当前页面账号与已绑定会话不一致，未保存。'
+    return null
+  }
+  return scope
 }
 
 async function loadFileTypes(caseTypeId: string, ticket: { id: number; signal: AbortSignal }): Promise<void> {
@@ -265,6 +270,8 @@ function openTemplateEditor(template?: QueryTemplate): void {
   editingCustomer.value = false
   editingTemplate.value = true
   editingTemplateId.value = template?.id ?? ''
+  draftTemplateVersion.value = template?.version ?? null
+  openedScope.value = scopeFromConnection(workspace.connection.value)
   draftName.value = template?.name ?? ''
   draftFields.value = Object.entries(template?.fields ?? {}).map(([key, value]) => ({ key, value }))
   if (draftFields.value.length === 0) draftFields.value = [{ key: 'case_type', value: '' }, { key: 'filetype', value: '' }]
@@ -283,13 +290,17 @@ async function saveTemplate(): Promise<void> {
     storageMessage.value = '请填写模板名称。'
     return
   }
+  const scope = openedScope.value
+  if (!scope) {
+    storageMessage.value = '请先连接 EASY 后再保存模板。'
+    return
+  }
   const now = new Date().toISOString()
   const current = localTemplates.value.find(item => item.id === editingTemplateId.value && item.source === 'local')
   const template: QueryTemplate = current ? {
     ...current,
     name,
     fields,
-    version: current.version + 1,
     updatedAt: now
   } : {
     id: `local-${crypto.randomUUID()}`,
@@ -301,19 +312,25 @@ async function saveTemplate(): Promise<void> {
     createdAt: now,
     updatedAt: now
   }
-  await templates.value.save(template)
+  const result = await workspace.call({ action: 'saveQueryTemplate', template, expectedScope: scope, expectedVersion: current ? draftTemplateVersion.value : null })
+  if (!result?.ok) {
+    storageMessage.value = result?.message || '模板没有保存。'
+    return
+  }
   editingTemplate.value = false
   await reloadLocal()
   await applyBase(template.id)
 }
 async function importCurrent(): Promise<void> {
   if (!selectedBaseId.value || baseMissing.value) return
+  const scope = liveScope()
+  if (!scope) return
   const now = new Date().toISOString()
   const template: QueryTemplate = {
     id: `local-${crypto.randomUUID()}`,
     name: `${baseName.value || '历史模板'} 的本地副本`.slice(0, 80),
     source: 'local',
-    sourceQueryId: historyOptions.value.some(item => item.id === selectedBaseId.value) ? selectedBaseId.value : undefined,
+    ...(historyOptions.value.some(item => item.id === selectedBaseId.value) && isQueryGuid(selectedBaseId.value) ? { sourceQueryId: selectedBaseId.value } : {}),
     queryType: 'FileSearch',
     fields: { ...baseFields.value },
     displayValues: { ...displayValues.value },
@@ -322,30 +339,51 @@ async function importCurrent(): Promise<void> {
     createdAt: now,
     updatedAt: now
   }
-  await templates.value.save(template)
+  const result = await workspace.call({ action: 'saveQueryTemplate', template, expectedScope: scope, expectedVersion: null })
+  if (!result?.ok) {
+    storageMessage.value = result?.message || '模板没有导入。'
+    return
+  }
   await reloadLocal()
   storageMessage.value = '已导入为本地模板，刷新原网站模板不会覆盖这份副本。'
 }
 async function copySelected(): Promise<void> {
   if (!selectedBaseId.value || baseMissing.value) return
+  const scope = liveScope()
+  if (!scope) return
   const now = new Date().toISOString()
-  await templates.value.save({
-    id: `local-${crypto.randomUUID()}`,
-    name: `${baseName.value || '模板'} 副本`.slice(0, 80),
-    source: 'local',
-    queryType: 'FileSearch',
-    fields: { ...baseFields.value },
-    displayValues: { ...displayValues.value },
-    unknownFields: { ...unknownFields.value },
-    version: 1,
-    createdAt: now,
-    updatedAt: now
+  const result = await workspace.call({
+    action: 'saveQueryTemplate',
+    expectedScope: scope,
+    expectedVersion: null,
+    template: {
+      id: `local-${crypto.randomUUID()}`,
+      name: `${baseName.value || '模板'} 副本`.slice(0, 80),
+      source: 'local',
+      queryType: 'FileSearch',
+      fields: { ...baseFields.value },
+      displayValues: { ...displayValues.value },
+      unknownFields: { ...unknownFields.value },
+      version: 1,
+      createdAt: now,
+      updatedAt: now
+    }
   })
+  if (!result?.ok) {
+    storageMessage.value = result?.message || '模板没有复制。'
+    return
+  }
   await reloadLocal()
 }
 async function deleteSelectedLocal(): Promise<void> {
   if (!selectedLocal.value) return
-  await templates.value.delete(selectedLocal.value.id)
+  const scope = liveScope()
+  if (!scope) return
+  const result = await workspace.call({ action: 'deleteQueryTemplate', id: selectedLocal.value.id, expectedScope: scope })
+  if (!result?.ok) {
+    storageMessage.value = result?.message || '模板没有删除。'
+    return
+  }
   selectedBaseId.value = ''
   baseFields.value = {}
   await reloadLocal()
@@ -355,6 +393,8 @@ function openCustomerEditor(profile?: CustomerQueryProfile): void {
   editingTemplate.value = false
   editingCustomer.value = true
   draftCustomerId.value = profile?.id ?? ''
+  draftCustomerRevision.value = profile?.revision ?? 1
+  openedScope.value = scopeFromConnection(workspace.connection.value)
   draftName.value = profile?.name ?? ''
   draftBaseId.value = profile?.baseTemplateId ?? selectedBaseId.value
   draftEnabled.value = profile?.enabled ?? true
@@ -370,26 +410,60 @@ async function saveCustomer(): Promise<void> {
     }
     overrides[row.key] = row.value
   }
-  try {
-    const saved = await customerService.value.save({
-      ...(draftCustomerId.value ? { id: draftCustomerId.value } : {}),
+  const scope = openedScope.value
+  if (!scope) {
+    storageMessage.value = '请先连接 EASY 后再保存客户。'
+    return
+  }
+  if (!draftName.value.trim()) {
+    storageMessage.value = '请填写客户名称。'
+    return
+  }
+  if (!draftBaseId.value.trim()) {
+    storageMessage.value = '请选择基础模板。'
+    return
+  }
+  const result = await workspace.call({
+    action: 'saveCustomer',
+    expectedScope: scope,
+    ...(draftCustomerId.value ? { expectedRevision: draftCustomerRevision.value } : {}),
+    profile: {
+      ...(draftCustomerId.value ? { id: draftCustomerId.value, revision: draftCustomerRevision.value } : { id: `customer-${crypto.randomUUID()}` }),
       name: draftName.value,
       ...(draftEasyId.value.trim() ? { easyCustomerId: draftEasyId.value.trim() } : {}),
       baseTemplateId: draftBaseId.value,
       overrides,
-      enabled: draftEnabled.value
-    })
-    editingCustomer.value = false
-    await reloadLocal()
+      enabled: draftEnabled.value,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+  })
+  if (!result?.ok) {
+    storageMessage.value = result?.message || '保存客户配置失败。'
+    return
+  }
+  const saved = result.customers.find(item => item.name === draftName.value.trim() || item.id === draftCustomerId.value)
+  editingCustomer.value = false
+  await reloadLocal()
+  if (saved) {
     selectedCustomerId.value = saved.id
     await applyBase(saved.baseTemplateId)
-  } catch (error) {
-    storageMessage.value = error instanceof Error ? error.message : '保存客户配置失败。'
   }
 }
 async function deleteCustomer(): Promise<void> {
   if (!selectedCustomer.value) return
-  await customerService.value.delete(selectedCustomer.value.id)
+  const scope = liveScope()
+  if (!scope) return
+  const result = await workspace.call({
+    action: 'deleteCustomer',
+    id: selectedCustomer.value.id,
+    expectedScope: scope,
+    expectedRevision: selectedCustomer.value.revision ?? 1
+  })
+  if (!result?.ok) {
+    storageMessage.value = result?.message || '客户没有删除。'
+    return
+  }
   selectedCustomerId.value = ''
   await reloadLocal()
 }
@@ -404,6 +478,9 @@ watch(() => [props.userId, props.canSearch, props.mode] as const, () => {
   basicDictionaries.value = {}
   flowDictionaries.value = {}
   fileTypeNodes.value = []
+  editingCustomer.value = false
+  editingTemplate.value = false
+  openedScope.value = null
   resetBase()
   selectedBaseId.value = ''
   void reloadLocal()

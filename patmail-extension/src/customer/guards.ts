@@ -11,6 +11,7 @@ export function isCustomerProfile(value: unknown): value is CustomerQueryProfile
   if (profile.easyCustomerId !== undefined && (typeof profile.easyCustomerId !== 'string' || !isQueryGuid(profile.easyCustomerId))) return false
   if (typeof profile.baseTemplateId !== 'string' || !profile.baseTemplateId.trim()) return false
   if (typeof profile.enabled !== 'boolean') return false
+  if (profile.revision !== undefined && (!Number.isSafeInteger(profile.revision) || Number(profile.revision) < 1)) return false
   if (typeof profile.createdAt !== 'string' || typeof profile.updatedAt !== 'string') return false
   if (profile.overrides === null || typeof profile.overrides !== 'object' || Array.isArray(profile.overrides)) return false
   for (const key of Object.keys(profile.overrides as object)) {

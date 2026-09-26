@@ -3,7 +3,7 @@ import { IndexedTaskStore } from '../automation/indexed-store'
 import { IndexedEvidenceStore, MemoryEvidenceStore } from '../automation/evidence-store'
 import { handleAuthorityMessage } from './authority'
 import { scopeExtensionPageMessage } from './scope'
-import { EasyConnectionController } from '../shared/connection'
+import { EasyConnectionController, sameConnectionSnapshot, type ConnectionSnapshot } from '../shared/connection'
 import { handleWorkspaceMessage, openWorkspaceTab, recheckBoundSession, type WorkspaceHost } from './workspace'
 import { isMessage, MessageType, type AppMessage, type BackgroundResponse } from '../shared/message'
 
@@ -14,13 +14,18 @@ const tasks = globalThis.indexedDB ? new IndexedTaskStore(globalThis.indexedDB) 
 const evidence = globalThis.indexedDB ? new IndexedEvidenceStore(globalThis.indexedDB) : new MemoryEvidenceStore()
 const connection = new EasyConnectionController()
 const CONNECTION_SNAPSHOT = 'patmail.connection.snapshot.v1'
+let persistedSnapshot: ConnectionSnapshot | null = null
 
 function persistConnection(): void {
-  void chrome.storage.local.set({ [CONNECTION_SNAPSHOT]: connection.snapshot() })
+  const next = connection.snapshot()
+  if (sameConnectionSnapshot(persistedSnapshot, next)) return
+  persistedSnapshot = next
+  void chrome.storage.local.set({ [CONNECTION_SNAPSHOT]: next })
 }
 
 void chrome.storage.local.get(CONNECTION_SNAPSHOT).then(stored => {
   connection.restoreCandidate(stored[CONNECTION_SNAPSHOT])
+  persistedSnapshot = connection.snapshot()
 })
 
 const host: WorkspaceHost = {

@@ -11,6 +11,7 @@ const READONLY = new Set<string>(READONLY_ACCEPTANCE_CALLS)
 const WRITE_CALLS = new Set(['MailCustomer', 'SaveMailInfo', 'SaveMailRalteCaseFile', 'FlowSubmit', 'EndEmailFlowd'])
 
 export type AcceptanceResult = 'PASS' | 'FAIL' | 'BLOCKED'
+export type AcceptanceEvidenceLevel = 'NONE' | 'REQUEST_OBSERVED' | 'RESPONSE_OBSERVED' | 'BUSINESS_VALIDATED' | 'UI_COMPARED' | 'READBACK_VERIFIED'
 
 export interface LiveAcceptanceRecord {
   id: string
@@ -25,6 +26,7 @@ export interface LiveAcceptanceRecord {
   responseShape: string
   validatedFields: string[]
   matchedWithUi: boolean
+  evidenceLevel?: AcceptanceEvidenceLevel
   result: AcceptanceResult
   reason: string
   evidenceHash: string
@@ -54,12 +56,23 @@ function acceptanceId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-function record(partial: Omit<LiveAcceptanceRecord, 'evidenceHash'>): LiveAcceptanceRecord {
+function record(partial: Omit<LiveAcceptanceRecord, 'evidenceHash' | 'evidenceLevel'>): LiveAcceptanceRecord {
+  const evidenceLevel: AcceptanceEvidenceLevel = partial.result === 'BLOCKED'
+    ? 'NONE'
+    : partial.httpStatus === 502 || partial.httpStatus === 503 || partial.httpStatus < 200 || partial.httpStatus >= 300
+      ? (partial.httpStatus > 0 ? 'REQUEST_OBSERVED' : 'NONE')
+      : partial.result === 'FAIL'
+        ? 'RESPONSE_OBSERVED'
+        : partial.result === 'PASS' && partial.matchedWithUi
+          ? 'UI_COMPARED'
+          : partial.result === 'PASS'
+            ? 'RESPONSE_OBSERVED'
+            : 'NONE'
   const evidenceHash = sha256Hex(JSON.stringify({
     call: partial.call, httpStatus: partial.httpStatus, result: partial.result,
     fields: partial.validatedFields, shape: partial.responseShape
   }))
-  return { ...partial, evidenceHash }
+  return { ...partial, evidenceLevel, evidenceHash }
 }
 
 /** 只调用白名单里的只读接口。写接口和 Mock 都不会被当成现场通过。 */
@@ -92,7 +105,7 @@ export class LiveEasyAcceptanceRunner {
       return record({ ...base, result: 'BLOCKED', reason: '只读验收不能调用写接口。' })
     }
     if (this.exchange.kind !== 'live') {
-      return record({ ...base, result: 'BLOCKED', reason: 'Mock 响应不能代替现场验收。' })
+      return record({ ...base, result: 'BLOCKED', reason: 'Mock 响应不能作为现场证据。' })
     }
     const response = await this.exchange.call(input.call)
     const fields = cleanFields(response.fields)
@@ -110,15 +123,18 @@ export class LiveEasyAcceptanceRunner {
     } else if (response.httpStatus < 200 || response.httpStatus >= 300) {
       result = 'FAIL'
       reason = `${input.call} 没有成功响应。`
+    } else if (fields.clientStatus === 'false' || fields.clientLogin === 'false' || fields.loginPage === 'true') {
+      result = 'FAIL'
+      reason = 'HTTP 200，但业务状态未通过。'
     } else if (mismatches.length > 0) {
       result = 'FAIL'
       reason = `字段不一致：${mismatches.join('、')}`
     } else if (Object.keys(expected).length > 0) {
       result = 'PASS'
-      reason = '对照字段一致。'
+      reason = '与原网站 UI 对照通过。'
     } else if (input.call === 'GetUserModel' && fields.userId) {
       result = 'PASS'
-      reason = '已确认操作员 GUID。'
+      reason = '只读响应结构通过。'
     }
     return record({
       ...base,

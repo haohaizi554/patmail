@@ -16,6 +16,7 @@ import type { MailRuleBundle, SelectedPatentFile } from '../mail/types'
 import { MAIL_FLOW_TYPE } from '../workflow/contracts'
 import { WORKFLOW_WRITES_ENABLED } from '../workflow/gate'
 import { useWorkspace } from '../app/composables/useWorkspace'
+import { scopeFromConnection } from '../shared/connection'
 import { MessageType, type ExistingMailDiagnostic, type MessageBridge, type TaskSummary } from '../shared/message'
 
 const props = defineProps<{
@@ -90,10 +91,21 @@ async function plan(): Promise<void> {
     message.value = '当前 EASY 用户身份尚未确认。计划不会持久化，也不能执行。'
     return
   }
-  const response = await sendToBackground({ type: MessageType.SaveTask, payload: { task: task as unknown as Record<string, unknown> } })
-  const saved = response?.type === MessageType.TaskResult && response.payload.ok
+  const scope = scopeFromConnection(useWorkspace().connection.value)
+  if (!scope || scope.operatorId !== props.userId) {
+    persisted.value = false
+    message.value = '当前页面账号与已绑定会话不一致，未保存。'
+    return
+  }
+  const response = await useWorkspace().call({
+    action: 'createTaskPlan',
+    files: task.selectedFiles,
+    queryTemplateVersion: props.queryTemplateVersion,
+    expectedScope: scope
+  })
+  const saved = Boolean(response?.ok)
   persisted.value = saved
-  message.value = saved ? '计划已保存。没有发出写请求。' : response?.type === MessageType.TaskResult ? response.payload.message : '任务保存失败。'
+  message.value = saved ? (response?.message || '已保存。') : (response?.message || '任务保存失败。')
   if (saved) {
     await reload()
     await useWorkspace().call({ action: 'load' })
@@ -174,7 +186,7 @@ async function diagnose(): Promise<void> {
     </ul>
     <article v-if="checked" class="file-card">
       <strong>{{ checked.name }}</strong>
-      <p class="hint">{{ persisted ? '已保存' : '未保存' }} · 任务 {{ checked.taskId }}</p>
+      <p class="hint">{{ persisted ? '后台已接收这份计划' : '尚未保存' }} · 预览 {{ checked.taskId }}</p>
       <p v-if="checked.legacyTaskId" class="hint">由旧编号 {{ checked.legacyTaskId }} 迁移，原记录保留在迁移关系里。</p>
       <p class="hint">客户 {{ customerLabel }} · 文件 {{ checked.selectedFiles.length }} · 预计邮件 {{ checked.items.length }}</p>
       <p class="hint">状态 {{ checked.status }} · 创建 {{ checked.createdAt }} · 最近核对 {{ checked.updatedAt }}</p>

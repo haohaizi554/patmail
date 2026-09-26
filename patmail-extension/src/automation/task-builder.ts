@@ -17,6 +17,14 @@ export interface TaskBuildInput {
   now?: string
 }
 
+function identityForItem(profileId: string, easyCustomerId: string, identities: CustomerIdentitySnapshot[]): CustomerIdentitySnapshot {
+  const matches = identities.filter(item => item.profileId === profileId)
+  const exact = matches.find(item => item.easyCustomerId && item.easyCustomerId === easyCustomerId)
+  if (exact) return exact
+  if (matches.length === 1 && (!easyCustomerId || !matches[0]?.easyCustomerId || matches[0].easyCustomerId === easyCustomerId)) return matches[0]
+  return emptyIdentity()
+}
+
 function byText(left: string, right: string): number {
   if (left < right) return -1
   if (left > right) return 1
@@ -90,7 +98,7 @@ export function buildTask(input: TaskBuildInput): AutomationTask {
     itemId: draft.id,
     taskId,
     customerProfileId: draft.customerProfileId,
-    customerIdentity: identities.find(item => item.profileId === draft.customerProfileId) ?? emptyIdentity(),
+    customerIdentity: identityForItem(draft.customerProfileId, draft.files.find(file => file.customerId)?.customerId ?? '', identities),
     fileIds: [...draft.fileIds],
     fileNames: draft.files.map(file => file.fileName),
     fileDescriptionIdentity: draft.files[0]?.fileDescriptionId || draft.files[0]?.fileDescription || '',

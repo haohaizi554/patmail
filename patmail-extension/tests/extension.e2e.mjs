@@ -579,7 +579,21 @@ try {
       const bundle = stored[key]
       bundle.revision -= 1
       bundle.subject.template = '过期标题'
-      return chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'saveRules', bundle } })
+      const loaded = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'load' } })
+      const connection = loaded.payload.connection
+      return chrome.runtime.sendMessage({
+        type: 'WORKSPACE',
+        payload: {
+          action: 'saveRules',
+          bundle,
+          expectedScope: {
+            easyOrigin: connection.easyOrigin,
+            operatorId: connection.operatorId,
+            easyTabId: connection.easyTabId,
+            connectionVersion: connection.connectionVersion
+          }
+        }
+      })
     }, storedKey)
     assert.equal(stale.payload.ok, false)
     assert.match(stale.payload.message, /其他页面/)

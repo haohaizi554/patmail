@@ -29,6 +29,13 @@ const ruleRevision = computed(() => {
   const snapshot = detail.value?.ruleSnapshot
   return snapshot && typeof snapshot === 'object' && 'revision' in snapshot ? String((snapshot as { revision?: unknown }).revision ?? '') : ''
 })
+const identities = computed(() => Array.isArray(detail.value?.identitySnapshot) ? detail.value.identitySnapshot as Array<Record<string, unknown>> : [])
+const issues = computed(() => Array.isArray(detail.value?.issues) ? detail.value.issues as Array<Record<string, unknown>> : [])
+function draftSubject(item: Record<string, unknown>): string {
+  const preview = item.mailDraftPreview
+  if (!preview || typeof preview !== 'object') return ''
+  return String((preview as { subject?: unknown }).subject ?? '')
+}
 onMounted(() => { if (ready.value) void call({ action: 'load' }) })
 </script>
 
@@ -55,14 +62,20 @@ onMounted(() => { if (ready.value) void call({ action: 'load' }) })
     </section>
     <section v-if="detail" class="pm-card">
       <h2>任务详情</h2>
-      <p class="hint">{{ String(detail.taskId) }} · {{ describeTaskRecord(String(detail.status ?? '')) }}</p>
-      <p class="hint">Origin {{ String(detail.origin ?? '') }} · 规则版本 {{ ruleRevision }} · 文件 {{ Array.isArray(detail.selectedFiles) ? detail.selectedFiles.length : 0 }}</p>
+      <p class="hint">来源 Origin {{ String(detail.origin ?? '') }} · {{ String(detail.taskId) }} · {{ describeTaskRecord(String(detail.status ?? '')) }}</p>
+      <p class="hint">客户 {{ String(detail.customerName ?? '') }} · 规则版本 {{ ruleRevision }} · 文件 {{ Array.isArray(detail.selectedFiles) ? detail.selectedFiles.length : 0 }} · 阶段 {{ String(detail.status ?? '') }}</p>
+      <p v-if="issues.length" class="hint">阻塞：{{ issues.map(item => String(item.message ?? '')).filter(Boolean).join('；') }}</p>
+      <ul v-if="identities.length" class="hint">
+        <li v-for="row in identities" :key="String(row.profileId) + String(row.easyCustomerId)">配置 {{ row.profileName || row.profileId }} · EASY 客户 {{ row.easyCustomerId || '未绑定 GUID' }} · 模板 {{ row.baseTemplateId || '无' }}</li>
+      </ul>
       <p v-if="items.length === 0" class="empty">这个任务没有邮件条目。</p>
       <table v-else class="pm-table">
-        <thead><tr><th>文件</th><th>条目状态</th><th>说明</th></tr></thead>
+        <thead><tr><th>文件</th><th>发文类型</th><th>草稿主题</th><th>当前阶段</th><th>说明</th></tr></thead>
         <tbody>
           <tr v-for="item in items" :key="String(item.itemId)">
             <td>{{ Array.isArray(item.fileNames) ? item.fileNames.join('、') : '' }}</td>
+            <td>{{ item.mailTypeName || item.mailTypeId }}</td>
+            <td>{{ draftSubject(item) }}</td>
             <td>{{ item.status }}</td>
             <td>{{ describeItemRecord(String(item.status ?? ''), String(item.easyMailId ?? '')) }}</td>
           </tr>
