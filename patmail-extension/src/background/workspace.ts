@@ -1,4 +1,5 @@
 import { LiveEasyAcceptanceRunner } from '../automation/acceptance-runner'
+import { acceptanceBlockReason, blockedAcceptance } from '../automation/acceptance-context'
 import { isReadonlyProbe } from '../automation/acceptance-trust'
 import type { EvidenceRepository } from '../automation/evidence-store'
 import type { TaskStore } from '../automation/task-service'
@@ -8,7 +9,7 @@ import type { MailRuleBundle } from '../mail/types'
 import type { QueryTemplate } from '../query/query-types'
 import { isMessage, MessageType, type AppMessage, type BackgroundResponse } from '../shared/message'
 import { chooseAppTab, EasyConnectionController, emptyConnection, tabOrigin, type BrowserTabRef, type EasyConnectionContext, type EasyTabCandidate } from '../shared/connection'
-import { loadAccount, saveCustomerAccount, saveRuleAccount, type LocalArea } from './account-data'
+import { loadAccount, refreshStaleTasks, saveCustomerAccount, saveRuleAccount, type LocalArea } from './account-data'
 
 export interface WorkspacePayload {
   ok: boolean
@@ -58,6 +59,7 @@ export interface WorkspaceHost {
   focusTab(tabId: number, windowId?: number): Promise<void>
   openApp(): Promise<{ tabId: number; created: boolean }>
   sendToTab(tabId: number, message: AppMessage): Promise<unknown>
+  persist?(context: EasyConnectionContext): void
 }
 
 async function accountPayload(host: WorkspaceHost): Promise<Pick<WorkspacePayload, 'customers' | 'templates' | 'rules' | 'tasks'>> {
@@ -83,14 +85,34 @@ async function boundTab(host: WorkspaceHost): Promise<{ ok: true; tabId: number 
   try {
     const tab = await host.getTab(tabId)
     if (typeof tab.id !== 'number' || !tabOrigin(tab.url)) {
-      host.connection.context = { ...emptyConnection(), sessionStatus: 'error', message: '绑定页面已经离开 EASY 站点。' }
+      host.connection.context = {
+        ...emptyConnection(),
+        lastOperatorId: host.connection.context.lastOperatorId,
+        connectionVersion: host.connection.context.connectionVersion + 1,
+        sessionStatus: 'error',
+        message: '绑定页面已经离开 EASY 站点。'
+      }
+      remember(host)
       return { ok: false, message: host.connection.context.message }
     }
     return { ok: true, tabId }
   } catch {
     host.connection.detach(tabId)
+    remember(host)
     return { ok: false, message: '绑定的 EASY 标签页已关闭。' }
   }
+}
+
+/** 写操作前重新读取登录身份。账号变化或版本变化时不能提交旧请求。 */
+export async function recheckBoundSession(host: WorkspaceHost): Promise<'same' | 'changed' | 'invalid'> {
+  if (host.connection.context.easyTabId == null) return 'invalid'
+  const version = host.connection.context.connectionVersion
+  const operator = host.connection.context.operatorId
+  await readBoundSession(host)
+  if (host.connection.context.connectionVersion !== version) return 'changed'
+  if (operator && host.connection.context.operatorId !== operator) return 'changed'
+  if (host.connection.context.sessionStatus !== 'authenticated') return 'invalid'
+  return 'same'
 }
 
 export async function handleWorkspaceMessage(message: AppMessage, host: WorkspaceHost): Promise<BackgroundResponse> {
@@ -129,24 +151,33 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
     return workspaceResult({ ok: host.connection.context.sessionStatus === 'authenticated', message: host.connection.context.message || '已重新检测会话。', connection: host.connection.context, ...account })
   }
   if (action.action === 'load') {
+    if (host.connection.context.easyTabId != null) await readBoundSession(host)
     const account = await accountPayload(host)
     return workspaceResult({ ok: true, message: host.connection.context.message, connection: host.connection.context, ...account })
   }
   if (action.action === 'saveCustomer') {
-    if (host.connection.context.sessionStatus !== 'authenticated') {
-      return workspaceResult({ ok: false, message: '尚未确认 EASY 用户，不能保存客户。', connection: host.connection.context })
+    const gate = await recheckBoundSession(host)
+    if (gate !== 'same') {
+      const account = await accountPayload(host)
+      return workspaceResult({ ok: false, message: gate === 'changed' ? '会话已变化，请重新读取后再保存。' : (host.connection.context.message || '尚未确认 EASY 用户，不能保存客户。'), connection: host.connection.context, ...account })
     }
     try {
       await saveCustomerAccount(host.area, host.connection.context.easyOrigin, host.connection.context.operatorId, action.profile)
+      const accountNow = await loadAccount(host.area, host.connection.context.easyOrigin, host.connection.context.operatorId)
+      if (host.tasks && accountNow.rules) {
+        await refreshStaleTasks(host.tasks, host.connection.context.easyOrigin, host.connection.context.operatorId, accountNow.rules, accountNow.customers)
+      }
     } catch (error) {
       return workspaceResult({ ok: false, message: error instanceof Error ? error.message : '客户没有保存。', connection: host.connection.context })
     }
     const account = await accountPayload(host)
-    return workspaceResult({ ok: true, message: '客户配置已保存。', connection: host.connection.context, ...account })
+    return workspaceResult({ ok: true, message: '客户配置已保存。名称或 EASY GUID 变化的任务会重新核验。', connection: host.connection.context, ...account })
   }
   if (action.action === 'saveRules') {
-    if (host.connection.context.sessionStatus !== 'authenticated') {
-      return workspaceResult({ ok: false, message: '尚未确认 EASY 用户，不能保存规则。', connection: host.connection.context })
+    const gate = await recheckBoundSession(host)
+    if (gate !== 'same') {
+      const account = await accountPayload(host)
+      return workspaceResult({ ok: false, message: gate === 'changed' ? '会话已变化，请重新读取后再保存。' : (host.connection.context.message || '尚未确认 EASY 用户，不能保存规则。'), connection: host.connection.context, ...account })
     }
     const checked = readMailRules(action.bundle, host.connection.context.operatorId)
     if (!checked.writable) {
@@ -155,40 +186,69 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
     try {
       await saveRuleAccount(host.area, host.connection.context.easyOrigin, host.connection.context.operatorId, checked.bundle, host.tasks)
     } catch (error) {
-      return workspaceResult({ ok: false, message: error instanceof Error ? error.message : '规则没有保存。', connection: host.connection.context })
+      const account = await accountPayload(host)
+      return workspaceResult({ ok: false, message: error instanceof Error ? error.message : '规则没有保存。', connection: host.connection.context, ...account })
     }
     const account = await accountPayload(host)
     return workspaceResult({ ok: true, message: '发文规则已保存。内容变化的旧任务会标记为过期。', connection: host.connection.context, ...account })
   }
   if (action.action === 'forward') {
+    if (action.message.type !== MessageType.CheckSession && action.message.type !== MessageType.CancelSessionCheck) {
+      const gate = await recheckBoundSession(host)
+      if (gate !== 'same') {
+        return workspaceResult({ ok: false, message: gate === 'changed' ? '会话已变化，请重新检测后再继续。' : (host.connection.context.message || '尚未确认 EASY 用户。'), connection: host.connection.context })
+      }
+    }
     const target = await boundTab(host)
     if (!target.ok) return workspaceResult({ ok: false, message: target.message, connection: host.connection.context })
     if (!FORWARDED.has(action.message.type)) {
       return workspaceResult({ ok: false, message: '完整页面不能转发这个请求。', connection: host.connection.context })
     }
+    const version = host.connection.context.connectionVersion
     try {
       const response = await host.sendToTab(target.tabId, action.message)
+      if (host.connection.context.connectionVersion !== version) {
+        return workspaceResult({ ok: false, message: '连接已经变化，这次结果已丢弃。', connection: host.connection.context })
+      }
       if (!isMessage(response) || response.type === MessageType.Workspace || response.type === MessageType.WorkspaceResult) {
         return workspaceResult({ ok: false, message: 'EASY 页面没有返回可识别的结果。', connection: host.connection.context })
       }
       return workspaceResult({ ok: true, message: '', connection: host.connection.context, forwarded: response })
     } catch {
       host.connection.detach(target.tabId)
+      remember(host)
       return workspaceResult({ ok: false, message: '绑定的 EASY 标签页已失效。', connection: host.connection.context })
     }
   }
   if (action.action === 'runAcceptance') {
+    const gate = await recheckBoundSession(host)
+    if (gate !== 'same') {
+      return workspaceResult({ ok: false, message: gate === 'changed' ? '会话已变化，请重新检测后再验收。' : (host.connection.context.message || '尚未确认 EASY 用户。'), connection: host.connection.context })
+    }
     const target = await boundTab(host)
     if (!target.ok) return workspaceResult({ ok: false, message: target.message, connection: host.connection.context })
-    if (host.connection.context.sessionStatus !== 'authenticated') {
-      await readBoundSession(host)
+    const acceptanceContext = { caseTypeId: action.caseTypeId, mailId: action.mailId, flowType: action.flowType, expectedFields: action.expectedFields }
+    const blocked = acceptanceBlockReason(action.call, acceptanceContext)
+    if (blocked) {
+      const row = blockedAcceptance({ origin: host.connection.context.easyOrigin, operatorId: host.connection.context.operatorId, call: action.call, reason: blocked })
+      await host.evidence.saveAcceptance(row)
+      return workspaceResult({
+        ok: true,
+        message: `${row.call} ${row.result}`,
+        connection: host.connection.context,
+        forwarded: { type: MessageType.AcceptanceResult, payload: { records: [row as unknown as Record<string, unknown>] } }
+      })
     }
-    if (host.connection.context.sessionStatus !== 'authenticated') {
-      return workspaceResult({ ok: false, message: host.connection.context.message || '尚未确认 EASY 用户。', connection: host.connection.context })
-    }
+    const version = host.connection.context.connectionVersion
     let response: unknown
     try {
-      response = await host.sendToTab(target.tabId, { type: MessageType.RunReadonlyAcceptance, payload: { call: action.call, expected: {} } })
+      response = await host.sendToTab(target.tabId, {
+        type: MessageType.RunReadonlyAcceptance,
+        payload: { call: action.call, expected: action.expectedFields ?? {}, caseTypeId: action.caseTypeId, mailId: action.mailId, flowType: action.flowType }
+      })
+      if (host.connection.context.connectionVersion !== version) {
+        return workspaceResult({ ok: false, message: '连接已经变化，这次验收结果已丢弃。', connection: host.connection.context })
+      }
     } catch {
       host.connection.detach(target.tabId)
       return workspaceResult({ ok: false, message: '绑定的 EASY 标签页已失效。', connection: host.connection.context })
@@ -202,7 +262,7 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
       origin: host.connection.context.easyOrigin,
       operatorId: host.connection.context.operatorId,
       call: action.call,
-      expected: {}
+      expected: action.expectedFields ?? {}
     })
     await host.evidence.saveAcceptance(row)
     return workspaceResult({
@@ -215,14 +275,21 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
   return workspaceResult({ ok: false, message: '后台没有处理这条消息。', connection: host.connection.context })
 }
 
+function remember(host: WorkspaceHost): void {
+  host.persist?.(host.connection.context)
+}
+
 async function readBoundSession(host: WorkspaceHost): Promise<void> {
   const target = await boundTab(host)
   if (!target.ok) return
-  const previous = host.connection.context.operatorId
+  const version = host.connection.context.connectionVersion
+  const previous = host.connection.context.operatorId || host.connection.context.lastOperatorId
   try {
     const response = await host.sendToTab(target.tabId, { type: MessageType.CheckSession })
+    if (host.connection.context.connectionVersion !== version) return
     if (!isMessage(response) || response.type !== MessageType.SessionResult) {
-      host.connection.applySession({ ok: false, message: '无法读取该标签页的登录状态。' })
+      host.connection.applySession({ ok: false, message: '无法读取该标签页的登录状态。' }, version)
+      remember(host)
       return
     }
     if (!response.payload.ok) {
@@ -230,7 +297,8 @@ async function readBoundSession(host: WorkspaceHost): Promise<void> {
         ok: false,
         status: response.payload.error.code === 'SESSION_EXPIRED' ? 'expired' : 'error',
         message: response.payload.error.message
-      })
+      }, version)
+      remember(host)
       return
     }
     host.connection.applySession({
@@ -240,12 +308,21 @@ async function readBoundSession(host: WorkspaceHost): Promise<void> {
       displayName: response.payload.data.displayName,
       checkedAt: response.payload.data.checkedAt,
       message: response.payload.data.message
-    })
+    }, version)
     if (previous && host.connection.context.operatorId && previous !== host.connection.context.operatorId) {
       host.connection.context = { ...host.connection.context, message: '已切换到当前标签页的登录用户。' }
     }
+    remember(host)
   } catch {
-    host.connection.detach(target.tabId)
+    if (host.connection.context.connectionVersion !== version) return
+    host.connection.context = {
+      ...host.connection.context,
+      operatorId: '',
+      displayName: '',
+      sessionStatus: 'pending',
+      message: '标签页已刷新，请重新检测会话。'
+    }
+    remember(host)
   }
 }
 

@@ -9,6 +9,14 @@ export function describeTaskRecord(status: string): string {
   return '尚未确认发送'
 }
 
+export function describeDraftState(input: { status: string; easyMailId: string; stage: string; verified: boolean }): string {
+  if (input.verified) return '实际发送已核验'
+  if (input.easyMailId && input.stage === 'MAIL_SAVE') return 'EASY 邮件已保存'
+  if (input.easyMailId) return 'EASY 邮件已创建'
+  if (input.status === 'UNKNOWN') return '结果未知'
+  return '本地草稿'
+}
+
 export function describeItemRecord(status: string, easyMailId: string): string {
   if (status === 'UNKNOWN') return '结果未知'
   if (status === 'PARTIAL_FAILURE') return '部分失败'

@@ -49,11 +49,26 @@ await context.route('http://183.36.43.66:88/**', async route => {
       })
       return
     }
+    const userB = (await request.allHeaders()).cookie?.includes('pm_fixture_user=b') === true
     await route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8',
       body: JSON.stringify({
-        UserModel: { user_id: '11111111-1111-1111-1111-111111111111', user_name: 'tester', Name: '测试员', SessionId: 'hidden' },
+        UserModel: userB
+          ? { user_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', user_name: 'user-b', Name: '用户乙', SessionId: 'hidden' }
+          : { user_id: '11111111-1111-1111-1111-111111111111', user_name: 'tester', Name: '测试员', SessionId: 'hidden' },
         ClientInfo: { IsLogin: true, Status: true, Result: false, Message: null }
       }) })
+    return
+  }
+  if (pathName === '/AjaxServers/Mail.ashx' && params.get('Call') === 'GetMailInfo') {
+    if (params.get('mail_id') === '50250250-5025-4025-8025-502502502502') {
+      await route.fulfill({ status: 502, contentType: 'text/plain; charset=utf-8', body: 'bad gateway' })
+      return
+    }
+    await route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: JSON.stringify({ ClientInfo: { IsLogin: true, Status: true, Result: true }, mail_id: params.get('mail_id') }) })
+    return
+  }
+  if (pathName === '/AjaxServers/Common.ashx' && params.get('Call') === 'GetFlowInfo') {
+    await route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: JSON.stringify({ ClientInfo: { IsLogin: true, Status: false, Result: false, Message: '流程类型不匹配' } }) })
     return
   }
   if (pathName === '/AjaxServers/CaseInfo.ashx' && params.get('Call') === 'GetSearchFiles') {
@@ -82,12 +97,16 @@ const errors = []
 const requestFailures = []
 const watch = (page) => {
   page.on('pageerror', (error) => errors.push(error.message))
-  page.on('console', (message) => { if (message.type() === 'error' || message.text().includes('PatMail transport diagnostic:')) errors.push(message.text()) })
+  page.on('console', (message) => {
+    if (message.text().includes('502')) return
+    if (message.type() === 'error' || message.text().includes('PatMail transport diagnostic:')) errors.push(message.text())
+  })
   page.on('requestfailed', request => { if (request.url().includes('/AjaxServers/')) requestFailures.push({ url: request.url(), failure: request.failure()?.errorText }) })
 }
 context.on('page', watch)
 for (const page of context.pages()) watch(page)
 let checks = 0
+let workspace
 const profile = []
 const check = (name, action) => Promise.resolve().then(action).then(() => {
   checks++; console.log(`✓ ${name}`)
@@ -471,6 +490,130 @@ try {
     await app.getByText('通知书-1.pdf').waitFor()
     await app.getByRole('link', { name: '系统设置' }).click()
     await app.getByText('Production Write：关闭').waitFor()
+    await easyPage.close()
+    workspace = app
+  })
+  await check('FullPageBusinessFlow saves a task from the full page and restores it', async () => {
+    const app = workspace
+    await context.addCookies([{ name: 'pm_fixture_session', value: 'active', url: easyUrl, httpOnly: true, sameSite: 'Lax' }])
+    const easyPage = await context.newPage()
+    await easyPage.goto(easyUrl)
+    await tabFor(easyPage)
+    assert.equal(await easyPage.locator('patmail-root').count(), 0)
+    await app.bringToFront()
+    await app.getByRole('button', { name: '刷新标签页' }).click()
+    await app.getByText('发现一个 EASY 标签页，请确认后连接。').waitFor()
+    await app.getByRole('button', { name: '连接所选标签页' }).click()
+    await app.getByText('测试员').waitFor()
+    await app.getByRole('link', { name: '客户管理' }).click()
+    await app.getByLabel('名称').fill('测试客户')
+    await app.getByLabel('查询覆盖').fill('case_volume=ABC')
+    await app.getByRole('button', { name: '保存到当前账号' }).click()
+    await app.getByText('客户配置已保存。', { exact: true }).waitFor()
+    await app.getByText('case_volume=ABC').waitFor()
+    await app.getByRole('button', { name: '编辑' }).click()
+    await app.getByLabel('名称').fill('测试客户甲')
+    await app.getByRole('button', { name: '保存到当前账号' }).click()
+    await app.getByText('客户配置已保存。', { exact: true }).waitFor()
+    await app.reload()
+    await app.getByText('case_volume=ABC').waitFor()
+    await app.getByText('测试客户甲').waitFor()
+    await app.getByRole('button', { name: '编辑' }).click()
+    await app.getByLabel('名称').fill('测试客户')
+    await app.getByRole('button', { name: '保存到当前账号' }).click()
+    await app.getByText('客户配置已保存。', { exact: true }).waitFor()
+    await app.getByRole('link', { name: '文件查询' }).click()
+    await app.getByLabel('我方文号').fill('A+123')
+    await app.getByRole('button', { name: '查询文件' }).click()
+    await app.getByRole('checkbox', { name: '通知书-1.pdf' }).check()
+    await app.getByRole('button', { name: '下一页' }).click()
+    await app.getByRole('checkbox', { name: '通知书-2.pdf' }).check()
+    await app.getByRole('button', { name: '查看已选' }).click()
+    await app.getByLabel('绑定到已有客户配置').focus()
+    await app.waitForFunction(() => [...document.querySelectorAll('option')].some(item => item.textContent === '测试客户'))
+    await app.getByLabel('绑定到已有客户配置').selectOption({ label: '测试客户' })
+    await app.getByRole('button', { name: '绑定已选文件' }).click()
+    await app.getByRole('button', { name: '生成发文计划' }).click()
+    await app.getByRole('button', { name: '生成计划' }).click()
+    await app.getByText(/已保存 · 任务 /).waitFor()
+    await app.getByRole('link', { name: '发文任务' }).click()
+    await app.getByText('测试客户').waitFor()
+    await app.getByRole('button', { name: '详情' }).click()
+    await app.getByText('Origin http://183.36.43.66:88').waitFor()
+    await app.getByText('文件 2').waitFor()
+    const taskUrl = app.url()
+    await app.reload()
+    await app.getByText('测试客户').waitFor()
+    await app.getByRole('button', { name: '详情' }).click()
+    await app.getByText('Origin http://183.36.43.66:88').waitFor()
+    await app.getByRole('link', { name: '发文规则' }).click()
+    await app.getByLabel('标题模板').fill('阶段三标题{文件名称}')
+    await app.getByRole('button', { name: '保存标题和正文' }).click()
+    await app.getByText('发文规则已保存。内容变化的旧任务会标记为过期。').first().waitFor()
+    await app.getByRole('link', { name: '发文任务' }).click()
+    await app.getByText('计划已过期').waitFor()
+    const mailCalls = () => apiCalls.filter(item => item.path === '/AjaxServers/Mail.ashx').length
+    const beforeMail = mailCalls()
+    await app.getByRole('link', { name: '接口验收' }).click()
+    await app.getByLabel('接口').selectOption('GetMailInfo')
+    await app.getByRole('button', { name: '执行只读验收' }).click()
+    await app.getByText('GetMailInfo BLOCKED').waitFor()
+    assert.equal(mailCalls(), beforeMail)
+    await app.getByLabel('邮件 ID').fill('50250250-5025-4025-8025-502502502502')
+    await app.getByRole('button', { name: '执行只读验收' }).click()
+    await app.getByText(/GetMailInfo FAIL/).first().waitFor()
+    await app.getByLabel('接口').selectOption('GetFlowInfo')
+    await app.getByLabel('邮件 ID').fill('11111111-1111-4111-8111-111111111111')
+    await app.getByLabel('流程类型').fill('NO')
+    await app.getByRole('button', { name: '执行只读验收' }).click()
+    await app.getByText(/GetFlowInfo (BLOCKED|FAIL)/).first().waitFor()
+    await app.getByLabel('接口').selectOption('GetUserModel')
+    await app.getByLabel('邮件 ID').fill('')
+    await app.getByLabel('流程类型').fill('')
+    await app.getByRole('button', { name: '执行只读验收' }).click()
+    await app.getByText('GetUserModel PASS').first().waitFor()
+    await app.getByText('未与原网页对照').first().waitFor()
+    const storedKey = 'patmail.mail.v1:http://183.36.43.66:88:11111111-1111-1111-1111-111111111111'
+    const stale = await app.evaluate(async (key) => {
+      const stored = await chrome.storage.local.get(key)
+      const bundle = stored[key]
+      bundle.revision -= 1
+      bundle.subject.template = '过期标题'
+      return chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'saveRules', bundle } })
+    }, storedKey)
+    assert.equal(stale.payload.ok, false)
+    assert.match(stale.payload.message, /其他页面/)
+    await showPanel(easyPage)
+    assert.equal(await easyPage.locator('patmail-root').count(), 1)
+    await context.addCookies([{ name: 'pm_fixture_user', value: 'b', url: easyUrl, httpOnly: true, sameSite: 'Lax' }])
+    await easyPage.reload()
+    await tabFor(easyPage)
+    await app.bringToFront()
+    await app.getByRole('button', { name: '重新检测会话' }).click()
+    await app.getByText('用户乙').waitFor()
+    await app.getByRole('link', { name: '客户管理' }).click()
+    assert.equal(await app.getByText('测试客户').count(), 0)
+    const userCalls = apiCalls.filter(item => item.path === '/AjaxServers/Login.ashx').length
+    const liveWorker = context.serviceWorkers().find(item => item.url().includes(extensionId))
+    assert.ok(liveWorker)
+    await liveWorker.evaluate(() => { globalThis.__patmailBoot = 1 })
+    const browser = context.browser()
+    assert.ok(browser)
+    const cdp = await browser.newBrowserCDPSession()
+    const { targetInfos } = await cdp.send('Target.getTargets')
+    const target = targetInfos.find(item => item.type === 'service_worker' && item.url.includes(extensionId))
+    assert.ok(target)
+    await cdp.send('Target.closeTarget', { targetId: target.targetId })
+    const again = await context.newPage()
+    await again.goto(`chrome-extension://${extensionId}/app.html`)
+    const nextWorker = context.serviceWorkers().find(item => item.url().includes(extensionId))
+    assert.ok(nextWorker)
+    assert.notEqual(await nextWorker.evaluate(() => globalThis.__patmailBoot ?? 0), 1)
+    await again.getByRole('button', { name: '重新检测会话' }).click()
+    await again.getByText('用户乙').waitFor()
+    assert.equal(await again.getByText('测试客户').count(), 0)
+    assert.ok(apiCalls.filter(item => item.path === '/AjaxServers/Login.ashx').length > userCalls)
+    assert.equal(taskUrl.includes('#/tasks') || taskUrl.includes('app.html'), true)
     await easyPage.close()
   })
   assert.deepEqual(errors, [], `browser errors: ${errors.join('\n')}`)

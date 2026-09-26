@@ -1,3 +1,4 @@
+import { acceptanceForm } from '../automation/acceptance-context'
 import { CURRENT_ENVIRONMENT } from './config'
 import { DictionaryService } from './dictionaries'
 import type { DictionaryLoadRequest, DictionarySnapshot } from './dictionaries'
@@ -258,10 +259,10 @@ export class EasyRuntime {
   }
 
   /** 只读验收探测。写接口不在表内，不会发请求。 */
-  async probeReadonly(call: string): Promise<{ httpStatus: number; sessionOk: boolean; fields: Record<string, string>; shape: string }> {
+  async probeReadonly(call: string, context: { caseTypeId?: string; mailId?: string; flowType?: string } = {}): Promise<{ httpStatus: number; sessionOk: boolean; fields: Record<string, string>; shape: string }> {
     const operation = ACCEPTANCE_ROUTE[call]
     if (!operation) return { httpStatus: 0, sessionOk: false, fields: {}, shape: 'blocked' }
-    const response = await this.transport.post(operation, new URLSearchParams({ Call: call }))
+    const response = await this.transport.post(operation, acceptanceForm(call, context))
     if (!response.ok) {
       return {
         httpStatus: response.error.status ?? (response.error.code === 'SESSION_EXPIRED' ? 401 : 0),

@@ -62,7 +62,11 @@ const bridge: MessageBridge = {
       case MessageType.DiagnoseExistingMail:
         return { type: MessageType.ExistingMailDiagnostic, payload: await easyRuntime.diagnoseExistingMail(message.payload.mailId, message.payload.flowType) }
       case MessageType.RunReadonlyAcceptance: {
-        const probe = await easyRuntime.probeReadonly(message.payload.call)
+        const probe = await easyRuntime.probeReadonly(message.payload.call, {
+          caseTypeId: message.payload.caseTypeId,
+          mailId: message.payload.mailId,
+          flowType: message.payload.flowType
+        })
         const runner = new LiveEasyAcceptanceRunner({ kind: 'live', call: async () => probe })
         const row = await runner.run({
           origin: location.origin,

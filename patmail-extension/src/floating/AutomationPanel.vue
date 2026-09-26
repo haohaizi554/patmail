@@ -15,6 +15,7 @@ import type { CustomerQueryProfile } from '../customer/types'
 import type { MailRuleBundle, SelectedPatentFile } from '../mail/types'
 import { MAIL_FLOW_TYPE } from '../workflow/contracts'
 import { WORKFLOW_WRITES_ENABLED } from '../workflow/gate'
+import { useWorkspace } from '../app/composables/useWorkspace'
 import { MessageType, type ExistingMailDiagnostic, type MessageBridge, type TaskSummary } from '../shared/message'
 
 const props = defineProps<{
@@ -24,6 +25,7 @@ const props = defineProps<{
   rules: MailRuleBundle
   profiles: CustomerQueryProfile[]
   queryTemplateVersion: number
+  businessOrigin: string
 }>()
 
 const history = ref<TaskSummary[]>([])
@@ -47,7 +49,7 @@ const identityReady = computed(() => isConfirmedOperator(props.userId))
 
 function currentInput() {
   return {
-    origin: location.origin,
+    origin: props.businessOrigin,
     operatorId: props.userId,
     files: props.files,
     rules: props.rules,
@@ -61,7 +63,7 @@ async function reload(): Promise<void> {
     history.value = []
     return
   }
-  const response = await sendToBackground({ type: MessageType.ListTasks, payload: { origin: location.origin, operatorId: props.userId } })
+  const response = await sendToBackground({ type: MessageType.ListTasks, payload: { origin: props.businessOrigin, operatorId: props.userId } })
   history.value = response?.type === MessageType.TaskResult ? response.payload.tasks : []
 }
 
@@ -92,7 +94,10 @@ async function plan(): Promise<void> {
   const saved = response?.type === MessageType.TaskResult && response.payload.ok
   persisted.value = saved
   message.value = saved ? '计划已保存。没有发出写请求。' : response?.type === MessageType.TaskResult ? response.payload.message : '任务保存失败。'
-  if (saved) await reload()
+  if (saved) {
+    await reload()
+    await useWorkspace().call({ action: 'load' })
+  }
 }
 
 async function recheck(): Promise<void> {
@@ -105,7 +110,7 @@ async function openHistory(item: TaskSummary): Promise<void> {
   if (!identityReady.value) return
   const response = await sendToBackground({
     type: MessageType.GetTask,
-    payload: { origin: location.origin, operatorId: props.userId, taskId: item.taskId }
+    payload: { origin: props.businessOrigin, operatorId: props.userId, taskId: item.taskId }
   })
   if (response?.type !== MessageType.TaskResult || !response.payload.task) {
     message.value = '没有读到这个任务。'

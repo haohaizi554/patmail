@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { describeItemRecord, describeTaskRecord } from '../record-status'
 import { MessageType } from '../../shared/message'
 import { sendToBackground } from '../../utils/runtime'
 import { useWorkspace } from '../composables/useWorkspace'
 
-const { connection, tasks } = useWorkspace()
+const { connection, tasks, call } = useWorkspace()
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
 const detail = ref<Record<string, unknown> | null>(null)
 const detailMessage = ref('')
@@ -25,6 +25,11 @@ async function openTask(taskId: string): Promise<void> {
 }
 
 const items = computed(() => Array.isArray(detail.value?.items) ? detail.value.items as Array<Record<string, unknown>> : [])
+const ruleRevision = computed(() => {
+  const snapshot = detail.value?.ruleSnapshot
+  return snapshot && typeof snapshot === 'object' && 'revision' in snapshot ? String((snapshot as { revision?: unknown }).revision ?? '') : ''
+})
+onMounted(() => { if (ready.value) void call({ action: 'load' }) })
 </script>
 
 <template>
@@ -51,6 +56,7 @@ const items = computed(() => Array.isArray(detail.value?.items) ? detail.value.i
     <section v-if="detail" class="pm-card">
       <h2>任务详情</h2>
       <p class="hint">{{ String(detail.taskId) }} · {{ describeTaskRecord(String(detail.status ?? '')) }}</p>
+      <p class="hint">Origin {{ String(detail.origin ?? '') }} · 规则版本 {{ ruleRevision }} · 文件 {{ Array.isArray(detail.selectedFiles) ? detail.selectedFiles.length : 0 }}</p>
       <p v-if="items.length === 0" class="empty">这个任务没有邮件条目。</p>
       <table v-else class="pm-table">
         <thead><tr><th>文件</th><th>条目状态</th><th>说明</th></tr></thead>

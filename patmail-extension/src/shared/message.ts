@@ -110,7 +110,7 @@ export type ContentRequest =
   | Response<'PREVIEW_WORKFLOW', { executionId: string; nodeId: string; reviewerId: string; auditType: 'submit' | 'handover'; remark: string; urgencyId: string }>
   | Response<'RESTORE_WORKFLOW', { mailId: string }>
   | Response<'DIAGNOSE_EXISTING_MAIL', { mailId: string; flowType: string }>
-  | Response<'RUN_READONLY_ACCEPTANCE', { call: string; expected: Record<string, string> }>
+  | Response<'RUN_READONLY_ACCEPTANCE', { call: string; expected: Record<string, string>; caseTypeId?: string; mailId?: string; flowType?: string }>
 export type ErrorMessage = Response<'ERROR', { message: string }>
 export interface ExistingMailDiagnostic {
   mailId: string
@@ -170,7 +170,7 @@ export type WorkspaceAction =
   | { action: 'saveCustomer'; profile: CustomerQueryProfile }
   | { action: 'saveRules'; bundle: MailRuleBundle }
   | { action: 'forward'; message: ContentRequest }
-  | { action: 'runAcceptance'; call: string }
+  | { action: 'runAcceptance'; call: string; caseTypeId?: string; mailId?: string; flowType?: string; expectedFields?: Record<string, string> }
 
 export interface WorkspaceResultPayload {
   ok: boolean
@@ -363,7 +363,7 @@ function isWorkspaceAction(value: unknown): value is WorkspaceAction {
   if (value.action === 'bind') return typeof value.tabId === 'number' && Number.isInteger(value.tabId) && Object.keys(value).length === 2
   if (value.action === 'saveCustomer') return isCustomerProfile(value.profile) && Object.keys(value).length === 2
   if (value.action === 'saveRules') return isRuleBundle(value.bundle) && Object.keys(value).length === 2
-  if (value.action === 'runAcceptance') return typeof value.call === 'string' && value.call.length > 0 && value.call.length <= 80 && Object.keys(value).length === 2
+  if (value.action === 'runAcceptance') return isAcceptanceAction(value)
   if (value.action === 'forward') return Object.keys(value).length === 2 && isMessage(value.message) && PAGE_FORWARD.has(String(value.message.type))
   return false
 }
@@ -433,10 +433,30 @@ function isTaskSummary(value: unknown): boolean {
     typeof value.mailCount === 'number'
 }
 
+function isShortText(value: unknown, max: number): value is string {
+  return typeof value === 'string' && value.length <= max
+}
+
+function isAcceptanceAction(value: Record<string, unknown>): boolean {
+  if (!isShortText(value.call, 80) || value.call.length === 0) return false
+  const allowed = new Set(['action', 'call', 'caseTypeId', 'mailId', 'flowType', 'expectedFields'])
+  if (Object.keys(value).some(key => !allowed.has(key))) return false
+  if (value.caseTypeId !== undefined && !isShortText(value.caseTypeId, 80)) return false
+  if (value.mailId !== undefined && !isShortText(value.mailId, 80)) return false
+  if (value.flowType !== undefined && !isShortText(value.flowType, 20)) return false
+  if (value.expectedFields !== undefined && (!isRecord(value.expectedFields) || Object.keys(value.expectedFields).length > 20 || Object.values(value.expectedFields).some(item => typeof item !== 'string'))) return false
+  return true
+}
+
 function isReadonlyProbe(value: unknown): boolean {
-  return isRecord(value) && typeof value.call === 'string' && value.call.length <= 80 &&
-    isRecord(value.expected) && Object.values(value.expected).every(item => typeof item === 'string') &&
-    Object.keys(value.expected).length <= 20 && Object.keys(value).length === 2
+  if (!isRecord(value) || !isShortText(value.call, 80) || !isRecord(value.expected)) return false
+  if (Object.values(value.expected).some(item => typeof item !== 'string') || Object.keys(value.expected).length > 20) return false
+  const allowed = new Set(['call', 'expected', 'caseTypeId', 'mailId', 'flowType'])
+  if (Object.keys(value).some(key => !allowed.has(key))) return false
+  if (value.caseTypeId !== undefined && !isShortText(value.caseTypeId, 80)) return false
+  if (value.mailId !== undefined && !isShortText(value.mailId, 80)) return false
+  if (value.flowType !== undefined && !isShortText(value.flowType, 20)) return false
+  return true
 }
 
 function isClaim(value: unknown): value is { origin: string; operatorId: string; taskFingerprint: string } {

@@ -8,8 +8,11 @@ import ControlledExecutionPanel from './ControlledExecutionPanel.vue'
 import LiveAcceptancePanel from './LiveAcceptancePanel.vue'
 import MailExecutionPanel from './MailExecutionPanel.vue'
 import WorkflowPanel from './WorkflowPanel.vue'
+import { plainClone } from '../automation/snapshot'
+import { isConfirmedOperator } from '../automation/operator'
 import { ChromeBundleRepository, storageKey } from '../storage/query-bundle'
 import { MessageType, type MessageBridge } from '../shared/message'
+import { sendToBackground } from '../utils/runtime'
 
 const props = defineProps<{ bridge?: MessageBridge; userId: string; files: SelectedPatentFile[]; pageOrigin?: string }>()
 const accountOrigin = computed(() => props.pageOrigin || location.origin)
@@ -74,27 +77,43 @@ async function loadMailTypes(): Promise<void> {
   mailTypes.value = response.payload.data.nodes.map(node => ({ id: node.id, name: node.name }))
 }
 async function save(mutate: (draft: MailRuleBundle) => void): Promise<void> {
-  if (!repository.value) return
-  try {
-    bundle.value = await repository.value.update(mutate)
-    message.value = scope.value === 'session' ? '已保存在本次页面。没有稳定用户 ID 时不会写入其他账号的配置。' : '已保存。'
-    drafts.value = []
-  } catch (error) {
-    message.value = error instanceof Error ? error.message : '保存失败，原配置未覆盖。'
+  const draft = plainClone(bundle.value)
+  mutate(draft)
+  draft.ownerId = isConfirmedOperator(props.userId) ? props.userId : owner.value
+  const response = await sendToBackground({ type: MessageType.Workspace, payload: { action: 'saveRules', bundle: draft } }, 30_000)
+  if (!response || response.type !== MessageType.WorkspaceResult || !response.payload.ok || !response.payload.rules) {
+    if (response?.type === MessageType.WorkspaceResult && response.payload.rules) bundle.value = response.payload.rules
+    message.value = response?.type === MessageType.WorkspaceResult ? response.payload.message : '保存失败，原配置未覆盖。'
+    return
   }
+  bundle.value = response.payload.rules
+  subjectTemplate.value = bundle.value.subject.template
+  bodyTemplate.value = bundle.value.body.template
+  drafts.value = []
+  message.value = response.payload.message || '已保存。'
 }
 function newId(prefix: string): string {
   return `${prefix}-${globalThis.crypto.randomUUID()}`
 }
 async function importRules(): Promise<void> {
-  if (!repository.value) return
+  let parsed: MailRuleBundle
   try {
-    bundle.value = await repository.value.importJson(importText.value)
-    drafts.value = []
-    message.value = '已导入当前账号的发文配置。'
-  } catch (error) {
-    message.value = error instanceof Error ? error.message : '导入失败，原配置未覆盖。'
+    parsed = JSON.parse(importText.value) as MailRuleBundle
+  } catch {
+    message.value = '导入失败，原配置未覆盖。'
+    return
   }
+  parsed.revision = bundle.value.revision
+  parsed.ownerId = owner.value
+  await save(draft => {
+    draft.policies = parsed.policies
+    draft.mappings = parsed.mappings
+    draft.recipients = parsed.recipients
+    draft.signatures = parsed.signatures
+    draft.subject = parsed.subject
+    draft.body = parsed.body
+  })
+  if (bundle.value.subject) message.value = message.value || '已导入当前账号的发文配置。'
 }
 function preview(): void {
   if (!bundle.value) return
@@ -206,9 +225,9 @@ watch(() => props.files, () => { drafts.value = [] }, { deep: true })
     <label>导入配置<textarea v-model="importText" rows="3" /></label>
     <button type="button" class="text-button" @click="importRules">导入配置</button>
     <button type="button" class="search-submit" :disabled="files.length === 0" @click="preview">重新生成预览</button>
-    <AutomationPanel :bridge="bridge" :user-id="userId" :files="files" :rules="bundle" :profiles="customers" :query-template-version="queryTemplateVersion" />
-    <LiveAcceptancePanel :bridge="bridge" :user-id="userId" />
-    <ControlledExecutionPanel :bridge="bridge" :user-id="userId" :files="files" :rules="bundle" :profiles="customers" :query-template-version="queryTemplateVersion" />
+    <AutomationPanel :bridge="bridge" :user-id="userId" :business-origin="accountOrigin" :files="files" :rules="bundle" :profiles="customers" :query-template-version="queryTemplateVersion" />
+    <LiveAcceptancePanel :bridge="bridge" :user-id="userId" :business-origin="accountOrigin" />
+    <ControlledExecutionPanel :bridge="bridge" :user-id="userId" :business-origin="accountOrigin" :files="files" :rules="bundle" :profiles="customers" :query-template-version="queryTemplateVersion" />
     <article v-for="draft in drafts" :key="draft.id" class="file-card">
       <strong>{{ draft.status === 'ready' ? '可核对' : draft.status === 'warning' ? '需确认' : '不能发文' }} · {{ draft.sendMode === 'single_file' ? '单个来文' : '同描述合并' }}</strong>
       <p class="hint">客户配置 {{ draft.customerProfileId || '未绑定' }} · {{ draft.files.length }} 个文件 · {{ draft.mailTypeName || '未映射发文类型' }}</p>

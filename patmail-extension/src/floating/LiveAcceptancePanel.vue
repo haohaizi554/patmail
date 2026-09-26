@@ -1,24 +1,25 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { acceptanceBlockReason } from '../automation/acceptance-context'
 import { READONLY_ACCEPTANCE_CALLS, type LiveAcceptanceRecord } from '../automation/acceptance-runner'
 import { isConfirmedOperator } from '../automation/operator'
 import { MessageType, type MessageBridge } from '../shared/message'
 import { sendToBackground } from '../utils/runtime'
 
-const props = defineProps<{ bridge?: MessageBridge; userId: string }>()
+const props = defineProps<{ bridge?: MessageBridge; userId: string; businessOrigin: string }>()
 const records = ref<LiveAcceptanceRecord[]>([])
 const selected = ref('')
 const message = ref('')
 const busy = ref(false)
 const ready = computed(() => isConfirmedOperator(props.userId))
-const pageOrigin = location.origin
+const pageOrigin = computed(() => props.businessOrigin)
 
 async function reload(): Promise<void> {
   if (!ready.value) {
     records.value = []
     return
   }
-  const response = await sendToBackground({ type: MessageType.ListAcceptance, payload: { origin: location.origin, operatorId: props.userId } })
+  const response = await sendToBackground({ type: MessageType.ListAcceptance, payload: { origin: props.businessOrigin, operatorId: props.userId } })
   records.value = response?.type === MessageType.AcceptanceResult ? response.payload.records as unknown as LiveAcceptanceRecord[] : []
 }
 
@@ -29,6 +30,11 @@ async function run(call: string): Promise<void> {
   }
   if (!ready.value) {
     message.value = '当前 EASY 用户身份尚未确认。计划不会持久化，也不能执行。'
+    return
+  }
+  const blocked = acceptanceBlockReason(call, {})
+  if (blocked) {
+    message.value = `${call} BLOCKED · ${blocked}`
     return
   }
   busy.value = true

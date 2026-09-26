@@ -4,7 +4,7 @@ import { validateTask } from '../automation/task-validator'
 import { CustomerQueryService } from '../customer/service'
 import { BundleCustomerRepository } from '../customer/repository'
 import type { CustomerQueryProfile } from '../customer/types'
-import { MailRuleRepository } from '../mail/repository'
+import { MailRuleRepository, mailStorageKey } from '../mail/repository'
 import type { MailRuleBundle } from '../mail/types'
 import { ChromeBundleRepository, storageKey } from '../storage/query-bundle'
 import type { QueryTemplate } from '../query/query-types'
@@ -49,9 +49,23 @@ export async function refreshStaleTasks(store: TaskStore, origin: string, operat
   return changed
 }
 
+const ruleQueues = new Map<string, Promise<unknown>>()
+
+function enqueue<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const previous = ruleQueues.get(key) ?? Promise.resolve()
+  const run = previous.then(work, work)
+  ruleQueues.set(key, run.then(() => undefined, () => undefined))
+  return run
+}
+
 export async function saveRuleAccount(area: LocalArea, origin: string, operatorId: string, bundle: MailRuleBundle, tasks: TaskStore | null): Promise<MailRuleBundle> {
   if (!isConfirmedOperator(operatorId)) throw new Error('尚未确认 EASY 用户。')
-  const saved = await new MailRuleRepository(operatorId, origin, area).update(draft => {
+  const key = mailStorageKey(origin, operatorId) ?? `${origin}:${operatorId}`
+  return enqueue(key, async () => {
+  const repo = new MailRuleRepository(operatorId, origin, area)
+  const current = await repo.load()
+  if (bundle.revision !== current.bundle.revision) throw new Error('发文规则已被其他页面更新，请重新读取后再保存。')
+  const saved = await repo.update(draft => {
     draft.ownerId = operatorId
     draft.policies = bundle.policies
     draft.mappings = bundle.mappings
@@ -65,4 +79,5 @@ export async function saveRuleAccount(area: LocalArea, origin: string, operatorI
     await refreshStaleTasks(tasks, origin, operatorId, saved, account.customers)
   }
   return saved
+  })
 }

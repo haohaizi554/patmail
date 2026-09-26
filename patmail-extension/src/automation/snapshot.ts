@@ -3,9 +3,14 @@ import type { CustomerQueryProfile } from '../customer/types'
 import type { SelectedPatentFile } from '../mail/types'
 import type { CustomerIdentitySnapshot } from './types'
 
-/** 结构化深复制。不走 JSON，避免丢掉字段语义。 */
+/** 复制成普通对象。响应式代理不能直接 structuredClone。 */
+export function plainClone<T>(value: T): T {
+  if (typeof value !== 'object' || value === null) return value
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
 export function createTaskSnapshot<T>(value: T): T {
-  return structuredClone(value)
+  return plainClone(value)
 }
 
 function byText(left: string, right: string): number {

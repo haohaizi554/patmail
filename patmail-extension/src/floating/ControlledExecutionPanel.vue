@@ -16,6 +16,7 @@ const props = defineProps<{
   rules: MailRuleBundle
   profiles: CustomerQueryProfile[]
   queryTemplateVersion: number
+  businessOrigin: string
 }>()
 
 const stage = ref<StageId>('MAIL_CREATE')
@@ -33,7 +34,7 @@ const mode = executionMode('TEST_WRITE')
 
 function taskNow() {
   return buildTask({
-    origin: location.origin,
+    origin: props.businessOrigin,
     operatorId: props.userId,
     files: props.files,
     rules: props.rules,
@@ -47,7 +48,7 @@ function explain(): string[] {
   return evaluateTestWrite({
     mode,
     task: taskNow(),
-    scope: { ...CLOSED_TEST_SCOPE, allowedOrigin: location.origin, operatorId: props.userId },
+    scope: { ...CLOSED_TEST_SCOPE, allowedOrigin: props.businessOrigin, operatorId: props.userId },
     stage: stage.value,
     acceptance: [] as LiveAcceptanceRecord[],
     evidence: [],

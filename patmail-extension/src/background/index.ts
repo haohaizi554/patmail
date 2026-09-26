@@ -4,7 +4,7 @@ import { IndexedEvidenceStore, MemoryEvidenceStore } from '../automation/evidenc
 import { handleAuthorityMessage } from './authority'
 import { scopeExtensionPageMessage } from './scope'
 import { EasyConnectionController } from '../shared/connection'
-import { handleWorkspaceMessage, openWorkspaceTab, type WorkspaceHost } from './workspace'
+import { handleWorkspaceMessage, openWorkspaceTab, recheckBoundSession, type WorkspaceHost } from './workspace'
 import { isMessage, MessageType, type AppMessage, type BackgroundResponse } from '../shared/message'
 
 const ownerId = globalThis.crypto.randomUUID()
@@ -13,6 +13,15 @@ const ledger = transactions ? new ExecutionLedger(transactions, ownerId) : null
 const tasks = globalThis.indexedDB ? new IndexedTaskStore(globalThis.indexedDB) : null
 const evidence = globalThis.indexedDB ? new IndexedEvidenceStore(globalThis.indexedDB) : new MemoryEvidenceStore()
 const connection = new EasyConnectionController()
+const CONNECTION_SNAPSHOT = 'patmail.connection.snapshot.v1'
+
+function persistConnection(): void {
+  void chrome.storage.local.set({ [CONNECTION_SNAPSHOT]: connection.snapshot() })
+}
+
+void chrome.storage.local.get(CONNECTION_SNAPSHOT).then(stored => {
+  connection.restoreCandidate(stored[CONNECTION_SNAPSHOT])
+})
 
 const host: WorkspaceHost = {
   connection,
@@ -35,12 +44,19 @@ const host: WorkspaceHost = {
       return created.id
     })
   },
-  sendToTab: (tabId, message) => chrome.tabs.sendMessage(tabId, message)
+  sendToTab: (tabId, message) => chrome.tabs.sendMessage(tabId, message),
+  persist: persistConnection
 }
 
-chrome.tabs.onRemoved.addListener((tabId) => connection.detach(tabId))
+chrome.tabs.onRemoved.addListener((tabId) => {
+  connection.detach(tabId)
+  persistConnection()
+})
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
-  if (info.url || info.status === 'loading') connection.observeNavigation(tabId, info.url ?? tab.url)
+  if (info.url || info.status === 'loading') {
+    connection.observeNavigation(tabId, info.url ?? tab.url)
+    persistConnection()
+  }
 })
 chrome.action.onClicked.addListener(() => { void host.openApp() })
 
@@ -61,17 +77,34 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
     void handleWorkspaceMessage(message, host).then(sendResponse)
     return true
   }
-  let scoped: AppMessage = message
-  if (fromExtensionPage(sender)) {
-    const next = scopeExtensionPageMessage(message, connection.context)
-    if ('error' in next) {
-      sendResponse({ type: MessageType.Error, payload: { message: next.error } } satisfies BackgroundResponse)
-      return
+  const writes = new Set<string>([
+    MessageType.SaveTask, MessageType.ClaimExecution, MessageType.MarkExecutionPrepared,
+    MessageType.MarkExecutionSent, MessageType.MarkExecutionResponse, MessageType.MarkExecutionVerified,
+    MessageType.CompleteExecution, MessageType.ReleaseExecution, MessageType.MarkExecutionUnknown
+  ])
+  const reads = new Set<string>([
+    MessageType.ListTasks, MessageType.GetTask, MessageType.ListAcceptance,
+    MessageType.ArchiveTask, MessageType.ValidateTaskMetadata, MessageType.RecoverExecution
+  ])
+  void (async () => {
+    let scoped: AppMessage = message
+    if (fromExtensionPage(sender) && (writes.has(message.type) || reads.has(message.type))) {
+      const gate = await recheckBoundSession(host)
+      if (writes.has(message.type) && gate !== 'same') {
+        sendResponse({ type: MessageType.Error, payload: { message: '会话已变化，请重新读取后再保存。' } } satisfies BackgroundResponse)
+        return
+      }
     }
-    scoped = next
-  }
-  void handleAuthorityMessage(scoped, { ledger, tasks, evidence }).then(response => {
+    if (fromExtensionPage(sender)) {
+      const next = scopeExtensionPageMessage(message, connection.context)
+      if ('error' in next) {
+        sendResponse({ type: MessageType.Error, payload: { message: next.error } } satisfies BackgroundResponse)
+        return
+      }
+      scoped = next
+    }
+    const response = await handleAuthorityMessage(scoped, { ledger, tasks, evidence })
     sendResponse(response ?? { type: MessageType.Error, payload: { message: '后台没有处理这条消息。' } })
-  })
+  })()
   return true
 })

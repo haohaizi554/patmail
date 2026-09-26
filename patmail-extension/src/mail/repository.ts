@@ -1,3 +1,4 @@
+import { plainClone } from '../automation/snapshot'
 import type { BodyRule, CustomerMailPolicy, CustomerRecipientTemplate, DescriptionMailTypeMapping, MailRuleBundle, OperatorSignature, SubjectRule } from './types'
 import { isQueryGuid } from '../query/query-validator'
 
@@ -84,13 +85,19 @@ export function readMailRules(value: unknown, ownerId: string): { bundle: MailRu
   return { bundle: { version: 1, revision: record.revision, ownerId, policies, mappings, recipients, signatures, subject: record.subject, body: record.body }, writable: true }
 }
 
+type StorageAreaLike = { get: (key: string) => Promise<Record<string, unknown>>; set: (items: Record<string, unknown>) => Promise<void> }
+
 export class MailRuleRepository {
   private memory: MailRuleBundle | null = null
   private tail: Promise<void> = Promise.resolve()
+  private readonly readKey: ((key: string) => Promise<Record<string, unknown>>) | null
+  private readonly writeKey: ((items: Record<string, unknown>) => Promise<void>) | null
   readonly scope: 'account' | 'session'
 
-  constructor(readonly ownerId: string, private readonly origin: string, private readonly area: { get: (key: string) => Promise<Record<string, unknown>>; set: (items: Record<string, unknown>) => Promise<void> } | null) {
+  constructor(readonly ownerId: string, private readonly origin: string, area: StorageAreaLike | null) {
     this.scope = mailStorageKey(origin, ownerId) && area ? 'account' : 'session'
+    this.readKey = area ? key => area.get.call(area, key) : null
+    this.writeKey = area ? items => area.set.call(area, items) : null
   }
 
   private get key(): string | null {
@@ -98,11 +105,11 @@ export class MailRuleRepository {
   }
 
   async load(): Promise<{ bundle: MailRuleBundle; writable: boolean; warning?: string; scope: 'account' | 'session' }> {
-    if (!this.key || !this.area) {
+    if (!this.key || !this.readKey) {
       const bundle = this.memory ?? emptyMailRules(this.ownerId || 'session')
-      return { bundle: structuredClone(bundle), writable: true, scope: 'session' }
+      return { bundle: plainClone(bundle), writable: true, scope: 'session' }
     }
-    const stored = await this.area.get(this.key)
+    const stored = await this.readKey(this.key)
     const read = readMailRules(stored[this.key], this.ownerId)
     return { ...read, scope: 'account' }
   }
@@ -111,13 +118,13 @@ export class MailRuleRepository {
     const run = this.tail.then(async () => {
       const loaded = await this.load()
       if (!loaded.writable) throw new Error(loaded.warning ?? '发文配置只读，未覆盖原数据。')
-      const draft = structuredClone(loaded.bundle)
+      const draft = plainClone(loaded.bundle)
       mutate(draft)
       draft.revision += 1
       draft.ownerId = this.ownerId || 'session'
       const checked = readMailRules(draft, draft.ownerId)
       if (!checked.writable) throw new Error(checked.warning ?? '发文配置未通过校验，未保存。')
-      if (this.key && this.area) await this.area.set({ [this.key]: checked.bundle })
+      if (this.key && this.writeKey) await this.writeKey({ [this.key]: checked.bundle })
       else this.memory = checked.bundle
       return checked.bundle
     })

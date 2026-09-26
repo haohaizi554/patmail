@@ -162,12 +162,14 @@ describe('完整页面数据与证据', () => {
     await saveCustomerAccount(area, origin, userA, profile())
     expect((await loadAccount(area, origin, userB)).customers).toEqual([])
     expect((await loadAccount(area, origin, userA)).customers.map(item => item.name)).toEqual(['客户A'])
-    const task = buildTask({ origin, operatorId: userA, files: [file('file-a')], rules: rules(), profiles: [profile()], queryTemplateVersion: 1, now: '2026-09-26T00:00:00.000Z' })
+    const initial = rules()
+    initial.revision = 1
+    const storedRules = await saveRuleAccount(area, origin, userA, initial, null)
+    const task = buildTask({ origin, operatorId: userA, files: [file('file-a')], rules: storedRules, profiles: [profile()], queryTemplateVersion: 1, now: '2026-09-26T00:00:00.000Z' })
     const unknown = { ...task, taskId: 'unknown-task', status: 'UNKNOWN' as const, readonly: true }
     await store.save(task)
     await store.save(unknown)
-    const changed = rules()
-    changed.subject = { ...changed.subject, template: '新的{文件名称}' }
+    const changed = { ...storedRules, subject: { ...storedRules.subject, template: '新的{文件名称}' } }
     await saveRuleAccount(area, origin, userA, changed, store)
     const saved = await store.list(origin, userA)
     expect(saved.find(item => item.taskId === task.taskId)?.status).toBe('STALE')
