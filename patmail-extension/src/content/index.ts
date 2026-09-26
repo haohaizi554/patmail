@@ -62,17 +62,15 @@ const bridge: MessageBridge = {
       case MessageType.DiagnoseExistingMail:
         return { type: MessageType.ExistingMailDiagnostic, payload: await easyRuntime.diagnoseExistingMail(message.payload.mailId, message.payload.flowType) }
       case MessageType.RunReadonlyAcceptance: {
-        const runner = new LiveEasyAcceptanceRunner({
-          kind: 'live',
-          call: () => easyRuntime.probeReadonly(message.payload.call)
-        })
+        const probe = await easyRuntime.probeReadonly(message.payload.call)
+        const runner = new LiveEasyAcceptanceRunner({ kind: 'live', call: async () => probe })
         const row = await runner.run({
           origin: location.origin,
           operatorId: '',
           call: message.payload.call,
           expected: message.payload.expected
         })
-        return { type: MessageType.AcceptanceResult, payload: { records: [row as unknown as Record<string, unknown>] } }
+        return { type: MessageType.AcceptanceResult, payload: { records: [row as unknown as Record<string, unknown>], probe } }
       }
       case MessageType.CancelFileSearch:
         easyRuntime.cancelFileSearch()
@@ -90,16 +88,5 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   return true
 })
 
-// 旧站点在 document_idle 附近使用 document.write 时，DOM 根节点可能短暂不可用。
-let injectionAttempts = 0
-function mountWhenReady(): void {
-  try {
-    injectPanel(bridge)
-  } catch (error) {
-    injectionAttempts++
-    if (injectionAttempts < 5) window.setTimeout(mountWhenReady, 250)
-    else console.error('PatMail initial injection failed', error)
-  }
-}
-mountWhenReady()
+// 正式入口是完整工作台。浮窗只在收到 SHOW_PANEL 时挂载。
 

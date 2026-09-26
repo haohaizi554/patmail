@@ -40,11 +40,9 @@ async function run(call: string): Promise<void> {
   }
   const row = response.payload.records[0] as unknown as LiveAcceptanceRecord | undefined
   if (!row) return
-  row.operatorId = props.userId
   records.value = [row, ...records.value.filter(item => item.call !== row.call)]
   selected.value = row.call
-  await sendToBackground({ type: MessageType.SaveAcceptance, payload: { record: row as unknown as Record<string, unknown> } })
-  message.value = `${row.call} ${row.result}`
+  message.value = `${row.call} ${row.result}。这是页面展示，不能作为正式证据。`
 }
 
 async function runAll(): Promise<void> {

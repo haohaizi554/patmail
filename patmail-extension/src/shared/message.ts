@@ -1,5 +1,12 @@
 import type { PageInfo, PageSnapshot } from './types'
 import { isPageInfo, isPageSnapshot, isRecord } from './guards'
+import { EASY_ORIGIN } from '../api/config'
+import { isCustomerProfile } from '../customer/guards'
+import type { CustomerQueryProfile } from '../customer/types'
+import type { MailRuleBundle } from '../mail/types'
+import { isQueryTemplate } from '../query/query-validator'
+import type { QueryTemplate } from '../query/query-types'
+import { isEasyConnection, type EasyConnectionContext, type EasyTabCandidate } from './connection'
 import { isDictionaryResult, isFileSearchApiResult, isFileSearchQuery, isHistoryDetailResult, isHistoryListResult, isSessionResult } from '../api/message-guards'
 import type { DictionaryLoadRequest, DictionarySnapshot } from '../api/dictionaries'
 import type { FileSearchQuery } from '../api/file-search-params'
@@ -78,6 +85,8 @@ export const MessageType = {
   ListEvidence: 'LIST_EVIDENCE',
   EvidenceResult: 'EVIDENCE_RESULT',
   RunReadonlyAcceptance: 'RUN_READONLY_ACCEPTANCE',
+  Workspace: 'WORKSPACE',
+  WorkspaceResult: 'WORKSPACE_RESULT',
   WorkflowResult: 'WORKFLOW_RESULT',
   Error: 'ERROR'
 } as const
@@ -136,13 +145,15 @@ export type BackgroundRequest =
   | Response<'LIST_ACCEPTANCE', { origin: string; operatorId: string }>
   | Response<'SAVE_EVIDENCE', { record: Record<string, unknown> }>
   | Response<'LIST_EVIDENCE', { origin: string; call: string }>
+  | Response<'WORKSPACE', WorkspaceAction>
 export type BackgroundResponse =
   | Response<'PONG', { ok: true }>
   | Response<'EXECUTION_LEASE', ExecutionLeasePayload>
   | Response<'EXECUTION_RECOVERED', { leases: ExecutionLeasePayload['lease'][] }>
   | Response<'TASK_RESULT', { ok: boolean; message: string; tasks: TaskSummary[]; task: Record<string, unknown> | null }>
-  | Response<'ACCEPTANCE_RESULT', { records: Record<string, unknown>[] }>
+  | Response<'ACCEPTANCE_RESULT', { records: Record<string, unknown>[]; probe?: { httpStatus: number; sessionOk: boolean; fields: Record<string, string>; shape: string } }>
   | Response<'EVIDENCE_RESULT', { records: Record<string, unknown>[] }>
+  | Response<'WORKSPACE_RESULT', WorkspaceResultPayload>
   | ErrorMessage
 
 export interface LeaseCommand {
@@ -151,6 +162,27 @@ export interface LeaseCommand {
   taskFingerprint: string
   executionId: string
   leaseVersion: number
+}
+
+export type WorkspaceAction =
+  | { action: 'focus' } | { action: 'listTabs' } | { action: 'refreshSession' } | { action: 'openLogin' } | { action: 'load' }
+  | { action: 'bind'; tabId: number }
+  | { action: 'saveCustomer'; profile: CustomerQueryProfile }
+  | { action: 'saveRules'; bundle: MailRuleBundle }
+  | { action: 'forward'; message: ContentRequest }
+  | { action: 'runAcceptance'; call: string }
+
+export interface WorkspaceResultPayload {
+  ok: boolean
+  message: string
+  connection: EasyConnectionContext
+  tabs: EasyTabCandidate[]
+  customers: CustomerQueryProfile[]
+  templates: QueryTemplate[]
+  rules: MailRuleBundle | null
+  tasks: TaskSummary[]
+  forwarded: AppMessage | null
+  appTab: { tabId: number; created: boolean } | null
 }
 
 export interface TaskSummary {
@@ -245,6 +277,10 @@ export function isMessage(value: unknown): value is AppMessage {
     case MessageType.ListEvidence:
       return isRecord(value.payload) && typeof value.payload.origin === 'string' && typeof value.payload.call === 'string' &&
         value.payload.origin.length <= 200 && value.payload.call.length <= 80 && Object.keys(value.payload).length === 2
+    case MessageType.Workspace:
+      return isWorkspaceAction(value.payload)
+    case MessageType.WorkspaceResult:
+      return isWorkspaceResult(value.payload)
     case MessageType.PreviewWorkflow:
       return isWorkflowPreview(value.payload)
     case MessageType.FindMailExecution:
@@ -315,6 +351,50 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.RestoreWorkflow || value.type === MessageType.DiagnoseExistingMail ||
     value.type === MessageType.RunReadonlyAcceptance
   )
+}
+
+const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
+
+function isWorkspaceAction(value: unknown): value is WorkspaceAction {
+  if (!isRecord(value) || typeof value.action !== 'string') return false
+  if (value.action === 'focus' || value.action === 'listTabs' || value.action === 'refreshSession' || value.action === 'openLogin' || value.action === 'load') {
+    return Object.keys(value).length === 1
+  }
+  if (value.action === 'bind') return typeof value.tabId === 'number' && Number.isInteger(value.tabId) && Object.keys(value).length === 2
+  if (value.action === 'saveCustomer') return isCustomerProfile(value.profile) && Object.keys(value).length === 2
+  if (value.action === 'saveRules') return isRuleBundle(value.bundle) && Object.keys(value).length === 2
+  if (value.action === 'runAcceptance') return typeof value.call === 'string' && value.call.length > 0 && value.call.length <= 80 && Object.keys(value).length === 2
+  if (value.action === 'forward') return Object.keys(value).length === 2 && isMessage(value.message) && PAGE_FORWARD.has(String(value.message.type))
+  return false
+}
+
+function isWorkspaceResult(value: unknown): value is WorkspaceResultPayload {
+  if (!isRecord(value) || typeof value.ok !== 'boolean' || typeof value.message !== 'string' || !isEasyConnection(value.connection)) return false
+  if (!Array.isArray(value.tabs) || !value.tabs.every(isEasyTab)) return false
+  if (!Array.isArray(value.customers) || !value.customers.every(isCustomerProfile)) return false
+  if (!Array.isArray(value.templates) || !value.templates.every(isQueryTemplate)) return false
+  if (value.rules !== null && !isRuleBundle(value.rules)) return false
+  if (!Array.isArray(value.tasks) || !value.tasks.every(isTaskSummary)) return false
+  if (!isForwardedMessage(value.forwarded)) return false
+  return value.appTab === null || (isRecord(value.appTab) && typeof value.appTab.tabId === 'number' && typeof value.appTab.created === 'boolean')
+}
+
+function isEasyTab(value: unknown): value is EasyTabCandidate {
+  return isRecord(value) && typeof value.id === 'number' && typeof value.title === 'string' && typeof value.url === 'string' && value.origin === EASY_ORIGIN
+}
+
+function isRuleBundle(value: unknown): value is MailRuleBundle {
+  if (!isRecord(value) || value.version !== 1 || typeof value.revision !== 'number' || typeof value.ownerId !== 'string') return false
+  if (!Array.isArray(value.policies) || !Array.isArray(value.mappings) || !Array.isArray(value.recipients) || !Array.isArray(value.signatures)) return false
+  if (!isRecord(value.subject) || typeof value.subject.template !== 'string' || value.subject.template.length > 500) return false
+  if (!isRecord(value.body) || typeof value.body.template !== 'string' || value.body.template.length > 4000) return false
+  return JSON.stringify(value).length <= 200_000
+}
+
+function isForwardedMessage(value: unknown): value is AppMessage | null {
+  if (value === null) return true
+  if (!isRecord(value) || value.type === MessageType.Workspace || value.type === MessageType.WorkspaceResult) return false
+  return isMessage(value)
 }
 
 function isOperatorScope(value: unknown): value is { origin: string; operatorId: string } {

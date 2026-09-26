@@ -116,14 +116,36 @@ try {
   const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker')
   const extensionId = new URL(worker.url()).host
   assert.match(extensionId, /^[a-p]{32}$/)
+  async function tabFor(targetPage) {
+    const targetUrl = targetPage.url()
+    for (let attempt = 0; attempt < 25; attempt++) {
+      const tab = (await worker.evaluate(() => chrome.tabs.query({}))).find((item) => item.url === targetUrl)
+      if (tab?.id) {
+        try {
+          const pong = await worker.evaluate((tabId) => chrome.tabs.sendMessage(tabId, { type: 'PING' }, { frameId: 0 }), tab.id)
+          if (pong?.type === 'PONG') return tab
+        } catch { /* 内容脚本仍在启动 */ }
+      }
+      await targetPage.waitForTimeout(200)
+    }
+    throw new Error(`content script did not answer ${targetUrl}`)
+  }
+  async function showPanel(targetPage) {
+    const tab = await tabFor(targetPage)
+    const response = await worker.evaluate((tabId) => chrome.tabs.sendMessage(tabId, { type: 'SHOW_PANEL' }), tab.id)
+    assert.deepEqual(response, { type: 'PANEL_SHOWN', payload: { ok: true } })
+  }
   const page = await context.newPage()
   await page.setViewportSize({ width: 1200, height: 800 })
   await page.goto(url)
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(url).origin })
   const host = page.locator('patmail-root')
   const panel = host.locator('.panel')
+  await tabFor(page)
+  assert.equal(await host.count(), 0)
+  await showPanel(page)
   await panel.waitFor()
-  await check('auto injection and isolated 360×600 panel', async () => {
+  await check('explicit SHOW_PANEL opens one isolated 360×600 panel', async () => {
     assert.equal(await host.count(), 1)
     assert.equal(await host.evaluate((node) => node.shadowRoot?.querySelectorAll('.panel').length), 1)
     await visible(panel, 360, 600)
@@ -196,6 +218,9 @@ try {
     const easyPage = await context.newPage()
     await easyPage.setViewportSize({ width: 1200, height: 800 })
     await easyPage.goto(easyUrl)
+    await tabFor(easyPage)
+    assert.equal(await easyPage.locator('patmail-root').count(), 0)
+    await showPanel(easyPage)
     const easyPanel = easyPage.locator('patmail-root').locator('.panel')
     await easyPanel.getByText('未登录', { exact: true }).waitFor()
     assert(apiCalls.some(call => call.path === '/AjaxServers/Login.ashx' && !call.authenticated))
@@ -290,7 +315,7 @@ try {
     await visible(panel, 294, 254)
     await page.setViewportSize({ width: 1200, height: 800 })
   })
-  await check('close, SHOW_PANEL twice, and refresh preserve one host', async () => {
+  await check('close and SHOW_PANEL keep one host; reload does not restore it', async () => {
     await panel.getByRole('button', { name: '关闭面板' }).click()
     await host.waitFor({ state: 'detached' })
     const tab = (await worker.evaluate((target) => chrome.tabs.query({}), url)).find((item) => item.url === url)
@@ -302,6 +327,9 @@ try {
       assert.equal(await host.count(), 1)
     }
     await page.reload()
+    await tabFor(page)
+    assert.equal(await host.count(), 0)
+    await showPanel(page)
     await panel.waitFor()
     assert.equal(await host.count(), 1)
   })
@@ -368,6 +396,9 @@ try {
   })
   await check('document.write replacement restores one panel', async () => {
     await page.reload()
+    await tabFor(page)
+    assert.equal(await host.count(), 0)
+    await showPanel(page)
     await panel.waitFor()
     await page.evaluate(() => {
       document.open()
@@ -380,6 +411,8 @@ try {
   })
   await check('large form scan reports profiling without observing the page', async () => {
     await page.reload()
+    await tabFor(page)
+    await showPanel(page)
     await panel.waitFor()
     await page.evaluate(() => {
       const batch = document.createDocumentFragment()
@@ -396,6 +429,49 @@ try {
     assert.equal(snapshot.stats.totalControls, 1008)
     assert(Number.isFinite(snapshot.stats.durationMs))
     profile.push(`large ${snapshot.stats.totalControls} controls: ${snapshot.stats.durationMs} ms`)
+  })
+  await check('icon action opens one full-page workspace and the next call focuses it', async () => {
+    const manifest = JSON.parse(await readFile(path.join(dist, 'manifest.json'), 'utf8'))
+    assert.equal(manifest.action.default_popup, undefined)
+    assert.equal((await readFile(path.join(dist, 'app.html'), 'utf8')).includes('./app.js'), true)
+    const launcher = await context.newPage()
+    await launcher.goto(`chrome-extension://${extensionId}/src/popup/index.html`)
+    const opened = context.waitForEvent('page')
+    const first = await launcher.evaluate(() => chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'focus' } }))
+    assert.equal(first.payload.appTab.created, true)
+    const app = await opened
+    const second = await launcher.evaluate(() => chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'focus' } }))
+    assert.equal(second.payload.appTab.created, false)
+    assert.equal(first.payload.appTab.tabId, second.payload.appTab.tabId)
+    const tabs = await worker.evaluate(() => chrome.tabs.query({}))
+    assert.equal(tabs.filter((item) => item.url?.includes('/app.html')).length, 1)
+    await app.getByRole('navigation', { name: '工作台导航' }).getByRole('link', { name: '客户管理' }).click()
+    await app.waitForURL(/#\/customers$/)
+    await app.reload()
+    await app.waitForURL(/#\/customers$/)
+    await app.getByRole('heading', { name: '尚未连接 EASY' }).waitFor()
+    await app.getByText('尚未确认 EASY 用户，不能读取客户配置。').waitFor()
+    assert.equal(await app.getByText('华为').count(), 0)
+    assert.equal(await app.getByText('DEMO').count(), 0)
+    assert.equal(await app.getByText('已成功发送').count(), 0)
+    await context.addCookies([{ name: 'pm_fixture_session', value: 'active', url: easyUrl, httpOnly: true, sameSite: 'Lax' }])
+    const easyPage = await context.newPage()
+    await easyPage.goto(easyUrl)
+    await tabFor(easyPage)
+    assert.equal(await easyPage.locator('patmail-root').count(), 0)
+    await app.bringToFront()
+    await app.getByRole('button', { name: '刷新标签页' }).click()
+    await app.getByText('发现一个 EASY 标签页，请确认后连接。').waitFor()
+    await app.getByRole('button', { name: '连接所选标签页' }).click()
+    await app.getByText('测试员').waitFor()
+    await app.getByRole('link', { name: '文件查询' }).click()
+    await app.getByText('已登录', { exact: true }).waitFor()
+    await app.getByLabel('我方文号').fill('A+123')
+    await app.getByRole('button', { name: '查询文件' }).click()
+    await app.getByText('通知书-1.pdf').waitFor()
+    await app.getByRole('link', { name: '系统设置' }).click()
+    await app.getByText('Production Write：关闭').waitFor()
+    await easyPage.close()
   })
   assert.deepEqual(errors, [], `browser errors: ${errors.join('\n')}`)
   await writeFile(path.join(root, 'test-results/patmail-e2e.txt'), `${checks} checks passed; browser errors: 0\n${profile.join('\n')}\n`)

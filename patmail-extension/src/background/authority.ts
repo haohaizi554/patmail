@@ -1,5 +1,6 @@
 import type { LiveAcceptanceRecord } from '../automation/acceptance-runner'
-import { type EvidenceRepository, type StoredEvidence } from '../automation/evidence-store'
+import { downgradeClientAcceptance, downgradeClientEvidence } from '../automation/acceptance-trust'
+import { type EvidenceRepository, type EvidenceSource, type StoredEvidence } from '../automation/evidence-store'
 import { ExecutionLedger } from '../automation/ledger'
 import { isConfirmedOperator } from '../automation/operator'
 import type { TaskStore } from '../automation/task-service'
@@ -96,7 +97,11 @@ export async function handleAuthorityMessage(message: AppMessage, deps: Authorit
     return { type: MessageType.TaskResult, payload: { ok: true, message: '', tasks: [], task: null } }
   }
   if (message.type === MessageType.SaveAcceptance) {
-    await deps.evidence.saveAcceptance(message.payload.record as unknown as LiveAcceptanceRecord)
+    const raw = message.payload.record as unknown as LiveAcceptanceRecord
+    if (typeof raw.call !== 'string' || (raw.result !== 'PASS' && raw.result !== 'FAIL' && raw.result !== 'BLOCKED')) {
+      return { type: MessageType.AcceptanceResult, payload: { records: [] } }
+    }
+    await deps.evidence.saveAcceptance(downgradeClientAcceptance(raw))
     return { type: MessageType.AcceptanceResult, payload: { records: [] } }
   }
   if (message.type === MessageType.ListAcceptance) {
@@ -105,7 +110,9 @@ export async function handleAuthorityMessage(message: AppMessage, deps: Authorit
     return { type: MessageType.AcceptanceResult, payload: { records: records as unknown as Record<string, unknown>[] } }
   }
   if (message.type === MessageType.SaveEvidence) {
-    await deps.evidence.saveEvidence(message.payload.record as unknown as StoredEvidence)
+    const raw = clientEvidence(message.payload.record)
+    if (!raw) return { type: MessageType.EvidenceResult, payload: { records: [] } }
+    await deps.evidence.saveEvidence(downgradeClientEvidence(raw))
     return { type: MessageType.EvidenceResult, payload: { records: [] } }
   }
   if (message.type === MessageType.ListEvidence) {
@@ -113,4 +120,29 @@ export async function handleAuthorityMessage(message: AppMessage, deps: Authorit
     return { type: MessageType.EvidenceResult, payload: { records: records as unknown as Record<string, unknown>[] } }
   }
   return null
+}
+
+function clientEvidence(value: Record<string, unknown>): StoredEvidence | null {
+  if (typeof value.call !== 'string' || typeof value.origin !== 'string' || typeof value.handler !== 'string') return null
+  if (typeof value.httpStatus !== 'number' || typeof value.requestShape !== 'string' || typeof value.responseShape !== 'string') return null
+  if (typeof value.capturedAt !== 'string') return null
+  const source: EvidenceSource = value.source === 'CAPTURED_HAR' || value.source === 'MOCK' || value.source === 'LIVE' || value.source === 'PAGE_SCRIPT' ? value.source : 'PAGE_SCRIPT'
+  return {
+    evidenceId: typeof value.evidenceId === 'string' ? value.evidenceId : '',
+    handler: value.handler,
+    call: value.call,
+    origin: value.origin,
+    operatorIdHash: '',
+    requestShape: value.requestShape,
+    responseShape: value.responseShape,
+    httpStatus: value.httpStatus,
+    businessSuccess: false,
+    readbackCall: typeof value.readbackCall === 'string' ? value.readbackCall : '',
+    readbackMatched: false,
+    source,
+    level: 'UNKNOWN',
+    capturedAt: value.capturedAt,
+    verifiedAt: '',
+    sampleHash: ''
+  }
 }

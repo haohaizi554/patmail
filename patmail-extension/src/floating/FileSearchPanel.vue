@@ -10,7 +10,9 @@ import QueryTemplateSection from './QueryTemplateSection.vue'
 import SchemaQueryForm from './SchemaQueryForm.vue'
 import { MessageType, type MessageBridge } from '../shared/message'
 
+const props = defineProps<{ pageOrigin?: string }>()
 const bridge = inject<MessageBridge>('bridge')
+const accountOrigin = computed(() => props.pageOrigin || location.origin)
 const sessionStatus = ref<SessionStatus>('unknown')
 const sessionName = ref('')
 const sessionUserId = ref('')
@@ -194,7 +196,7 @@ function confirmBindReview(): void {
 async function loadBindCustomers(): Promise<void> {
   if (!sessionUserId.value || typeof chrome === 'undefined' || !chrome.storage?.local) return
   const { ChromeBundleRepository, storageKey } = await import('../storage/query-bundle')
-  const loaded = await new ChromeBundleRepository(storageKey(location.origin, sessionUserId.value)).load()
+  const loaded = await new ChromeBundleRepository(storageKey(accountOrigin.value, sessionUserId.value)).load()
   bindCustomers.value = loaded.bundle.customers.map(item => ({ id: item.id, name: item.name }))
 }
 
@@ -235,7 +237,7 @@ onBeforeUnmount(() => {
       </label>
     </section>
     <SchemaQueryForm v-if="querySource === 'manual'" :bridge="bridge" :can-search="canSearch" :page-size="pageSize" @search="executeSearch" />
-    <QueryTemplateSection v-else :bridge="bridge" :can-search="canSearch" :user-id="sessionUserId" :mode="querySource === 'customer' ? 'customer' : 'history'" :page-size="pageSize" @search="executeSearch" />
+    <QueryTemplateSection v-else :bridge="bridge" :can-search="canSearch" :user-id="sessionUserId" :origin="accountOrigin" :mode="querySource === 'customer' ? 'customer' : 'history'" :page-size="pageSize" @search="executeSearch" />
 
     <section ref="resultsSection" class="card file-results" aria-label="查询结果">
       <div class="section-heading"><strong>查询结果</strong><button type="button" class="text-button" :disabled="!canSearch || !lastQuery || searchState === 'loading'" @click="refresh">刷新</button></div>
@@ -289,7 +291,7 @@ onBeforeUnmount(() => {
           </article>
           <button v-if="bindReview.length" type="button" class="text-button" @click="confirmBindReview">确认已核对的绑定</button>
         </section>
-        <MailWorkspace v-if="showMail" :bridge="bridge" :user-id="sessionUserId" :files="Object.values(selected)" />
+        <MailWorkspace v-if="showMail" :bridge="bridge" :user-id="sessionUserId" :page-origin="accountOrigin" :files="Object.values(selected)" />
       </template>
     </section>
   </div>

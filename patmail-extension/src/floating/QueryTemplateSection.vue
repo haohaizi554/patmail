@@ -19,6 +19,7 @@ const props = defineProps<{
   userId: string
   mode: 'history' | 'customer'
   pageSize: number
+  origin?: string
 }>()
 const emit = defineEmits<{ search: [query: FileSearchQuery] }>()
 
@@ -65,7 +66,7 @@ const PREVIEW_FIELDS = ['case_type', 'filetype', 'customer_name_vague', 'case_vo
 const businessFields = FILE_SEARCH_REQUEST_FIELDS.filter(field => !FILE_SEARCH_SYSTEM_FIELDS.has(field))
 
 const bundles = computed<QueryBundleRepository>(() => {
-  const key = storageKey(location.origin, props.userId || null)
+  const key = storageKey(props.origin || location.origin, props.userId || null)
   if (typeof chrome !== 'undefined' && chrome.storage?.local) return new ChromeBundleRepository(key)
   return new MemoryBundleRepository()
 })

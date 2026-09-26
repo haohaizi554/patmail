@@ -11,7 +11,8 @@ import WorkflowPanel from './WorkflowPanel.vue'
 import { ChromeBundleRepository, storageKey } from '../storage/query-bundle'
 import { MessageType, type MessageBridge } from '../shared/message'
 
-const props = defineProps<{ bridge?: MessageBridge; userId: string; files: SelectedPatentFile[] }>()
+const props = defineProps<{ bridge?: MessageBridge; userId: string; files: SelectedPatentFile[]; pageOrigin?: string }>()
+const accountOrigin = computed(() => props.pageOrigin || location.origin)
 const customers = ref<CustomerQueryProfile[]>([])
 const bundle = ref<MailRuleBundle>(emptyMailRules('session'))
 const scope = ref<'account' | 'session'>('session')
@@ -42,7 +43,7 @@ const queryTemplateVersion = computed(() => customers.value.map(item => `${item.
 const scopeLabel = computed(() => scope.value === 'account' ? '当前账号' : '本次页面，未套用其他账号配置')
 
 async function reloadCustomers(): Promise<void> {
-  const key = storageKey(location.origin, props.userId || null)
+  const key = storageKey(accountOrigin.value, props.userId || null)
   if (typeof chrome === 'undefined' || !chrome.storage?.local || !props.userId) {
     customers.value = []
     return
@@ -51,7 +52,7 @@ async function reloadCustomers(): Promise<void> {
   customers.value = loaded.bundle.customers
 }
 async function reloadRules(): Promise<void> {
-  repository.value = new MailRuleRepository(owner.value, location.origin, props.userId && typeof chrome !== 'undefined' ? chrome.storage?.local ?? null : null)
+  repository.value = new MailRuleRepository(owner.value, accountOrigin.value, props.userId && typeof chrome !== 'undefined' ? chrome.storage?.local ?? null : null)
   const loaded = await repository.value.load()
   bundle.value = loaded.bundle
   scope.value = loaded.scope
@@ -98,18 +99,18 @@ async function importRules(): Promise<void> {
 function preview(): void {
   if (!bundle.value) return
   const files = props.files.map(file => ({ ...file, ...(file.customerBinding ? { customerBinding: { ...file.customerBinding } } : {}) }))
-  const fingerprint = selectionFingerprint({ files, revision: bundle.value.revision, userId: owner.value, origin: location.origin })
+  const fingerprint = selectionFingerprint({ files, revision: bundle.value.revision, userId: owner.value, origin: accountOrigin.value })
   drafts.value = planDrafts({
     selectedAt: new Date().toISOString(),
     files,
     configVersion: bundle.value.revision,
     userId: owner.value,
-    origin: location.origin,
+    origin: accountOrigin.value,
     fingerprint
   }, bundle.value, customers.value, owner.value)
 }
 
-watch(() => props.userId, () => { void reloadCustomers(); void reloadRules() }, { immediate: true })
+watch(() => [props.userId, accountOrigin.value], () => { void reloadCustomers(); void reloadRules() }, { immediate: true })
 watch(() => props.files, () => { drafts.value = [] }, { deep: true })
 </script>
 
