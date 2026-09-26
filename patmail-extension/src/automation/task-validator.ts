@@ -22,11 +22,21 @@ export function validateTask(task: AutomationTask, current: TaskBuildInput): Aut
     if (frozen !== live || task.taskFingerprint !== frozen) {
       issues.push({ code: 'STALE_TASK', message: '文件、客户绑定或规则内容已经变化，需要重新生成计划。', itemId: '' })
     }
-    if (task.queryDependencies && task.queryDependencies.length > 0 && current.templates) {
-      const liveDependencies = buildQueryDependencies(current.profiles, current.templates)
-      const referenced = new Set(task.queryDependencies.map(item => item.customerProfileId))
-      const relevant = liveDependencies.filter(item => referenced.has(item.customerProfileId))
-      if (!sameQueryDependencies(task.queryDependencies, relevant)) {
+    if (!Array.isArray(task.queryDependencies)) {
+      issues.push({ code: 'LEGACY_DEPENDENCY_UNKNOWN', message: '旧任务没有查询依赖快照，只能查看和只读诊断。', itemId: '' })
+      const keepUnknown = task.status === 'UNKNOWN' || task.checkpoints.some(item => item.requestSent)
+      return {
+        ...task,
+        issues,
+        dependencyState: 'LEGACY_DEPENDENCY_UNKNOWN',
+        readonly: true,
+        status: keepUnknown ? 'UNKNOWN' : 'STALE',
+        updatedAt: current.now ?? new Date().toISOString()
+      }
+    }
+    if (task.queryDependencies.length > 0 && current.templates) {
+      const liveDependencies = buildQueryDependencies(current.profiles, current.templates, task.queryDependencies.map(item => item.customerProfileId))
+      if (!sameQueryDependencies(task.queryDependencies, liveDependencies)) {
         issues.push({ code: 'STALE_TASK', message: '查询模板或客户覆盖已经变化，旧计划已过期。', itemId: '' })
       }
     }

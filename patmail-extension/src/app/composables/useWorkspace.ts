@@ -40,7 +40,7 @@ export interface WorkspaceCommitCheck {
 export function canCommitWorkspaceResponse(input: WorkspaceCommitCheck): boolean {
   if (input.expectedEpoch !== undefined && input.connectionEpoch !== undefined && input.expectedEpoch !== input.connectionEpoch) return false
   if (input.kind === 'mutation') {
-    if (input.latestMutationId === undefined || input.requestId !== input.latestMutationId) return false
+    if (input.expectedEpoch !== undefined && input.connectionEpoch !== undefined && input.expectedEpoch !== input.connectionEpoch) return false
   } else if (input.requestId !== input.latestRequestId) return false
   if (input.expectedOrigin && input.responseOrigin && input.responseOrigin !== input.expectedOrigin) return false
   if (input.responseAuthenticated && (!input.responseOrigin || !input.responseOperatorId)) return false
@@ -150,7 +150,7 @@ export function useWorkspace() {
         responseOperatorId: next.operatorId,
         responseAuthenticated: next.sessionStatus === 'authenticated'
       })) return null
-      applyPayload(action, response.payload)
+      if (kind !== 'mutation' || requestId === mutationSerial) applyPayload(action, response.payload)
       return response.payload
     } finally {
       inflight -= 1

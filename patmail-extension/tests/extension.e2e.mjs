@@ -663,10 +663,29 @@ try {
       }
     })
     assert.equal(protectedTask.ok, false)
-    assert.match(protectedTask.message, /不能覆盖已有执行证据/)
+    assert.match(protectedTask.message, /正式页面不能提交完整任务/)
     assert.equal(protectedTask.status, 'UNKNOWN')
     assert.equal(protectedTask.requestSent, true)
     assert.equal(protectedTask.easyMailId, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+    const forged = await app.evaluate(async () => {
+      const loaded = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'load' } })
+      const connection = loaded.payload.connection
+      const currentId = loaded.payload.tasks[0].taskId
+      const got = await chrome.runtime.sendMessage({ type: 'GET_TASK', payload: { origin: connection.easyOrigin, operatorId: connection.operatorId, taskId: currentId } })
+      const task = got.payload.task
+      task.status = 'READY'
+      task.readonly = false
+      if (Array.isArray(task.items)) task.items.forEach((item) => {
+        item.status = 'COMPLETED'
+        item.easyMailId = ''
+        item.mailExecutionId = ''
+        item.workflowExecutionId = ''
+      })
+      task.checkpoints = [{ stage: 'MAIL_CREATE', itemId: '', requestSent: false, responseReceived: false, verified: true, easyMailId: '', at: '', note: '' }]
+      const saved = await chrome.runtime.sendMessage({ type: 'SAVE_TASK', payload: { task } })
+      return saved.payload.message
+    })
+    assert.match(forged, /不能由页面声明子任务完成/)
     const mailCalls = () => apiCalls.filter(item => item.path === '/AjaxServers/Mail.ashx').length
     const beforeMail = mailCalls()
     await app.getByRole('link', { name: '接口验收' }).click()

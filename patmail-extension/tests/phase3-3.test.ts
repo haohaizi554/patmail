@@ -126,7 +126,7 @@ describe('Phase 3.3 可信任务、模板摘要与账号事务', () => {
     )
     if (rejected?.type !== MessageType.TaskResult) throw new Error('save')
     expect(rejected.payload.ok).toBe(false)
-    expect(rejected.payload.message).toContain('不能覆盖已有执行证据')
+    expect(rejected.payload.message).toContain('正式页面不能提交完整任务')
     const again = await runtime.tasks?.list(origin, userA, true)
     const kept = again?.find(item => item.taskId === stored.taskId)
     expect(kept?.status).toBe('UNKNOWN')

@@ -10,6 +10,7 @@ import type { QueryTemplate } from '../query/query-types'
 import { chooseAppTab, EasyConnectionController, emptyConnection, accountScopeMatches, freezeAccount, sameAccountContext, tabOrigin, type AccountContextSnapshot, type BrowserTabRef, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope } from '../shared/connection'
 import { isMessage, MessageType, type AppMessage, type BackgroundResponse, type CreatedTaskResult } from '../shared/message'
 import { loadAccount, deleteCustomerAccount, deleteQueryTemplateAccount, refreshStaleTasks, saveCustomerAccount, saveQueryTemplateAccount, saveRuleAccount, type LocalArea } from './account-data'
+import { fileSearchFor, provenanceFor, rememberFileSearch, snapshotFromItems } from '../automation/file-search-snapshot'
 import { planTrustedTask } from '../automation/task-planner'
 import type { AutomationTask } from '../automation/types'
 
@@ -109,6 +110,15 @@ function staleResult(host: WorkspaceHost): BackgroundResponse {
   })
 }
 
+function rememberObservedSearch(host: WorkspaceHost, response: AppMessage): void {
+  if (response.type !== MessageType.SearchFilesResult || !response.payload.ok) return
+  const data = response.payload.data
+  if (!data || !Array.isArray(data.items)) return
+  const frozen = freezeAccount(host.connection.context)
+  if (!frozen) return
+  rememberFileSearch(snapshotFromItems(frozen, data.items, new Date().toISOString()))
+}
+
 function createdOf(task: AutomationTask): CreatedTaskResult {
   return {
     taskId: task.taskId,
@@ -117,7 +127,7 @@ function createdOf(task: AutomationTask): CreatedTaskResult {
     createdAt: task.createdAt,
     itemCount: task.items.length,
     persisted: true,
-    fileSource: 'FILE_SOURCE_UNVERIFIED'
+    fileSource: task.fileSource === 'SEARCH_RESPONSE_OBSERVED' ? 'SEARCH_RESPONSE_OBSERVED' : 'FILE_SOURCE_UNVERIFIED'
   }
 }
 
@@ -309,13 +319,16 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
       if (!accountNow.rules || !host.tasks) {
         return workspaceResult({ ok: false, message: '没有可核验的发文规则，任务未保存。', connection: host.connection.context })
       }
+      const observed = fileSearchFor(frozen.easyOrigin, frozen.operatorId)
+      const fileSource = provenanceFor(action.files.map(file => file.fileId), observed, frozen)
       const task = planTrustedTask({
         origin: frozen.easyOrigin,
         operatorId: frozen.operatorId,
         files: action.files,
         rules: accountNow.rules,
         profiles: accountNow.customers,
-        templates: accountNow.templates
+        templates: accountNow.templates,
+        fileSource
       })
       if (!sameAccountContext(host.connection.context, frozen)) return staleResult(host)
       await host.tasks.save(task)
@@ -347,6 +360,7 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
       if (!isMessage(response) || response.type === MessageType.Workspace || response.type === MessageType.WorkspaceResult) {
         return workspaceResult({ ok: false, message: 'EASY 页面没有返回可识别的结果。', connection: host.connection.context })
       }
+      rememberObservedSearch(host, response)
       return workspaceResult({ ok: true, message: '', connection: host.connection.context, forwarded: response })
     } catch {
       host.connection.detach(target.tabId)

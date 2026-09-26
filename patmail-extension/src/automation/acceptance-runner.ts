@@ -28,6 +28,8 @@ export interface LiveAcceptanceRecord {
   matchedWithUi: boolean
   evidenceLevel?: AcceptanceEvidenceLevel
   evidenceSource?: 'MANUAL_EXPECTATION' | 'EASY_UI_OBSERVED' | 'API_RESPONSE' | 'HAR_CAPTURE' | 'MOCK'
+  /** 分层验收。手工期望只能到 MANUAL_COMPARED，不能自动升到 EASY_UI_COMPARED。 */
+  acceptanceLayer?: 'HTTP_RESULT' | 'RESPONSE_STRUCTURE_VALIDATED' | 'BUSINESS_VALIDATED' | 'MANUAL_COMPARED' | 'EASY_UI_COMPARED' | 'READBACK_VERIFIED'
   result: AcceptanceResult
   reason: string
   evidenceHash: string
@@ -147,6 +149,7 @@ export class LiveEasyAcceptanceRunner {
       validatedFields: Object.keys(expected).length > 0 ? Object.keys(expected) : Object.keys(fields),
       matchedWithUi: false,
       evidenceSource,
+      acceptanceLayer: result !== 'PASS' ? 'HTTP_RESULT' : Object.keys(expected).length > 0 ? 'MANUAL_COMPARED' : 'BUSINESS_VALIDATED',
       result,
       reason
     })

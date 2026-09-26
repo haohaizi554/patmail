@@ -1,5 +1,6 @@
 import { sha256Hex } from './sha256'
 import type { CustomerQueryProfile } from '../customer/types'
+import type { SelectedPatentFile } from '../mail/types'
 import type { QueryTemplate } from '../query/query-types'
 
 /** 任务引用的客户和模板。摘要来自字段内容，不看显示名，也不看更新时间字符串。 */
@@ -13,25 +14,37 @@ export interface QueryDependencySnapshot {
   customerOverridesDigest: string
 }
 
-/** 稳定序列化。空字符串保留。键排序后，字段顺序和客户数组顺序不影响摘要。 */
+/** 稳定序列化。用 JSON 数组保留空字符串，并避免换行、等号和属性顺序造成歧义。 */
 export function stableFieldDigest(fields: Record<string, string> | undefined): string {
   const source = fields ?? {}
-  const canonical = Object.keys(source).sort().map(key => `${key}=${source[key]}`).join('\n')
+  const canonical = JSON.stringify(Object.keys(source).sort().map(key => [key, source[key]]))
   return sha256Hex(canonical)
 }
 
-export function buildQueryDependencies(profiles: CustomerQueryProfile[], templates: QueryTemplate[]): QueryDependencySnapshot[] {
-  return profiles.map(profile => {
-    const template = templates.find(item => item.id === profile.baseTemplateId && item.source === 'local')
-      ?? templates.find(item => item.id === profile.baseTemplateId)
+export function referencedProfileIds(files: Array<Pick<SelectedPatentFile, 'customerProfileId' | 'customerBinding'>>): string[] {
+  const ids = new Set<string>()
+  for (const file of files) {
+    if (file.customerProfileId) ids.add(file.customerProfileId)
+    if (file.customerBinding?.profileId) ids.add(file.customerBinding.profileId)
+  }
+  return [...ids]
+}
+
+export function buildQueryDependencies(profiles: CustomerQueryProfile[], templates: QueryTemplate[], onlyProfileIds?: readonly string[]): QueryDependencySnapshot[] {
+  const wanted = onlyProfileIds ? [...new Set(onlyProfileIds)] : profiles.map(profile => profile.id)
+  return wanted.map(profileId => {
+    const profile = profiles.find(item => item.id === profileId)
+    const template = profile
+      ? templates.find(item => item.id === profile.baseTemplateId && item.source === 'local') ?? templates.find(item => item.id === profile.baseTemplateId)
+      : undefined
     return {
-      customerProfileId: profile.id,
-      customerRevision: profile.revision ?? 1,
-      baseTemplateId: profile.baseTemplateId,
+      customerProfileId: profileId,
+      customerRevision: profile?.revision ?? 0,
+      baseTemplateId: profile?.baseTemplateId ?? '',
       templateId: template?.id ?? '',
       templateVersion: template?.version ?? 0,
-      templateContentDigest: template ? stableFieldDigest(template.fields) : 'missing',
-      customerOverridesDigest: stableFieldDigest(profile.overrides)
+      templateContentDigest: profile && template ? stableFieldDigest(template.fields) : 'missing',
+      customerOverridesDigest: profile ? stableFieldDigest(profile.overrides) : 'missing'
     }
   }).sort((left, right) => left.customerProfileId < right.customerProfileId ? -1 : left.customerProfileId > right.customerProfileId ? 1 : 0)
 }

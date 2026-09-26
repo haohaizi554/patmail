@@ -11,7 +11,7 @@ import { handleWorkspaceMessage, type WorkspaceHost } from '../src/background/wo
 import type { CustomerQueryProfile } from '../src/customer/types'
 import { emptyMailRules } from '../src/mail'
 import type { MailRuleBundle, SelectedPatentFile } from '../src/mail/types'
-import { EasyConnectionController, emptyConnection } from '../src/shared/connection'
+import { EasyConnectionController, emptyConnection, scopeFromConnection } from '../src/shared/connection'
 import { MessageType } from '../src/shared/message'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -83,7 +83,7 @@ describe('Phase 3.1 连接、规则与任务来源', () => {
   it('keeps customer overrides and rejects a stale rule bundle', async () => {
     const area = memoryArea()
     const saved = await saveCustomerAccount(area, origin, userA, profile())
-    const renamed = await saveCustomerAccount(area, origin, userA, { ...saved, name: '客户A改', updatedAt: '2026-09-26T00:00:00.000Z' })
+    const renamed = await saveCustomerAccount(area, origin, userA, { ...saved, name: '客户A改', updatedAt: '2026-09-26T00:00:00.000Z' }, saved.revision ?? 1)
     expect(renamed.overrides).toEqual({ case_volume: 'ABC' })
     const first = await saveRuleAccount(area, origin, userA, rules(), null)
     await expect(saveRuleAccount(area, origin, userA, { ...rules(), revision: 1, subject: { ...rules().subject, template: '过期标题' } }, null)).rejects.toThrow('发文规则已被其他页面更新')
@@ -93,7 +93,7 @@ describe('Phase 3.1 连接、规则与任务来源', () => {
   })
 
   it('saves a task only when the message origin is the EASY origin', async () => {
-    const runtime = host([session(userA), session(userA)])
+    const runtime = host(Array.from({ length: 8 }, () => session(userA)))
     const bound = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'bind', tabId: 3 } }, runtime)
     if (bound.type !== MessageType.WorkspaceResult) throw new Error('bind')
     const task = buildTask({ origin, operatorId: userA, files: [file()], rules: rules(), profiles: [profile()], queryTemplateVersion: 1, now: '2026-09-26T00:00:00.000Z' })
@@ -107,10 +107,24 @@ describe('Phase 3.1 连接、规则与任务来源', () => {
     const saved = await handleAuthorityMessage(scoped, { ledger: new ExecutionLedger(memoryTransactionStore(), 'owner'), tasks: store, evidence: runtime.evidence })
     expect(saved?.type).toBe(MessageType.TaskResult)
     if (saved?.type !== MessageType.TaskResult) return
-    expect(saved.payload.ok).toBe(true)
+    expect(saved.payload.ok).toBe(false)
+    expect(saved.payload.message).toContain('正式页面不能提交完整任务')
+    expect(await store.list(origin, userA)).toEqual([])
+    const scope = scopeFromConnection(runtime.connection.context)
+    if (!scope) throw new Error('scope')
+    await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'saveRules', bundle: rules(), expectedScope: scope } }, runtime)
+    await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'saveCustomer', profile: profile(), expectedScope: scope } }, runtime)
+    const planned = await handleWorkspaceMessage({
+      type: MessageType.Workspace,
+      payload: { action: 'createTaskPlan', files: [file()], queryTemplateVersion: 0, expectedScope: scope }
+    }, runtime)
+    if (planned.type !== MessageType.WorkspaceResult) throw new Error('plan')
+    expect(planned.payload.ok).toBe(true)
+    expect(planned.payload.createdTask?.taskId).toBeTruthy()
+    expect(planned.payload.createdTask?.taskId).not.toBe(task.taskId)
     const loaded = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'load' } }, runtime)
     if (loaded.type !== MessageType.WorkspaceResult) throw new Error('load')
-    expect(loaded.payload.tasks.map(item => item.taskId)).toContain(task.taskId)
+    expect(loaded.payload.tasks.map(item => item.taskId)).toContain(planned.payload.createdTask?.taskId)
     expect((await store.list(origin, userA))[0]?.origin).toBe(origin)
   })
 

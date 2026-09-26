@@ -3,7 +3,8 @@ import { downgradeClientAcceptance, downgradeClientEvidence } from '../automatio
 import { type EvidenceRepository, type EvidenceSource, type StoredEvidence } from '../automation/evidence-store'
 import { ExecutionLedger } from '../automation/ledger'
 import { isConfirmedOperator } from '../automation/operator'
-import { clientTaskRejection, executionOverwriteRejection } from '../automation/task-trust'
+import { clientDeclaredExecution } from '../automation/task-transition'
+import { clientTaskRejection } from '../automation/task-trust'
 import type { TaskStore } from '../automation/task-service'
 import type { AutomationTask } from '../automation/types'
 import { MessageType, type AppMessage, type BackgroundResponse, type TaskSummary } from '../shared/message'
@@ -96,12 +97,9 @@ export async function handleAuthorityMessage(message: AppMessage, deps: Authorit
     }
     const rejection = clientTaskRejection(task)
     if (rejection) return { type: MessageType.TaskResult, payload: { ok: false, message: rejection, tasks: [], task: null } }
-    const stored = await deps.tasks.list(task.origin, task.operatorId, true)
-    const prior = stored.find(item => item.taskId === task.taskId) ?? null
-    const overwrite = executionOverwriteRejection(prior)
-    if (overwrite) return { type: MessageType.TaskResult, payload: { ok: false, message: overwrite, tasks: [], task: null } }
-    await deps.tasks.save(task)
-    return { type: MessageType.TaskResult, payload: { ok: true, message: '', tasks: [], task: null } }
+    const declared = clientDeclaredExecution(task)
+    if (declared) return { type: MessageType.TaskResult, payload: { ok: false, message: declared, tasks: [], task: null } }
+    return { type: MessageType.TaskResult, payload: { ok: false, message: '正式页面不能提交完整任务。', tasks: [], task: null } }
   }
   if (message.type === MessageType.SaveAcceptance) {
     const raw = message.payload.record as unknown as LiveAcceptanceRecord

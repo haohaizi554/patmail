@@ -8,6 +8,13 @@ import type { AutomationTask, StageId } from './types'
 export interface TaskStore {
   list(origin: string, operatorId: string, includeArchived?: boolean): Promise<AutomationTask[]>
   save(task: AutomationTask): Promise<void>
+  updateTaskAtomically(
+    origin: string,
+    operatorId: string,
+    taskId: string,
+    expectedVersion: number,
+    transition: (current: AutomationTask) => { ok: true; task: AutomationTask } | { ok: false; message: string }
+  ): Promise<{ ok: boolean; message: string; task: AutomationTask | null }>
   archive(origin: string, operatorId: string, taskId: string): Promise<{ ok: boolean; message: string }>
 }
 

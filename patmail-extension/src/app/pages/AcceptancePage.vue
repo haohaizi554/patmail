@@ -49,8 +49,9 @@ async function run(): Promise<void> {
   }
   const compared = row.matchedWithUi === true ? '已对照原网页' : '未与原网页对照'
   const source = row.evidenceSource === 'MANUAL_EXPECTATION' ? ' · 手工期望' : row.evidenceSource === 'API_RESPONSE' ? ' · 接口响应' : row.evidenceSource === 'MOCK' ? ' · Mock' : ''
+  const layer = row.acceptanceLayer ? ` · ${row.acceptanceLayer}` : ''
   const level = typeof row.evidenceLevel === 'string' ? ` · ${row.evidenceLevel}` : ''
-  resultText.value = `${String(row.call)} ${String(row.result)} · ${String(row.reason ?? '')} · ${compared}${source}${level}`
+  resultText.value = `${String(row.call)} ${String(row.result)} · ${String(row.reason ?? '')} · ${compared}${source}${layer}${level}`
 }
 </script>
 

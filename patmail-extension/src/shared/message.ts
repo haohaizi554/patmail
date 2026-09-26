@@ -183,7 +183,7 @@ export interface CreatedTaskResult {
   createdAt: string
   itemCount: number
   persisted: true
-  fileSource: 'FILE_SOURCE_UNVERIFIED'
+  fileSource: 'FILE_SOURCE_UNVERIFIED' | 'SEARCH_RESPONSE_OBSERVED'
 }
 
 export interface WorkspaceResultPayload {
@@ -431,7 +431,8 @@ function isWorkspaceResult(value: unknown): value is WorkspaceResultPayload {
 function isCreatedTask(value: unknown): boolean {
   return isRecord(value) && typeof value.taskId === 'string' && typeof value.taskFingerprint === 'string' &&
     typeof value.status === 'string' && typeof value.createdAt === 'string' &&
-    typeof value.itemCount === 'number' && value.persisted === true && value.fileSource === 'FILE_SOURCE_UNVERIFIED'
+    typeof value.itemCount === 'number' && value.persisted === true &&
+    (value.fileSource === 'FILE_SOURCE_UNVERIFIED' || value.fileSource === 'SEARCH_RESPONSE_OBSERVED')
 }
 
 function isEasyTab(value: unknown): value is EasyTabCandidate {

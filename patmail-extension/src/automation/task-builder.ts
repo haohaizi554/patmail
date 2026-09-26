@@ -3,7 +3,7 @@ import { selectionFingerprint } from '../mail/fingerprint'
 import { planDrafts } from '../mail/planner'
 import { planMailGroups } from '../mail/rules/grouping'
 import type { MailRuleBundle, SelectedPatentFile } from '../mail/types'
-import { buildQueryDependencies } from './query-dependency'
+import { buildQueryDependencies, referencedProfileIds } from './query-dependency'
 import { sha256Hex } from './sha256'
 import { customerIdentities, createTaskSnapshot, emptyIdentity } from './snapshot'
 import type { AutomationIssue, AutomationTask, AutomationTaskItem, CustomerIdentitySnapshot, TaskCustomer, VerifiedSelectionSnapshot } from './types'
@@ -17,6 +17,7 @@ export interface TaskBuildInput {
   profiles: CustomerQueryProfile[]
   templates?: QueryTemplate[]
   queryTemplateVersion: number
+  fileSource?: 'FILE_SOURCE_UNVERIFIED' | 'SEARCH_RESPONSE_OBSERVED'
   now?: string
 }
 
@@ -141,8 +142,10 @@ export function buildTask(input: TaskBuildInput): AutomationTask {
     ruleSnapshot: rules, verifiedAt: '',
     selectionFingerprint: selection, taskFingerprint: fingerprint, selectedFiles: files,
     mailRuleRevision: rules.revision, queryTemplateVersion: input.queryTemplateVersion,
-    queryDependencies: buildQueryDependencies(profiles, input.templates ?? []),
-    fileSource: 'FILE_SOURCE_UNVERIFIED', verifiedSelection,
+    queryDependencies: buildQueryDependencies(profiles, input.templates ?? [], referencedProfileIds(files)),
+    dependencyState: 'CURRENT',
+    recordVersion: 1,
+    fileSource: input.fileSource ?? 'FILE_SOURCE_UNVERIFIED', verifiedSelection,
     mailGroups: grouped.groups, mailDrafts: drafts, status: blocked ? 'BLOCKED' : 'DRY_RUN_COMPLETED',
     createdAt: now, updatedAt: now, checkpoints: [], issues, items
   }

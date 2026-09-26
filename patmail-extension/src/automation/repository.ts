@@ -1,4 +1,5 @@
 import { emptyIdentity } from './snapshot'
+import { preservedEvidence } from './task-transition'
 import type { AutomationTask, AutomationTaskState, Checkpoint } from './types'
 
 export interface TaskArea {
@@ -105,6 +106,38 @@ export function commitTasks(existing: AutomationTask[], incoming: AutomationTask
   return migrated.concat(migrateTask(incoming).task)
 }
 
+export interface AtomicTaskResult {
+  ok: boolean
+  message: string
+  task: AutomationTask | null
+  tasks: AutomationTask[]
+}
+
+/** 版本检查、执行证据和写入决定在同一次计算里完成，调用方把它放进同一个存储事务。 */
+export function applyAtomicTaskUpdate(
+  existing: AutomationTask[],
+  taskId: string,
+  expectedVersion: number,
+  transition: (current: AutomationTask) => { ok: true; task: AutomationTask } | { ok: false; message: string }
+): AtomicTaskResult {
+  const current = existing.find(item => item.taskId === taskId)
+  if (!current) return { ok: false, message: '没有这个任务。', task: null, tasks: existing }
+  const version = current.recordVersion ?? 1
+  if (version !== expectedVersion) return { ok: false, message: '任务版本已变化。', task: current, tasks: existing }
+  const proposed = transition(current)
+  if (!proposed.ok) return { ok: false, message: proposed.message, task: current, tasks: existing }
+  const blocked = preservedEvidence(current, proposed.task)
+  if (blocked) return { ok: false, message: blocked, task: current, tasks: existing }
+  const next: AutomationTask = {
+    ...proposed.task,
+    taskId: current.taskId,
+    origin: current.origin,
+    operatorId: current.operatorId,
+    recordVersion: version + 1
+  }
+  return { ok: true, message: '', task: next, tasks: commitTasks(existing, next) }
+}
+
 export class TaskRepository {
   constructor(private readonly area: TaskArea | null) {}
 
@@ -118,10 +151,25 @@ export class TaskRepository {
 
   async save(task: AutomationTask): Promise<void> {
     if (!this.area) return
-    const key = keyFor(task.origin, task.operatorId)
-    const stored = await this.read(task.origin, task.operatorId)
-    const tasks = commitTasks(stored.tasks, task)
-    await this.area.set({ [key]: { version: 2, tasks: [...stored.opaque, ...tasks], migrations: stored.migrations } })
+    await enqueueTaskStore(task.origin, task.operatorId, async () => {
+      const key = keyFor(task.origin, task.operatorId)
+      const stored = await this.read(task.origin, task.operatorId)
+      const prior = stored.tasks.find(item => item.taskId === task.taskId)
+      if (prior && preservedEvidence(prior, task)) return
+      const tasks = commitTasks(stored.tasks, task)
+      await this.area?.set({ [key]: { version: 2, tasks: [...stored.opaque, ...tasks], migrations: stored.migrations } })
+    })
+  }
+
+  async updateTaskAtomically(origin: string, operatorId: string, taskId: string, expectedVersion: number, transition: (current: AutomationTask) => { ok: true; task: AutomationTask } | { ok: false; message: string }): Promise<{ ok: boolean; message: string; task: AutomationTask | null }> {
+    return enqueueTaskStore(origin, operatorId, async () => {
+      const stored = await this.read(origin, operatorId)
+      const result = applyAtomicTaskUpdate(stored.tasks, taskId, expectedVersion, transition)
+      if (result.ok && this.area) {
+        await this.area.set({ [keyFor(origin, operatorId)]: { version: 2, tasks: [...stored.opaque, ...result.tasks], migrations: stored.migrations } })
+      }
+      return { ok: result.ok, message: result.message, task: result.task }
+    })
   }
 
   async archive(origin: string, operatorId: string, taskId: string): Promise<{ ok: boolean; message: string }> {
@@ -153,9 +201,21 @@ export class MemoryTaskRepository extends TaskRepository {
     return this.tasks.filter(item => item.origin === origin && item.operatorId === operatorId && (includeArchived || !item.archived))
   }
   override async save(task: AutomationTask): Promise<void> {
-    const next = commitTasks(this.tasks.filter(item => item.origin === task.origin && item.operatorId === task.operatorId), task)
+    const scoped = this.tasks.filter(item => item.origin === task.origin && item.operatorId === task.operatorId)
+    const prior = scoped.find(item => item.taskId === task.taskId)
+    if (prior && preservedEvidence(prior, task)) return
+    const next = commitTasks(scoped, task)
     const others = this.tasks.filter(item => item.origin !== task.origin || item.operatorId !== task.operatorId)
     this.tasks.splice(0, this.tasks.length, ...others, ...next)
+  }
+  override async updateTaskAtomically(origin: string, operatorId: string, taskId: string, expectedVersion: number, transition: (current: AutomationTask) => { ok: true; task: AutomationTask } | { ok: false; message: string }): Promise<{ ok: boolean; message: string; task: AutomationTask | null }> {
+    const scoped = this.tasks.filter(item => item.origin === origin && item.operatorId === operatorId)
+    const result = applyAtomicTaskUpdate(scoped, taskId, expectedVersion, transition)
+    if (result.ok) {
+      const others = this.tasks.filter(item => item.origin !== origin || item.operatorId !== operatorId)
+      this.tasks.splice(0, this.tasks.length, ...others, ...result.tasks)
+    }
+    return { ok: result.ok, message: result.message, task: result.task }
   }
   override async archive(origin: string, operatorId: string, taskId: string): Promise<{ ok: boolean; message: string }> {
     const task = this.tasks.find(item => item.origin === origin && item.operatorId === operatorId && item.taskId === taskId)
@@ -164,4 +224,15 @@ export class MemoryTaskRepository extends TaskRepository {
     task.archived = true
     return { ok: true, message: '' }
   }
+}
+
+const taskQueues = new Map<string, Promise<unknown>>()
+
+/** 同一进程内串行化 chrome.storage 任务写入。这不是跨进程事务。 */
+function enqueueTaskStore<T>(origin: string, operatorId: string, work: () => Promise<T>): Promise<T> {
+  const key = keyFor(origin, operatorId)
+  const previous = taskQueues.get(key) ?? Promise.resolve()
+  const run = previous.then(work, work)
+  taskQueues.set(key, run.then(() => undefined, () => undefined))
+  return run
 }

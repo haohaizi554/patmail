@@ -131,8 +131,11 @@ export interface AutomationTask {
   queryTemplateVersion: number
   /** 实际引用的模板和客户覆盖摘要。旧任务可以没有这份快照。 */
   queryDependencies?: QueryDependencySnapshot[]
-  /** 页面选择的文件没有按 ID 回读。允许本地规划，不能升级成真实可写任务。 */
-  fileSource?: 'FILE_SOURCE_UNVERIFIED' | 'VERIFIED'
+  dependencyState?: 'CURRENT' | 'LEGACY_DEPENDENCY_UNKNOWN'
+  /** 每次原子更新加一。缺失时按 1 参与版本比较。 */
+  recordVersion?: number
+  /** 查询响应观察和按 ID 回读是两种证据，不能混用。 */
+  fileSource?: 'FILE_SOURCE_UNVERIFIED' | 'SEARCH_RESPONSE_OBSERVED' | 'FILE_READBACK_VERIFIED'
   verifiedSelection?: VerifiedSelectionSnapshot[]
   mailGroups: MailGroup[]
   mailDrafts: MailDraftPreview[]
