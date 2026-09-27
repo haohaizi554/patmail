@@ -12,3 +12,12 @@
 .stack-form textarea { width: 100%; border: 1px solid #eadff0; border-radius: 10px; background: #fff; padding: 8px 10px; }
 .stack-form textarea { min-height: 72px; }
 .stack-form label:has(input[type="checkbox"]) { display: flex; align-items: center; font-weight: 600; }
+.workspace .query-template { gap: 14px; }
+.workspace .query-template .text-button { border: 1px solid #eadff0; border-radius: 999px; background: #fff; color: #e45b92; padding: 4px 10px; font-size: 12px; }
+.workspace .query-template .inline-actions { gap: 8px; }
+.workspace .query-template .template-picks { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.workspace .query-template .template-picks button { min-height: 40px; border-radius: 12px; padding: 8px 12px; }
+.workspace .query-template .template-picks button.on { background: #fff0f6; }
+.workspace .query-template .template-picks small { background: #ffe4ef; color: #ff3f86; border-radius: 999px; padding: 2px 8px; }
+.workspace .query-template .check-line { max-width: 520px; font-size: 13px; color: #66758f; }
+.workspace .query-template .query-preview dl div { padding: 8px 0; border-top: 1px solid #f6e5ee; font-size: 13px; }

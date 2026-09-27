@@ -28,7 +28,7 @@ function expand(id: string): void {
 
 <template>
   <div class="file-tree">
-    <p v-if="selected.length" class="hint">已选：{{ display.text }}</p>
+    <p v-if="selected.length" class="hint">已选 {{ selected.length }} 项<span v-if="display.text.length <= 48">：{{ display.text }}</span></p>
     <input v-model="query" type="search" placeholder="搜索文件描述" aria-label="搜索文件描述" />
     <div v-if="query.trim()" class="tree-list">
       <label v-for="id in matches" :key="id" class="check-line">

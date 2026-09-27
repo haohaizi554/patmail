@@ -15,5 +15,5 @@ const ready = computed(() => connection.value.sessionStatus === 'authenticated')
     <h2>文件查询</h2>
     <p class="empty">尚未连接 EASY。文件查询会通过已绑定的原网站标签页读取会话，不会使用本页地址。</p>
   </section>
-  <FileSearchPanel v-else :page-origin="connection.easyOrigin" />
+  <FileSearchPanel v-else :page-origin="connection.easyOrigin" :show-session="false" />
 </template>

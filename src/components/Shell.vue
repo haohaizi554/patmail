@@ -11,7 +11,8 @@ const props = defineProps({
   items: { type: Array, default: null },
   profileName: { type: String, default: '林小樱' },
   profileDept: { type: String, default: '知识产权部' },
-  showDemo: { type: Boolean, default: true }
+  showDemo: { type: Boolean, default: true },
+  showSettings: { type: Boolean, default: true }
 })
 const emit = defineEmits(['navigate', 'update:search', 'settings'])
 const menu = computed(() => props.items || nav)
@@ -55,7 +56,7 @@ const menu = computed(() => props.items || nav)
           </button>
         </nav>
         <img class="mascot" :src="bg('专业细节，守护创新.png')" alt="专注细节 守护创新 让知识更有力量" />
-        <button class="settings" @click="emit('settings', '系统设置')">
+        <button v-if="showSettings" class="settings" @click="emit('settings', '系统设置')">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.5 1.5M16.5 16.5 18 18M18 6l-1.5 1.5M7.5 16.5 6 18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           系统设置
         </button>

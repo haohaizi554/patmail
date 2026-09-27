@@ -7,26 +7,21 @@ import { applyConfirmedBind, reviewCustomerBind, selectPage, toSelectedFile, tog
 import type { BindReviewGroup } from '../mail/selection'
 import MailWorkspace from './MailWorkspace.vue'
 import QueryTemplateSection from './QueryTemplateSection.vue'
-import SchemaQueryForm from './SchemaQueryForm.vue'
 import ThemeSelect from '../../../src/components/ThemeSelect.vue'
 import { MessageType, type MessageBridge } from '../shared/message'
 import { useWorkspace } from '../app/composables/useWorkspace'
 
-const props = defineProps<{ pageOrigin?: string }>()
+const props = withDefaults(defineProps<{ pageOrigin?: string; showSession?: boolean }>(), { showSession: true })
 const bridge = inject<MessageBridge>('bridge')
 const workspace = useWorkspace()
 const accountOrigin = computed(() => props.pageOrigin || location.origin)
 const sessionStatus = ref<SessionStatus>('unknown')
 const sessionName = ref('')
 const sessionUserId = ref('')
-const querySource = ref<'manual' | 'history' | 'customer'>('manual')
 const sessionMessage = ref('')
 const sessionLoading = ref(false)
-const caseVolume = ref('')
-const applicationNo = ref('')
-const customerName = ref('')
-const fileName = ref('')
 const pageSize = ref(20)
+const queryUserId = computed(() => sessionUserId.value || workspace.connection.value.operatorId)
 const querySessionId = ref('')
 const sourceNotice = ref('')
 const searchState = ref<'idle' | 'loading' | 'success' | 'empty' | 'error'>('idle')
@@ -44,7 +39,12 @@ const acceptedSources = ref<Record<string, boolean>>({})
 let generation = 0
 let sessionGeneration = 0
 
-const canSearch = computed(() => sessionStatus.value === 'authenticated' && !sessionLoading.value)
+const canSearch = computed(() => {
+  if (!props.showSession) return workspace.connection.value.sessionStatus === 'authenticated'
+  if (sessionStatus.value === 'authenticated') return true
+  if (sessionStatus.value === 'unknown' || sessionLoading.value) return workspace.connection.value.sessionStatus === 'authenticated'
+  return false
+})
 const sessionLabel = computed(() => ({
   unknown: '尚未检测登录状态', checking: '检测中…', authenticated: '已登录',
   unauthenticated: '未登录', expired: '登录已失效', error: '无法确认当前登录状态'
@@ -53,7 +53,7 @@ const sessionLabel = computed(() => ({
 function messageForError(code: string, message: string): string {
   if (code === 'SESSION_EXPIRED') return 'EASY 登录已失效，请在原网站重新登录后检测。'
   if (code === 'AUTH_UNKNOWN') return '无法确认当前登录状态，请重试。'
-  if (code === 'REQUEST_TIMEOUT') return '请求超时，请稍后重试。'
+  if (code === 'REQUEST_TIMEOUT') return '原网站查询太慢，没有在一分钟内返回。把我方文号或申请号写具体一点再查。'
   if (code === 'NETWORK_ERROR') return '网络异常，请检查 EASY 网站连接。'
   return message || '请求失败，请稍后重试。'
 }
@@ -117,17 +117,6 @@ async function checkSession(): Promise<void> {
   }
 }
 
-function formQuery(): FileSearchQuery {
-  return {
-    caseVolume: caseVolume.value.trim(),
-    applicationNo: applicationNo.value.trim(),
-    customerName: customerName.value.trim(),
-    fileName: fileName.value.trim(),
-    pageIndex: 1,
-    pageSize: pageSize.value
-  }
-}
-
 async function executeSearch(query: FileSearchQuery, run: 'start' | 'continue' = 'start'): Promise<void> {
   if (!bridge || !canSearch.value) return
   const resolvedEnough = query.resolvedFields ? assessQueryScope(query.resolvedFields).sufficient : false
@@ -176,7 +165,6 @@ async function executeSearch(query: FileSearchQuery, run: 'start' | 'continue' =
   }
 }
 
-function search(): void { void executeSearch(formQuery(), 'start') }
 function refresh(): void { if (lastQuery.value) void executeSearch({ ...lastQuery.value }, 'continue') }
 function changePageSize(): void {
   if (!lastQuery.value || !canSearch.value || ![20, 50, 100].includes(pageSize.value)) return
@@ -205,7 +193,7 @@ function confirmBindReview(): void {
 
 async function loadBindCustomers(): Promise<void> {
   const payload = await workspace.call({ action: 'load' })
-  if (!payload || payload.connection.operatorId !== sessionUserId.value) {
+  if (!payload || payload.connection.operatorId !== queryUserId.value) {
     bindCustomers.value = []
     return
   }
@@ -231,33 +219,26 @@ function page(delta: number): void {
   void executeSearch({ ...lastQuery.value, pageIndex: next }, 'continue')
 }
 
-onMounted(() => { void checkSession() })
+onMounted(() => { if (props.showSession) void checkSession() })
 onBeforeUnmount(() => {
   generation++
   sessionGeneration++
   if (bridge) {
     void bridge.request({ type: MessageType.CancelFileSearch })
-    void bridge.request({ type: MessageType.CancelSessionCheck })
+    if (props.showSession) void bridge.request({ type: MessageType.CancelSessionCheck })
   }
 })
 </script>
 
 <template>
   <div class="file-search">
-    <section class="card session-card" aria-label="EASY 登录状态">
+    <section v-if="showSession" class="card session-card" aria-label="EASY 登录状态">
       <div class="section-heading"><strong>EASY 登录状态</strong><button type="button" class="text-button" :disabled="sessionLoading" @click="checkSession">重新检测</button></div>
       <p class="session-state" role="status"><span class="status-dot" :class="{ 'status-dot-error': sessionStatus !== 'authenticated' }"></span><span>{{ sessionLabel }}</span><span v-if="sessionStatus === 'authenticated' && sessionName">{{ sessionName }}</span></p>
       <p v-if="sessionMessage" class="hint">{{ sessionMessage }}</p>
     </section>
 
-    <section class="card search-form" aria-label="查询来源">
-      <strong>查询来源</strong>
-      <label>方式
-        <ThemeSelect v-model="querySource" :options="[{ value: 'manual', label: '手动查询' }, { value: 'history', label: '历史模板' }, { value: 'customer', label: '客户模板' }]" />
-      </label>
-    </section>
-    <SchemaQueryForm v-if="querySource === 'manual'" :bridge="bridge" :can-search="canSearch" :page-size="pageSize" @search="executeSearch" />
-    <QueryTemplateSection v-else :bridge="bridge" :can-search="canSearch" :user-id="sessionUserId" :origin="accountOrigin" :mode="querySource === 'customer' ? 'customer' : 'history'" :page-size="pageSize" @search="executeSearch" />
+    <QueryTemplateSection :bridge="bridge" :can-search="canSearch" :user-id="queryUserId" :origin="accountOrigin" mode="history" :manage="false" :page-size="pageSize" @search="executeSearch" />
 
     <section ref="resultsSection" class="card file-results" aria-label="查询结果">
       <div class="section-heading"><strong>查询结果</strong><button type="button" class="text-button" :disabled="!canSearch || !lastQuery || searchState === 'loading'" @click="refresh">刷新</button></div>
@@ -309,7 +290,7 @@ onBeforeUnmount(() => {
           </article>
           <button v-if="bindReview.length" type="button" class="text-button" @click="confirmBindReview">确认已核对的绑定</button>
         </section>
-        <MailWorkspace v-if="showMail" :bridge="bridge" :user-id="sessionUserId" :page-origin="accountOrigin" :files="Object.values(selected)" />
+        <MailWorkspace v-if="showMail" :bridge="bridge" :user-id="queryUserId" :page-origin="accountOrigin" :files="Object.values(selected)" />
       </template>
     </section>
   </div>

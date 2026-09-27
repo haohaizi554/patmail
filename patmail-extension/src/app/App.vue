@@ -24,17 +24,16 @@ const nav = [
   { name: '发文规则与映射配置', path: 'rule', hash: '/rules' },
   { name: '发文任务', path: 'task', hash: '/tasks' },
   { name: '发文记录', path: 'record', hash: '/records' },
-  { name: '查询模板', path: 'chart', hash: '/templates' },
+  { name: '文件查询模板', path: 'chart', hash: '/templates' },
   { name: '邮件草稿', path: 'task', hash: '/drafts' },
-  { name: '工作流', path: 'rule', hash: '/workflow' },
-  { name: '接口验收', path: 'chart', hash: '/acceptance' },
-  { name: '系统设置', path: 'chart', hash: '/settings' }
+  { name: '工作流', path: 'rule', hash: '/workflow' }
 ]
+const hiddenRoutes = new Set(['/acceptance', '/settings'])
 const pages = { '/': HomePage, '/files': FilesPage, '/limits': LimitsPage, '/customers': CustomersPage, '/templates': TemplatesPage, '/rules': RulesPage, '/tasks': TasksPage, '/drafts': DraftsPage, '/workflow': WorkflowPage, '/records': RecordsPage, '/acceptance': AcceptancePage, '/settings': SettingsPage }
 
 function readRoute(): string {
   const path = location.hash.replace(/^#/, '') || '/'
-  return nav.some(item => item.hash === path) ? path : '/'
+  return nav.some(item => item.hash === path) || hiddenRoutes.has(path) ? path : '/'
 }
 
 const route = ref(readRoute())
@@ -60,7 +59,7 @@ onUnmounted(() => window.removeEventListener('hashchange', onHash))
 </script>
 
 <template>
-  <Shell :page="pageName" :search="search" placeholder="搜索我方文号、客户或申请号..." :items="nav" :profile-name="profileName" :profile-dept="profileDept" :show-demo="false" @navigate="go" @update:search="search = $event" @settings="go('系统设置')">
+  <Shell :page="pageName" :search="search" placeholder="搜索我方文号、客户或申请号..." :items="nav" :profile-name="profileName" :profile-dept="profileDept" :show-demo="false" :show-settings="false" @navigate="go" @update:search="search = $event">
     <component :is="page" />
   </Shell>
 </template>
