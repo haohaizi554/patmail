@@ -2,8 +2,9 @@
 
 启动当前仓库里的本地服务，并在结束时一起关掉。
 
-- 管理端：项目根目录的 Vite（首页、发文任务、规则、客户、文件、记录、统计、浮窗）
-- 浏览器插件：不是常驻进程，构建结果在 patmail-extension/dist，用 Chrome 加载
+- 插件：每次启动先在 patmail-extension 执行一次生产构建，结果写入 dist
+- 管理端原型：项目根目录的 Vite，地址 5173
+- 插件工作台是 dist 里的扩展页面，不另开本地端口
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 FRONTEND_PORT = 5173
 FRONTEND_URL = f"http://127.0.0.1:{FRONTEND_PORT}"
+EXTENSION = ROOT / "patmail-extension"
 
 processes: list[subprocess.Popen[str]] = []
 stopping = False
@@ -36,6 +38,8 @@ def command(name: str) -> str | None:
 
 def fail(message: str) -> None:
     print(message, file=sys.stderr)
+    if processes:
+        stop()
     if sys.platform == "win32" and sys.stdin.isatty():
         try:
             input("按回车关闭...")
@@ -98,14 +102,34 @@ def pipe_output(proc: subprocess.Popen[str], ready: threading.Event) -> None:
             ready.set()
 
 
-def start_frontend(runner: str) -> subprocess.Popen[str]:
-    if not (ROOT / "package.json").is_file():
-        fail("项目根目录没有 package.json，无法启动管理端。")
-    ensure_frontend(runner)
-    print(f"启动管理端  {FRONTEND_URL}")
+def build_extension(runner: str) -> None:
+    if not (EXTENSION / "package.json").is_file():
+        fail("找不到 patmail-extension/package.json，无法编译插件。")
+    if not (EXTENSION / "node_modules" / "vite").is_dir():
+        print("插件依赖不完整，正在按插件目录的锁文件恢复...")
+        install = subprocess.run(
+            [runner, "install", "--frozen-lockfile"],
+            cwd=EXTENSION,
+            check=False,
+        )
+        if install.returncode != 0:
+            fail("插件依赖恢复失败。请在 patmail-extension 目录查看 pnpm install 的输出。")
+    print(f"编译插件    {EXTENSION / 'dist'}")
+    build = subprocess.run(
+        [runner, "run", "build"],
+        cwd=EXTENSION,
+        check=False,
+    )
+    if build.returncode != 0:
+        fail(f"插件编译失败，退出码 {build.returncode}。管理端没有启动。")
+    print("插件编译完成。若 Chrome 已加载该扩展，请在扩展管理页重新加载。")
+    print()
+
+
+def start_logged(runner: str, args: list[str], cwd: Path) -> subprocess.Popen[str]:
     proc = subprocess.Popen(
-        [runner, "exec", "vite", "--host", "127.0.0.1", "--port", str(FRONTEND_PORT), "--strictPort"],
-        cwd=ROOT,
+        [runner, *args],
+        cwd=cwd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -115,6 +139,18 @@ def start_frontend(runner: str) -> subprocess.Popen[str]:
     )
     processes.append(proc)
     return proc
+
+
+def start_frontend(runner: str) -> subprocess.Popen[str]:
+    if not (ROOT / "package.json").is_file():
+        fail("项目根目录没有 package.json，无法启动管理端。")
+    ensure_frontend(runner)
+    print(f"启动管理端  {FRONTEND_URL}")
+    return start_logged(
+        runner,
+        ["exec", "vite", "--host", "127.0.0.1", "--port", str(FRONTEND_PORT), "--strictPort"],
+        ROOT,
+    )
 
 
 def main() -> None:
@@ -129,12 +165,13 @@ def main() -> None:
         fail("未找到 pnpm 或 npm。请先安装 Node.js。")
 
     print("PatMail")
-    print(f"管理端  {FRONTEND_URL}")
-    print(f"插件    {ROOT / 'patmail-extension' / 'dist'}")
-    print("插件在 Chrome 的「加载已解压的扩展程序」里打开，不由这个脚本拉起。")
+    print(f"管理端原型  {FRONTEND_URL}")
+    print(f"插件目录    {EXTENSION / 'dist'}")
+    print("每次启动都会先编译插件。工作台跟着扩展走：在 Chrome 里点 PatMail 图标，或在 EASY 页面点「打开工作台」。")
     print("按 Ctrl+C 停止。")
     print()
 
+    build_extension(runner)
     frontend = start_frontend(runner)
     ready = threading.Event()
     threading.Thread(target=pipe_output, args=(frontend, ready), daemon=True).start()

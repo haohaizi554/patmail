@@ -13,9 +13,16 @@ function candidateText(element: Element | null): string | undefined {
   return normalized(element.textContent)
 }
 
+type DomConstructors = {
+  HTMLInputElement: typeof HTMLInputElement
+  HTMLTextAreaElement: typeof HTMLTextAreaElement
+  HTMLSelectElement: typeof HTMLSelectElement
+  HTMLButtonElement: typeof HTMLButtonElement
+}
+
 /** 原生 labels 覆盖 for 和嵌套 label；也读取 aria-labelledby。 */
 export function explicitLabel(element: HTMLElement): string | undefined {
-  const view = element.ownerDocument.defaultView ?? window
+  const view = (element.ownerDocument.defaultView ?? window) as unknown as DomConstructors
   if (element instanceof view.HTMLInputElement || element instanceof view.HTMLSelectElement ||
       element instanceof view.HTMLTextAreaElement || element instanceof view.HTMLButtonElement) {
     const labels = Array.from(element.labels ?? []).map(label => normalized(label.textContent)).filter(Boolean)
