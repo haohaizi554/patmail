@@ -4,6 +4,7 @@ import PageHead from '../components/PageHead.vue'
 import BrandLogo from '../components/BrandLogo.vue'
 import { bg, icon } from '../assets'
 import { customers, tasks } from '../data'
+import ThemeSelect from '../components/ThemeSelect.vue'
 
 const ui = inject('ui')
 const tab = ref('全部')
@@ -24,9 +25,9 @@ const rows = computed(() => tasks.filter((t) => {
     <div class="col">
       <PageHead title="发文任务" desc="高效执行专利发文任务，让重要文件准时送达！" :art="bg('创业路上的小胜利.png')" />
       <div class="filters">
-        <select v-model="customer"><option>全部客户</option><option v-for="c in customers" :key="c.name">{{ c.name }}</option></select>
-        <select v-model="status"><option>全部状态</option><option>待发</option><option>处理中</option><option>待审核</option><option>已完成</option><option>失败</option></select>
-        <select v-model="mode"><option>全部发文方式</option><option>邮箱发文</option><option>向客户发文</option></select>
+        <ThemeSelect v-model="customer" :options="[{ value: '全部客户', label: '全部客户' }, ...customers.map(c => ({ value: c.name, label: c.name }))]" />
+        <ThemeSelect v-model="status" :options="[{ value: '全部状态', label: '全部状态' }, { value: '待发', label: '待发' }, { value: '处理中', label: '处理中' }, { value: '待审核', label: '待审核' }, { value: '已完成', label: '已完成' }, { value: '失败', label: '失败' }]" />
+        <ThemeSelect v-model="mode" :options="[{ value: '全部发文方式', label: '全部发文方式' }, { value: '邮箱发文', label: '邮箱发文' }, { value: '向客户发文', label: '向客户发文' }]" />
         <input value="2024-04-01　～　2024-04-30" readonly />
         <label class="grow"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="1.7"/></svg><input v-model="ui.search.value" placeholder="搜索任务名称、客户或文件..." /></label>
       </div>

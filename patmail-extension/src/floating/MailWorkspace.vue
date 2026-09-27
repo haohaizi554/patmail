@@ -15,6 +15,7 @@ import { scopeFromConnection } from '../shared/connection'
 import { MessageType, type MessageBridge } from '../shared/message'
 import { sendToBackground } from '../utils/runtime'
 import { useWorkspace } from '../app/composables/useWorkspace'
+import ThemeSelect from '../../../src/components/ThemeSelect.vue'
 
 const props = defineProps<{ bridge?: MessageBridge; userId: string; files: SelectedPatentFile[]; pageOrigin?: string }>()
 const accountOrigin = computed(() => props.pageOrigin || location.origin)
@@ -150,16 +151,10 @@ watch(() => props.files, () => { drafts.value = [] }, { deep: true })
     <p class="hint">配置归属：{{ scopeLabel }}。本地预览不是 EASY 邮件。选择或规则变化后需要重新生成，旧预览不能拿去创建。</p>
     <p v-if="message" class="hint">{{ message }}</p>
     <label>客户发文方式
-      <select v-model="policyCustomer">
-        <option value="">选择已有客户配置</option>
-        <option v-for="item in customers" :key="item.id" :value="item.id">{{ item.name }}</option>
-      </select>
+      <ThemeSelect v-model="policyCustomer" :options="[{ value: '', label: '选择已有客户配置' }, ...customers.map(item => ({ value: item.id, label: item.name }))]" />
     </label>
     <label>方式
-      <select v-model="policyMode">
-        <option value="merge_by_customer_description">同客户同文件描述合并</option>
-        <option value="single_file">单个来文发文</option>
-      </select>
+      <ThemeSelect v-model="policyMode" :options="[{ value: 'merge_by_customer_description', label: '同客户同文件描述合并' }, { value: 'single_file', label: '单个来文发文' }]" />
     </label>
     <button type="button" class="text-button" @click="save(draft => {
       if (!policyCustomer) return
@@ -170,10 +165,7 @@ watch(() => props.files, () => { drafts.value = [] }, { deep: true })
 
     <label>文件描述原文<input v-model="mapText" type="text" /></label>
     <label>发文类型
-      <select v-model="mapTypeId" @focus="loadMailTypes">
-        <option value="">选择发文类型</option>
-        <option v-for="item in mailTypes" :key="item.id" :value="item.id">{{ item.name }}</option>
-      </select>
+      <ThemeSelect v-model="mapTypeId" :options="[{ value: '', label: '选择发文类型' }, ...mailTypes.map(item => ({ value: item.id, label: item.name }))]" @open="loadMailTypes" />
     </label>
     <button type="button" class="text-button" @click="save(draft => {
       const mailType = mailTypes.find(item => item.id === mapTypeId)
@@ -197,10 +189,7 @@ watch(() => props.files, () => { drafts.value = [] }, { deep: true })
     </article>
 
     <label>收件人客户
-      <select v-model="recipientCustomer">
-        <option value="">选择客户</option>
-        <option v-for="item in customers" :key="item.id" :value="item.id">{{ item.name }}</option>
-      </select>
+      <ThemeSelect v-model="recipientCustomer" :options="[{ value: '', label: '选择客户' }, ...customers.map(item => ({ value: item.id, label: item.name }))]" />
     </label>
     <label>收件人<input v-model="recipientTo" type="text" placeholder="多个邮箱用逗号分隔" /></label>
     <label>抄送<input v-model="recipientCc" type="text" /></label>
@@ -220,11 +209,7 @@ watch(() => props.files, () => { drafts.value = [] }, { deep: true })
     <label>标题模板<input v-model="subjectTemplate" type="text" /></label>
     <label class="check-line"><input v-model="countInjection" type="checkbox" />多个文件时在“关于”后注入数量</label>
     <label>没有“关于”时
-      <select v-model="missingAnchor">
-        <option value="keep">保留原标题</option>
-        <option value="prefix">添加前缀</option>
-        <option value="confirm">标记人工确认</option>
-      </select>
+      <ThemeSelect v-model="missingAnchor" :options="[{ value: 'keep', label: '保留原标题' }, { value: 'prefix', label: '添加前缀' }, { value: 'confirm', label: '标记人工确认' }]" />
     </label>
     <label>正文<textarea v-model="bodyTemplate" rows="3" /></label>
     <label>补充文本<textarea v-model="bodySupplement" rows="2" /></label>

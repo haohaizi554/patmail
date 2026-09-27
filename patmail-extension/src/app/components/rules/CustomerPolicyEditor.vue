@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { CustomerMailPolicy, SendMode } from '../../../mail/types'
 import type { CustomerQueryProfile } from '../../../customer/types'
+import ThemeSelect from '../../../../../src/components/ThemeSelect.vue'
 
 defineProps<{ policies: CustomerMailPolicy[]; customers: CustomerQueryProfile[] }>()
 const emit = defineEmits<{ save: [policy: CustomerMailPolicy] }>()
@@ -20,25 +21,19 @@ function submit(): void {
 </script>
 
 <template>
-  <section class="pm-card">
+  <section class="card">
     <h2>客户发文方式</h2>
-    <div class="pm-form">
+    <div class="stack-form">
       <label>客户配置
-        <select v-model="profileId">
-          <option value="">选择客户</option>
-          <option v-for="item in customers" :key="item.id" :value="item.id">{{ item.name }}</option>
-        </select>
+        <ThemeSelect v-model="profileId" :options="[{ value: '', label: '选择客户' }, ...customers.map(item => ({ value: item.id, label: item.name }))]" />
       </label>
       <label>发文方式
-        <select v-model="sendMode">
-          <option value="merge_by_customer_description">按客户和文件描述合并</option>
-          <option value="single_file">一文件一封</option>
-        </select>
+        <ThemeSelect v-model="sendMode" :options="[{ value: 'merge_by_customer_description', label: '按客户和文件描述合并' }, { value: 'single_file', label: '一文件一封' }]" />
       </label>
       <button type="button" class="solid" @click="submit">保存发文方式</button>
     </div>
     <p v-if="policies.length === 0" class="empty">尚未设置发文方式。</p>
-    <table v-else class="pm-table">
+    <table v-else class="grid">
       <thead><tr><th>客户配置</th><th>方式</th><th>启用</th></tr></thead>
       <tbody>
         <tr v-for="item in policies" :key="item.customerProfileId">

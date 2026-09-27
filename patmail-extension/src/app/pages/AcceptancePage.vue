@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import PageHead from '../../../../src/components/PageHead.vue'
+import { bg } from '../../../../src/assets'
 import { acceptanceBlockReason } from '../../automation/acceptance-context'
 import { READONLY_ACCEPTANCE_CALLS } from '../../automation/acceptance-runner'
 import { MessageType } from '../../shared/message'
 import { useWorkspace } from '../composables/useWorkspace'
+import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
 
 const { connection, call } = useWorkspace()
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
@@ -56,15 +59,14 @@ async function run(): Promise<void> {
 </script>
 
 <template>
-  <section class="pm-card">
+  <PageHead title="接口验收" desc="只读核对接口返回，不会写入业务数据。" :art="bg('专业文书准确送达.png')" />
+  <section class="card">
     <h2>接口验收</h2>
     <p class="hint">只读请求由已绑定的 EASY 标签页发出。缺少业务参数或契约未确认时显示 BLOCKED，不会发出请求。HTTP 200 只说明传输层有响应。手工填写的对照字段只能说明接口响应和手工期望一致，不能记成原网页对照。</p>
     <p v-if="!ready" class="empty">尚未确认 EASY 用户，不能执行验收。</p>
-    <div v-else class="pm-form">
+    <div v-else class="stack-form">
       <label>接口
-        <select v-model="selected">
-          <option v-for="item in READONLY_ACCEPTANCE_CALLS" :key="item" :value="item">{{ item }}</option>
-        </select>
+        <ThemeSelect v-model="selected" :options="READONLY_ACCEPTANCE_CALLS.map(item => ({ value: item, label: item }))" />
       </label>
       <label>案件类型 ID <input v-model="caseTypeId" type="text" /></label>
       <label>邮件 ID <input v-model="mailId" type="text" /></label>

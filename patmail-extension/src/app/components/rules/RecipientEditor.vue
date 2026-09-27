@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { CustomerRecipientTemplate } from '../../../mail/types'
 import type { CustomerQueryProfile } from '../../../customer/types'
+import ThemeSelect from '../../../../../src/components/ThemeSelect.vue'
 
 defineProps<{ recipients: CustomerRecipientTemplate[]; customers: CustomerQueryProfile[] }>()
 const emit = defineEmits<{ save: [value: { profileId: string; name: string; to: string; cc: string }] }>()
@@ -15,14 +16,11 @@ function submit(): void {
 </script>
 
 <template>
-  <section class="pm-card">
+  <section class="card">
     <h2>收件人</h2>
-    <div class="pm-form">
+    <div class="stack-form">
       <label>客户配置
-        <select v-model="profileId">
-          <option value="">选择客户</option>
-          <option v-for="item in customers" :key="item.id" :value="item.id">{{ item.name }}</option>
-        </select>
+        <ThemeSelect v-model="profileId" :options="[{ value: '', label: '选择客户' }, ...customers.map(item => ({ value: item.id, label: item.name }))]" />
       </label>
       <label>模板名称 <input v-model="name" type="text" /></label>
       <label>收件人 <textarea v-model="to" rows="2"></textarea></label>

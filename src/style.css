@@ -1,3 +1,4 @@
+@import './components/theme-select.css';
 :root {
   --pink: #ff4f93;
   --text: #243056;

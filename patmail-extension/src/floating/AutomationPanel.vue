@@ -13,6 +13,7 @@ import type { AutomationStagePlan, AutomationTask } from '../automation/types'
 import { sendToBackground } from '../utils/runtime'
 import { EASY_MAIL_WRITES_ENABLED } from '../mail/easy/gate'
 import type { CustomerQueryProfile } from '../customer/types'
+import ThemeSelect from '../../../src/components/ThemeSelect.vue'
 import type { MailRuleBundle, SelectedPatentFile } from '../mail/types'
 import { MAIL_FLOW_TYPE } from '../workflow/contracts'
 import { WORKFLOW_WRITES_ENABLED } from '../workflow/gate'
@@ -234,9 +235,7 @@ async function diagnose(): Promise<void> {
       <p v-if="evidenceNow?.requiresRevalidation" class="hint" role="status">{{ evidenceNow.message }}</p>
       <p v-for="file in evidenceNow?.requiresRevalidation ? (liveEvidence?.files ?? []) : []" :key="file.fileId" class="hint">文件 {{ file.historical.fileName }} 曾在 {{ file.historical.fetchedAt }} 被查询到。历史记录仍保留。</p>
       <label v-if="items.length">分组
-        <select v-model="selectedItem">
-          <option v-for="item in items" :key="item.itemId" :value="item.itemId">{{ item.mailTypeName || '未映射' }} · {{ item.status }}</option>
-        </select>
+        <ThemeSelect v-model="selectedItem" :options="items.map(item => ({ value: item.itemId, label: `${item.mailTypeName || '未映射'} · ${item.status}` }))" />
       </label>
       <div v-if="active">
         <p class="hint">方式 {{ active.sendMode }} · 描述 {{ active.fileDescriptionIdentity || '缺失' }} · 发文类型 {{ active.mailTypeName || '未映射' }}</p>

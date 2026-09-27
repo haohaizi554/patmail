@@ -5,6 +5,8 @@ import BrandLogo from '../components/BrandLogo.vue'
 import Donut from '../components/Donut.vue'
 import { bg, icon } from '../assets'
 import { customers } from '../data'
+import ThemeSelect from '../components/ThemeSelect.vue'
+import { textOptions } from '../components/theme-select'
 
 const ui = inject('ui')
 const rows = computed(() => customers.slice(0, 8).filter((c) => !ui.search.value || c.name.includes(ui.search.value) || c.slogan.includes(ui.search.value)))
@@ -38,9 +40,9 @@ const recent = [
       <section class="card">
         <div class="filters">
           <label class="grow"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="1.7"/></svg><input v-model="ui.search.value" placeholder="搜索客户名称、联系人或关键词..." /></label>
-          <select><option>全部行业</option><option>互联网</option><option>通信/电子</option><option>新能源</option></select>
-          <select><option>全部状态</option><option>启用中</option><option>暂停</option></select>
-          <select><option>默认发文方式</option><option>邮箱发文</option><option>系统发文</option></select>
+          <ThemeSelect :options="textOptions(['全部行业', '互联网', '通信/电子', '新能源'])" />
+          <ThemeSelect :options="textOptions(['全部状态', '启用中', '暂停'])" />
+          <ThemeSelect :options="textOptions(['默认发文方式', '邮箱发文', '系统发文'])" />
           <button class="solid" @click="ui.notify('已按条件搜索')">搜索</button>
           <button class="ghost" @click="ui.search.value = ''">重置</button>
           <button class="ghost" @click="ui.notify('更多筛选')">···</button>

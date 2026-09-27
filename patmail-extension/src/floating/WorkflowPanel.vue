@@ -5,6 +5,7 @@ import { MAIL_FLOW_TYPE } from '../workflow/contracts'
 import { reviewersForNode } from '../workflow/reviewer-resolver'
 import { WORKFLOW_WRITES_ENABLED } from '../workflow/gate'
 import type { WorkflowView } from '../workflow/types'
+import ThemeSelect from '../../../src/components/ThemeSelect.vue'
 
 const props = defineProps<{ bridge?: MessageBridge; mailId: string; ready: boolean }>()
 const view = ref<WorkflowView | null>(null)
@@ -95,22 +96,14 @@ async function preview(): Promise<void> {
       <li v-for="item in history" :key="item.historyId || item.auditTime">历史 {{ item.nodeName }} · {{ item.auditUserName }} · {{ item.auditType }} · {{ item.auditTime }} · {{ item.remark }}</li>
     </ul>
     <label v-if="nodes.length">下一节点
-      <select v-model="nodeId">
-        <option value="">请选择</option>
-        <option v-for="node in nodes" :key="node.nodeId" :value="node.nodeId">{{ node.nodeName || node.nodeCode }} · {{ node.nodeId }}</option>
-      </select>
+      <ThemeSelect v-model="nodeId" :options="[{ value: '', label: '请选择' }, ...nodes.map(node => ({ value: node.nodeId, label: `${node.nodeName || node.nodeCode} · ${node.nodeId}` }))]" />
     </label>
     <label v-if="nodeId">审核人
-      <select v-model="reviewerId">
-        <option value="">请选择</option>
-        <option v-for="reviewer in reviewers" :key="reviewer.id" :value="reviewer.id">{{ reviewer.name }} · {{ reviewer.id }}</option>
-      </select>
+      <ThemeSelect v-model="reviewerId" :options="[{ value: '', label: '请选择' }, ...reviewers.map(reviewer => ({ value: reviewer.id, label: `${reviewer.name} · ${reviewer.id}` }))]" />
     </label>
     <p v-if="nodeId && reviewers.length === 0" class="hint">当前节点没有带 GUID 的候选审核人。</p>
     <label v-if="view?.snapshot?.urgencies.length">缓急
-      <select v-model="urgencyId">
-        <option v-for="item in view.snapshot.urgencies" :key="item.id" :value="item.id">{{ item.name }}</option>
-      </select>
+      <ThemeSelect v-model="urgencyId" :options="(view.snapshot?.urgencies ?? []).map(item => ({ value: item.id, label: item.name }))" />
     </label>
     <label>备注<textarea v-model="remark" rows="2" /></label>
     <p v-if="view?.plan" class="hint">下一节点 {{ view.plan.node.nodeName }} · 办理人 {{ view.plan.reviewer.name }} · {{ selfReviewer ? '是本人' : '不是本人' }}</p>

@@ -3,6 +3,8 @@ import { computed, inject, ref } from 'vue'
 import PageHead from '../components/PageHead.vue'
 import { bg, icon } from '../assets'
 import { customers, files } from '../data'
+import ThemeSelect from '../components/ThemeSelect.vue'
+import { textOptions } from '../components/theme-select'
 
 const ui = inject('ui')
 const picked = ref(files[0])
@@ -21,11 +23,11 @@ const rows = computed(() => files.filter((f) => !ui.search.value || f.name.inclu
       </div>
       <section class="card">
         <div class="form-grid">
-          <label>客户<select><option>请选择客户</option><option v-for="c in customers" :key="c.name">{{ c.name }}</option></select></label>
+          <label>客户<ThemeSelect :options="[{ value: '请选择客户', label: '请选择客户' }, ...customers.map(c => ({ value: c.name, label: c.name }))]" /></label>
           <label>文件描述<input v-model="ui.search.value" placeholder="请输入文件描述关键词" /></label>
-          <label>发文类型<select><option>全部类型</option><option>官方来文</option><option>客户发文</option><option>内部文件</option></select></label>
+          <label>发文类型<ThemeSelect :options="textOptions(['全部类型', '官方来文', '客户发文', '内部文件'])" /></label>
           <label>上传日期<span class="date-pair"><input placeholder="开始日期" /><i>～</i><input placeholder="结束日期" /></span></label>
-          <label>状态<select><option>全部状态</option><option>已归档</option><option>待处理</option><option>异常</option></select></label>
+          <label>状态<ThemeSelect :options="textOptions(['全部状态', '已归档', '待处理', '异常'])" /></label>
           <div class="form-actions"><button class="ghost" @click="ui.search.value = ''">重置</button><button class="solid" @click="ui.notify('查询完成')">查询</button></div>
         </div>
       </section>

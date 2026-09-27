@@ -6,6 +6,7 @@ import type { FileSearchQuery } from '../api/file-search-params'
 import { optionsForCaseType, resolveFileDescriptionDisplay, resolveInternalIdDisplay, formHasQueryScope, formValuesToFields, FILE_SEARCH_SCHEMA } from '../schema'
 import { MessageType, type MessageBridge } from '../shared/message'
 import FileTypePicker from './FileTypePicker.vue'
+import ThemeSelect from '../../../src/components/ThemeSelect.vue'
 
 const props = defineProps<{ bridge?: MessageBridge; canSearch: boolean; pageSize: number }>()
 const emit = defineEmits<{ search: [query: FileSearchQuery] }>()
@@ -137,10 +138,7 @@ function search(): void {
         <input :value="fieldText(field.key)" type="text" autocomplete="off" @input="setField(field.key, ($event.target as HTMLInputElement).value)" />
       </label>
       <label v-else-if="field.controlType === 'select'">{{ field.label }}
-        <select :value="fieldText(field.key)" @focus="ensureCore" @change="setField(field.key, ($event.target as HTMLSelectElement).value)">
-          <option value="">请选择</option>
-          <option v-for="item in selectOptions(field.dictionaryKey, field.dependsOn)" :key="item.value" :value="item.value">{{ item.label }}</option>
-        </select>
+        <ThemeSelect :model-value="fieldText(field.key)" :options="[{ value: '', label: '请选择' }, ...selectOptions(field.dictionaryKey, field.dependsOn)]" @open="ensureCore" @update:model-value="setField(field.key, String($event))" />
         <span v-if="fieldText(field.key) && displayOf(field.key) === '未识别的历史 ID'" class="hint">未识别的历史 ID</span>
       </label>
       <div v-else-if="field.controlType === 'tree'">

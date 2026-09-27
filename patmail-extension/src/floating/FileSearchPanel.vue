@@ -8,6 +8,7 @@ import type { BindReviewGroup } from '../mail/selection'
 import MailWorkspace from './MailWorkspace.vue'
 import QueryTemplateSection from './QueryTemplateSection.vue'
 import SchemaQueryForm from './SchemaQueryForm.vue'
+import ThemeSelect from '../../../src/components/ThemeSelect.vue'
 import { MessageType, type MessageBridge } from '../shared/message'
 import { useWorkspace } from '../app/composables/useWorkspace'
 
@@ -252,11 +253,7 @@ onBeforeUnmount(() => {
     <section class="card search-form" aria-label="查询来源">
       <strong>查询来源</strong>
       <label>方式
-        <select v-model="querySource">
-          <option value="manual">手动查询</option>
-          <option value="history">历史模板</option>
-          <option value="customer">客户模板</option>
-        </select>
+        <ThemeSelect v-model="querySource" :options="[{ value: 'manual', label: '手动查询' }, { value: 'history', label: '历史模板' }, { value: 'customer', label: '客户模板' }]" />
       </label>
     </section>
     <SchemaQueryForm v-if="querySource === 'manual'" :bridge="bridge" :can-search="canSearch" :page-size="pageSize" @search="executeSearch" />
@@ -266,7 +263,7 @@ onBeforeUnmount(() => {
       <div class="section-heading"><strong>查询结果</strong><button type="button" class="text-button" :disabled="!canSearch || !lastQuery || searchState === 'loading'" @click="refresh">刷新</button></div>
       <div v-if="lastQuery" class="result-toolbar">
         <span v-if="result">共 {{ result.total }} 个文件</span>
-        <label>每页数量 <select v-model.number="pageSize" :disabled="!canSearch || searchState === 'loading'" @change="changePageSize"><option :value="20">20</option><option :value="50">50</option><option :value="100">100</option></select></label>
+        <label>每页数量 <ThemeSelect v-model="pageSize" :disabled="!canSearch || searchState === 'loading'" :options="[{ value: 20, label: '20' }, { value: 50, label: '50' }, { value: 100, label: '100' }]" @change="changePageSize" /></label>
       </div>
       <p v-if="searchState === 'idle'" class="hint">输入条件后查询文件。</p>
       <p v-else-if="searchState === 'loading'" class="hint" role="status">正在查询…</p>
@@ -303,10 +300,7 @@ onBeforeUnmount(() => {
             <p class="hint">{{ file.fileDescription || '缺少文件描述' }} · {{ file.customerName || '缺少客户' }} · {{ file.caseVolume || '无文号' }}</p>
           </article>
           <label>绑定到已有客户配置
-            <select v-model="bindProfileId" @focus="loadBindCustomers">
-              <option value="">选择客户配置</option>
-              <option v-for="item in bindCustomers" :key="item.id" :value="item.id">{{ item.name }}</option>
-            </select>
+            <ThemeSelect v-model="bindProfileId" :options="[{ value: '', label: '选择客户配置' }, ...bindCustomers.map(item => ({ value: item.id, label: item.name }))]" @open="loadBindCustomers" />
           </label>
           <button type="button" class="text-button" :disabled="!bindProfileId" @click="startBind">绑定已选文件</button>
           <article v-for="group in bindReview" :key="group.sourceCustomerName" class="file-card">

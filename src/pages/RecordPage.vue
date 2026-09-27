@@ -4,6 +4,8 @@ import PageHead from '../components/PageHead.vue'
 import BrandLogo from '../components/BrandLogo.vue'
 import { bg, icon } from '../assets'
 import { records } from '../data'
+import ThemeSelect from '../components/ThemeSelect.vue'
+import { textOptions } from '../components/theme-select'
 
 const ui = inject('ui')
 const tab = ref('全部记录')
@@ -45,9 +47,9 @@ const rules = [
         </div>
         <div class="filters">
           <input value="2024-04-01　～　2024-04-28" readonly />
-          <select><option>全部客户</option></select>
-          <select><option>全部发文方式</option><option>邮箱直发</option><option>系统直发</option></select>
-          <select><option>全部状态</option></select>
+          <ThemeSelect :options="textOptions(['全部客户'])" />
+          <ThemeSelect :options="textOptions(['全部发文方式', '邮箱直发', '系统直发'])" />
+          <ThemeSelect :options="textOptions(['全部状态'])" />
         </div>
         <div class="filters">
           <label class="grow"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="1.7"/></svg><input v-model="ui.search.value" placeholder="搜索批次号、邮件主题、申请号..." /></label>

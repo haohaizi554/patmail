@@ -4,6 +4,8 @@ import PageHead from '../components/PageHead.vue'
 import BrandLogo from '../components/BrandLogo.vue'
 import Donut from '../components/Donut.vue'
 import { bg, icon } from '../assets'
+import ThemeSelect from '../components/ThemeSelect.vue'
+import { textOptions } from '../components/theme-select'
 import { ranks } from '../data'
 
 const ui = inject('ui')
@@ -57,7 +59,7 @@ const alerts = [
     <section class="card span2">
       <div class="card-head"><h2><img :src="icon(10)" alt="" />发文趋势</h2>
         <span class="legend-inline"><i style="background:#ff5d98" />发文总量　<i style="background:#5eb2f6" />成功数量　<i style="background:#ffb15c" />失败数量</span>
-        <select><option>按天</option><option>按周</option></select>
+        <ThemeSelect :options="textOptions(['按天', '按周'])" />
       </div>
       <div class="line">
         <svg viewBox="0 0 760 180" preserveAspectRatio="none">
@@ -69,7 +71,7 @@ const alerts = [
       </div>
     </section>
     <section class="card">
-      <div class="card-head"><h2>发文方式占比</h2><select><option>全部客户</option></select></div>
+      <div class="card-head"><h2>发文方式占比</h2><ThemeSelect :options="textOptions(['全部客户'])" /></div>
       <div class="donut-box">
         <Donut :parts="modeParts"><b>1,326</b><span>总发文数</span></Donut>
         <ul><li v-for="p in modeParts" :key="p.name"><i :style="{ background: p.color }" />{{ p.name }}<b>{{ p.value }}%</b><small>{{ p.count }}</small></li></ul>

@@ -1,0 +1,41 @@
+.theme-select { display: inline-block; max-width: 100%; vertical-align: middle; }
+label > .theme-select,
+.form-grid .theme-select,
+.stack-form .theme-select,
+.search-form .theme-select,
+.query-template .theme-select,
+.editor .theme-select,
+.field-row > .theme-select { display: block; width: 100%; }
+.theme-select-trigger {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-width: 140px; height: 36px;
+  border: 1px solid #eadff0; border-radius: 10px; background: #fff; color: var(--text, #243056);
+  padding: 0 10px; text-align: left; font: inherit; cursor: pointer;
+}
+.field-row > .theme-select .theme-select-trigger,
+.result-toolbar .theme-select-trigger { min-width: 0; }
+.search-form .theme-select-trigger,
+.query-template .theme-select-trigger,
+.editor .theme-select-trigger,
+.field-row .theme-select-trigger,
+.result-toolbar .theme-select-trigger { height: 31px; border-radius: 8px; font-size: 12px; }
+.theme-select-trigger:hover { border-color: #ffb3d0; background: #fff; }
+.theme-select-trigger.is-open { border-color: var(--pink, #ff4f93); box-shadow: 0 0 0 3px #ffe4ef; }
+.theme-select-trigger:focus-visible { outline: 2px solid #ffb3d0; outline-offset: 1px; }
+.theme-select-trigger:active { background: #fff7fb; }
+.theme-select-trigger:disabled { opacity: .55; cursor: not-allowed; }
+.theme-select-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.theme-select-value.is-placeholder { color: var(--sub, #8d97b0); }
+.theme-select-chevron { width: 12px; height: 12px; flex: none; color: #c9a0b4; }
+.theme-select-trigger.is-open .theme-select-chevron { transform: rotate(180deg); }
+#theme-select-portal { pointer-events: none; }
+.theme-select-menu {
+  position: fixed; z-index: 40; margin: 0; padding: 6px; overflow: auto; list-style: none;
+  border: 1px solid #eadff0; border-radius: 12px; background: #fff; color: var(--text, #243056);
+  box-shadow: 0 12px 32px #ffd0e266; pointer-events: auto;
+  font: 13px/1.4 "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+}
+.theme-select-group { padding: 6px 8px 2px; color: var(--sub, #8d97b0); font-size: 11px; font-weight: 700; }
+.theme-select-menu [role="option"] { min-height: 32px; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.theme-select-menu [role="option"].is-active { background: #fff0f6; }
+.theme-select-menu [role="option"].is-selected { background: #ffe4ef; color: #ff3f86; font-weight: 700; }
+.theme-select-empty { padding: 8px 10px; color: var(--sub, #8d97b0); }

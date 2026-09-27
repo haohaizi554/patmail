@@ -13,6 +13,7 @@ import { isQueryGuid } from '../query/query-validator'
 import { scopeFromConnection, type ExpectedAccountScope } from '../shared/connection'
 import { MessageType, type MessageBridge } from '../shared/message'
 import { useWorkspace } from '../app/composables/useWorkspace'
+import ThemeSelect from '../../../src/components/ThemeSelect.vue'
 
 const props = defineProps<{
   bridge?: MessageBridge
@@ -504,21 +505,10 @@ watch(selectedCustomerId, () => {
     <p v-if="storageMessage" class="hint">{{ storageMessage }}</p>
 
     <label v-if="mode === 'history'">历史或本地模板
-      <select v-model="selectedBaseId" @change="startApply(selectedBaseId)">
-        <option value="">请选择</option>
-        <optgroup label="EASY">
-          <option v-for="item in historyOptions" :key="item.id" :value="item.id">{{ item.name }}</option>
-        </optgroup>
-        <optgroup label="本地">
-          <option v-for="item in localTemplates" :key="item.id" :value="item.id">{{ item.name }}</option>
-        </optgroup>
-      </select>
+      <ThemeSelect v-model="selectedBaseId" :options="[{ value: '', label: '请选择' }, ...historyOptions.map(item => ({ value: item.id, label: item.name, group: 'EASY' })), ...localTemplates.map(item => ({ value: item.id, label: item.name, group: '本地' }))]" @change="startApply(selectedBaseId)" />
     </label>
     <label v-else>客户
-      <select v-model="selectedCustomerId">
-        <option value="">请选择</option>
-        <option v-for="item in customers" :key="item.id" :value="item.id">{{ item.name }}{{ item.enabled ? '' : '（已停用）' }}</option>
-      </select>
+      <ThemeSelect v-model="selectedCustomerId" :options="[{ value: '', label: '请选择' }, ...customers.map(item => ({ value: item.id, label: item.name + (item.enabled ? '' : '（已停用）') }))]" />
     </label>
     <p v-if="baseName" class="hint">基础模板：{{ baseName }}<span v-if="selectedLocal"> · 来源：本地</span><span v-else-if="selectedBaseId"> · 来源：EASY · 只读</span><span v-if="selectedLocal?.sourceQueryId"> · 已导入，刷新原网站模板不会覆盖</span></p>
     <p v-if="baseMissing" class="error" role="alert">基础模板不存在或无法解析，不会改用其他模板。</p>
@@ -541,9 +531,7 @@ watch(selectedCustomerId, () => {
       <strong>本地模板</strong>
       <label>名称<input v-model="draftName" type="text" maxlength="80" /></label>
       <div v-for="(row, index) in draftFields" :key="index" class="field-row">
-        <select v-model="row.key">
-          <option v-for="field in businessFields" :key="field" :value="field">{{ fieldLabel(field) }}</option>
-        </select>
+        <ThemeSelect v-model="row.key" :options="businessFields.map(field => ({ value: field, label: fieldLabel(field) }))" />
         <input v-model="row.value" type="text" />
         <button type="button" class="text-button" @click="draftFields.splice(index, 1)">移除</button>
       </div>
@@ -555,17 +543,12 @@ watch(selectedCustomerId, () => {
       <strong>客户配置</strong>
       <label>客户名称<input v-model="draftName" type="text" maxlength="80" /></label>
       <label>基础模板
-        <select v-model="draftBaseId">
-          <option value="">请选择</option>
-          <option v-for="item in baseChoices" :key="item.id" :value="item.id">{{ item.name }}（{{ item.source === 'easy' ? 'EASY' : '本地' }}）</option>
-        </select>
+        <ThemeSelect v-model="draftBaseId" :options="[{ value: '', label: '请选择' }, ...baseChoices.map(item => ({ value: item.id, label: `${item.name}（${item.source === 'easy' ? 'EASY' : '本地'}）` }))]" />
       </label>
       <label>原网站客户 ID（可选）<input v-model="draftEasyId" type="text" autocomplete="off" /></label>
       <label class="check-line"><input v-model="draftEnabled" type="checkbox" />启用</label>
       <div v-for="(row, index) in draftFields" :key="index" class="field-row">
-        <select v-model="row.key">
-          <option v-for="field in businessFields" :key="field" :value="field">{{ fieldLabel(field) }}</option>
-        </select>
+        <ThemeSelect v-model="row.key" :options="businessFields.map(field => ({ value: field, label: fieldLabel(field) }))" />
         <input v-model="row.value" type="text" placeholder="空字符串也会覆盖" />
         <button type="button" class="text-button" @click="draftFields.splice(index, 1)">移除</button>
       </div>

@@ -8,6 +8,7 @@ import type { CustomerQueryProfile } from '../customer/types'
 import type { MailRuleBundle, SelectedPatentFile } from '../mail/types'
 import type { StageId } from '../automation/types'
 import type { MessageBridge } from '../shared/message'
+import ThemeSelect from '../../../src/components/ThemeSelect.vue'
 
 const props = defineProps<{
   bridge?: MessageBridge
@@ -78,9 +79,7 @@ function readbackOnly(): void {
     <p class="hint">生产写操作保持关闭。这里没有一键执行，也不能把未知结果重试。</p>
     <p class="hint">测试范围 {{ ready ? '等待本地白名单' : '用户未确认' }} · 模式 TEST_WRITE</p>
     <label>当前步骤
-      <select v-model="stage">
-        <option v-for="item in steps" :key="item.id" :value="item.id">{{ item.label }}</option>
-      </select>
+      <ThemeSelect v-model="stage" :options="steps.map(item => ({ value: item.id, label: item.label }))" />
     </label>
     <label><input v-model="confirmed" type="checkbox" /> 我确认只执行这一项测试</label>
     <button type="button" class="text-button" @click="precheck">只读预检</button>
