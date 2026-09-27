@@ -2,6 +2,9 @@ import { isFileSearchBusinessField } from '../api/file-search-params'
 import { isForbiddenFieldName } from './field-registry'
 import type { FieldSource, ResolvedQuery } from './query-types'
 
+/** 原网站页面上有，但不进入 GetSearchFiles。 */
+const DISPLAY_ONLY_FIELDS = new Set(['selfilePath', 'filetemp', 'selfilename1', 'txtfilename1', 'tempName'])
+
 function copyRecord(source: Record<string, string> | undefined, into: Record<string, string>, mark: Record<string, FieldSource>, sourceName: FieldSource, warnings: string[]): void {
   if (!source) return
   for (const key of Object.keys(source)) {
@@ -9,6 +12,7 @@ function copyRecord(source: Record<string, string> | undefined, into: Record<str
       warnings.push('已忽略不安全的覆盖字段。')
       continue
     }
+    if (DISPLAY_ONLY_FIELDS.has(key)) continue
     if (!isFileSearchBusinessField(key) || typeof source[key] !== 'string') {
       warnings.push(`未注册字段 ${key} 不会进入查询请求。`)
       continue

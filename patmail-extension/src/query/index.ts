@@ -1,4 +1,4 @@
-export { classifyXmlNode, fieldLabel, xmlNodeToApiField } from './field-registry'
+export { classifyXmlNode, fieldGroup, fieldLabel, xmlNodeToApiField } from './field-registry'
 export { resolveQueryTemplate } from './merge'
 export { parseQueryXml } from './xml-parser'
 export { cloneTemplate, isQueryGuid, isQueryTemplate } from './query-validator'
