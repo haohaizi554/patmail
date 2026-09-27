@@ -1,11 +1,16 @@
 import { isQueryGuid } from '../query/query-validator'
+import { evaluateTaskEvidence } from './evidence-evaluation'
 import { buildQueryDependencies, sameQueryDependencies } from './query-dependency'
 import { customerIdentities } from './snapshot'
 import { taskFingerprint, type TaskBuildInput } from './task-builder'
 import type { AutomationTask } from './types'
 
 export function validateTask(task: AutomationTask, current: TaskBuildInput): AutomationTask {
-  const issues = [...task.issues]
+  const now = current.now ?? new Date().toISOString()
+  const evidence = evaluateTaskEvidence(task, { easyOrigin: current.origin, operatorId: current.operatorId }, now)
+  const issues = task.issues.filter(item => item.code !== 'EVIDENCE_EXPIRED' && item.code !== 'EVIDENCE_REVALIDATION_REQUIRED')
+  if (evidence.freshness === 'EXPIRED') issues.push({ code: 'EVIDENCE_EXPIRED', message: evidence.message, itemId: '' })
+  else if (evidence.requiresRevalidation && evidence.message) issues.push({ code: 'EVIDENCE_REVALIDATION_REQUIRED', message: evidence.message, itemId: '' })
   if (task.origin !== current.origin || task.operatorId !== current.operatorId) {
     issues.push({ code: 'ACCOUNT_MISMATCH', message: '任务不能跨账号或跨站点复用。', itemId: '' })
   }

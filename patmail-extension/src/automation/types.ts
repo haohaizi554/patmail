@@ -56,7 +56,7 @@ export interface FileFieldEvidence {
   verified: boolean
 }
 
-export type EvidencePersistence = 'PERSISTED' | 'MEMORY_ONLY' | 'FAILED'
+export type EvidencePersistence = 'PERSISTED' | 'MEMORY_ONLY' | 'FAILED' | 'UNKNOWN'
 
 export interface TaskIdentityGate {
   fileSource: 'FILE_SOURCE_UNVERIFIED' | 'SEARCH_RESPONSE_OBSERVED'
@@ -81,6 +81,8 @@ export interface VerifiedSelectionSnapshot {
   fetchedAt: string
   evidenceExpiresAt?: string
   persistence?: EvidencePersistence
+  historicalObservation?: boolean
+  recoveryState?: 'CURRENT' | 'RECOVERED_PENDING_REVALIDATION'
   descriptionSelectability?: 'confirmed' | 'pending' | 'rejected' | 'unknown'
   easyOrigin: string
   operatorId: string

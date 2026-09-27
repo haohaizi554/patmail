@@ -23,7 +23,7 @@ export interface TaskBuildInput {
 }
 
 function evidencePersistence(items: VerifiedSelectionSnapshot[]): EvidencePersistence | 'UNKNOWN' {
-  const values = items.map(item => item.persistence).filter((value): value is EvidencePersistence => value === 'PERSISTED' || value === 'MEMORY_ONLY' || value === 'FAILED')
+  const values = items.map(item => item.persistence).filter((value): value is EvidencePersistence => value === 'PERSISTED' || value === 'MEMORY_ONLY' || value === 'FAILED' || value === 'UNKNOWN')
   if (values.includes('FAILED')) return 'FAILED'
   if (values.includes('MEMORY_ONLY')) return 'MEMORY_ONLY'
   if (values.length > 0 && values.every(value => value === 'PERSISTED')) return 'PERSISTED'

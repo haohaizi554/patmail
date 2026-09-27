@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { forbiddenDeliveryNames } from './delivery-guard.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const outputDir = join(root, 'test-results')
@@ -40,8 +41,9 @@ if (listed.status !== 0) {
   process.exit(listed.status ?? 1)
 }
 const names = listed.stdout.split(/\r?\n/).filter(Boolean)
-if (names.some(name => name.toLowerCase().endsWith('.pem') || name.replace(/\\/g, '/').endsWith('/dist.pem'))) {
-  console.error('源码包含有私钥文件名，已停止。')
+const blocked = forbiddenDeliveryNames(names)
+if (blocked.length > 0) {
+  console.error(`源码包含有不能交付的文件名 ${blocked.length} 个，已停止。`)
   process.exit(1)
 }
 console.log(`source package entries: ${names.length}`)

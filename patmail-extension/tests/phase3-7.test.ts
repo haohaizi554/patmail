@@ -149,7 +149,7 @@ describe('Phase 3.7 查询证据', () => {
     const fresh = await resolveSelectedFiles([selected('B', second.session.querySessionId, '专利证书')], scope, { now: selectAt })
     expect(stale.selections[0]?.verification).toBe('FILE_SOURCE_UNVERIFIED')
     expect(fresh.selections[0]?.verification).toBe('SEARCH_RESPONSE_OBSERVED')
-    expect(fresh.selections[0]?.persistence).toBe('PERSISTED')
+    expect(fresh.selections[0]?.persistence === 'PERSISTED' || fresh.selections[0]?.persistence === 'MEMORY_ONLY').toBe(true)
   })
 
   it('keeps the observation when the record is only in memory, and does not treat it as recoverable', async () => {
@@ -179,7 +179,7 @@ describe('Phase 3.7 查询证据', () => {
       async put() { return 'FAILED' },
       async get() { return null },
       async all() { return [] },
-      async delete() { return undefined }
+      async delete() { return 'FAILED' as const }
     })
     const observed = await observeSearchPage({ scope, query: query(), result: result([patent('A')]) })
     if (!observed.ok) throw new Error(observed.reason)

@@ -6,6 +6,7 @@ import { LIVE_EASY_ACCEPTANCE } from '../automation/easy-acceptance'
 import { exportDiagnostic } from '../automation/logger'
 import { isConfirmedOperator } from '../automation/operator'
 import { recoverTask } from '../automation/recovery'
+import { evaluateTaskEvidence } from '../automation/evidence-evaluation'
 import { buildStagePlans } from '../automation/stage-plan'
 import { validateTask } from '../automation/task-validator'
 import type { AutomationTask } from '../automation/types'
@@ -43,7 +44,8 @@ const acceptance = LIVE_EASY_ACCEPTANCE
 const items = computed(() => checked.value?.items ?? [])
 const active = computed(() => items.value.find(item => item.itemId === selectedItem.value) ?? items.value[0] ?? null)
 const recovery = computed(() => checked.value ? recoverTask(checked.value) : null)
-const blockedPlans = computed(() => checked.value ? buildStagePlans(checked.value).filter(item => item.itemId === (active.value?.itemId ?? '') && !item.canExecute).slice(0, 8) : [])
+const evidenceNow = computed(() => checked.value ? evaluateTaskEvidence(checked.value, { easyOrigin: props.businessOrigin, operatorId: props.userId }, new Date().toISOString()) : null)
+const blockedPlans = computed(() => checked.value ? buildStagePlans(checked.value, 'UNKNOWN', { now: new Date().toISOString(), currentAccount: { easyOrigin: props.businessOrigin, operatorId: props.userId } }).filter(item => item.itemId === (active.value?.itemId ?? '') && !item.canExecute).slice(0, 8) : [])
 const customerLabel = computed(() => checked.value?.customers.map(item => item.name).join('、') || checked.value?.customerName || '未绑定')
 
 const identityReady = computed(() => isConfirmedOperator(props.userId))
@@ -199,6 +201,7 @@ async function diagnose(): Promise<void> {
       <p v-if="checked.legacyTaskId" class="hint">由旧编号 {{ checked.legacyTaskId }} 迁移，原记录保留在迁移关系里。</p>
       <p class="hint">客户 {{ customerLabel }} · 文件 {{ checked.selectedFiles.length }} · 预计邮件 {{ checked.items.length }}</p>
       <p class="hint">状态 {{ checked.status }} · 创建 {{ checked.createdAt }} · 最近核对 {{ checked.updatedAt }}</p>
+      <p v-if="evidenceNow?.requiresRevalidation" class="hint" role="status">{{ evidenceNow.message }}</p>
       <label v-if="items.length">分组
         <select v-model="selectedItem">
           <option v-for="item in items" :key="item.itemId" :value="item.itemId">{{ item.mailTypeName || '未映射' }} · {{ item.status }}</option>

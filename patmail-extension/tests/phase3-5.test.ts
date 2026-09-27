@@ -6,7 +6,9 @@ import {
   observeSearchPage,
   queryFingerprintOf,
   resolveSelectedFiles,
-  sessionsFor
+  sessionsFor,
+  useQuerySessionDisk,
+  type FileQuerySession
 } from '../src/automation/file-search-snapshot'
 import { buildTask } from '../src/automation/task-builder'
 import { validateTask } from '../src/automation/task-validator'
@@ -129,6 +131,13 @@ describe('Phase 3.5 查询会话、文件字段与任务回执', () => {
   })
 
   it('restores a query session after the memory cache is dropped and drops it when storage is cleared', async () => {
+    const records = new Map<string, FileQuerySession>()
+    useQuerySessionDisk({
+      async put(id, session) { records.set(id, structuredClone(session)); return 'PERSISTED' },
+      async get(id) { const found = records.get(id); return found ? structuredClone(found) : null },
+      async all() { return [...records.values()].map(item => structuredClone(item)) },
+      async delete(id) { return records.delete(id) ? 'DELETED' : 'NOT_FOUND' }
+    })
     const observed = await observeSearchPage({
       scope: scopeA,
       query: { caseVolume: 'Q1', pageIndex: 1, pageSize: 20 },
@@ -137,7 +146,9 @@ describe('Phase 3.5 查询会话、文件字段与任务回执', () => {
     if (!observed.ok) throw new Error(observed.reason)
     dropQuerySessionMemory()
     const restored = await resolveSelectedFiles([{ ...file('A'), querySessionId: observed.session.querySessionId }], scopeA, { profiles: [profile()] })
-    expect(restored.selections[0]?.verification).toBe('SEARCH_RESPONSE_OBSERVED')
+    expect(restored.selections[0]?.verification).toBe('FILE_SOURCE_UNVERIFIED')
+    expect(restored.selections[0]?.historicalObservation).toBe(true)
+    expect(restored.selections[0]?.recoveryState).toBe('RECOVERED_PENDING_REVALIDATION')
     await clearQuerySessionStore()
     const downgraded = await resolveSelectedFiles([{ ...file('A'), querySessionId: observed.session.querySessionId }], scopeA)
     expect(downgraded.selections[0]?.verification).toBe('FILE_SOURCE_UNVERIFIED')

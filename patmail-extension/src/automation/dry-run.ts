@@ -17,7 +17,10 @@ export function runDryRun(input: TaskBuildInput, transport: EasyTransport | null
   void transport
   const started = Date.now()
   const task = buildTask(input)
-  const plans = buildStagePlans(task)
+  const plans = buildStagePlans(task, 'UNKNOWN', {
+    now: input.now ?? new Date().toISOString(),
+    currentAccount: { easyOrigin: input.origin, operatorId: input.operatorId }
+  })
   const logs: AutomationLog[] = [{
     taskId: task.taskId, executionId: '', itemId: '', stage: 'DRAFT_VALIDATE', event: 'dry-run',
     status: task.status, durationMs: Date.now() - started, errorCode: task.status === 'DRY_RUN_COMPLETED' ? '' : 'BLOCKED',

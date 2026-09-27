@@ -607,6 +607,40 @@ try {
     assert.deepEqual(provenance.descriptionIds, ['', ''])
     assert.deepEqual(provenance.customerIds, ['', ''])
     assert.deepEqual(provenance.caseIds, ['', ''])
+    const expired = await app.evaluate(async (id) => {
+      const loaded = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'load' } })
+      const connection = loaded.payload.connection
+      const key = `${connection.easyOrigin}\u0000${connection.operatorId}`
+      const database = await new Promise((resolve, reject) => {
+        const request = indexedDB.open('patmail-automation-tasks')
+        request.onerror = () => reject(request.error)
+        request.onsuccess = () => resolve(request.result)
+      })
+      return await new Promise((resolve, reject) => {
+        const tx = database.transaction('bundles', 'readwrite')
+        const store = tx.objectStore('bundles')
+        const current = store.get(key)
+        current.onerror = () => reject(current.error)
+        current.onsuccess = () => {
+          const bundle = current.result
+          const task = (bundle?.tasks || []).find((item) => item.taskId === id)
+          const stamps = (task?.verifiedSelection || []).map((item) => item.fetchedAt)
+          ;(task?.verifiedSelection || []).forEach((item) => { item.evidenceExpiresAt = '2000-01-01T00:00:00.000Z' })
+          if (bundle && task) store.put(bundle, key)
+          tx.oncomplete = () => resolve(stamps)
+          tx.onerror = () => reject(tx.error)
+        }
+      })
+    }, taskId)
+    await app.getByRole('button', { name: new RegExp(taskId) }).click()
+    await app.getByText('查询证据已过期，请重新查询。').waitFor()
+    const kept = await app.evaluate(async (id) => {
+      const loaded = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'load' } })
+      const connection = loaded.payload.connection
+      const got = await chrome.runtime.sendMessage({ type: 'GET_TASK', payload: { origin: connection.easyOrigin, operatorId: connection.operatorId, taskId: id } })
+      return (got.payload.task.verifiedSelection || []).map((item) => item.fetchedAt)
+    }, taskId)
+    assert.deepEqual(kept, expired)
     const templated = await app.evaluate(async (id) => {
       const loaded = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'load' } })
       const connection = loaded.payload.connection
@@ -837,6 +871,70 @@ try {
     assert.equal(conflict.invalidSession, '')
     assert.equal(conflict.planStatus, 'BLOCKED')
     assert.equal(conflict.planSource, 'FILE_SOURCE_UNVERIFIED')
+    const storedSessions = await app.evaluate(async () => {
+      const database = await new Promise((resolve, reject) => {
+        const request = indexedDB.open('patmail-file-query-sessions')
+        request.onerror = () => reject(request.error)
+        request.onsuccess = () => resolve(request.result)
+      })
+      const rows = await new Promise((resolve, reject) => {
+        const tx = database.transaction('sessions', 'readonly')
+        const request = tx.objectStore('sessions').getAll()
+        request.onsuccess = () => resolve(request.result || [])
+        request.onerror = () => reject(request.error)
+      })
+      return rows.length
+    })
+    assert.ok(storedSessions > 0)
+    const rememberedSession = crossPage.sessions[0]
+    const liveWorkerBefore = context.serviceWorkers().find(item => item.url().includes(extensionId))
+    assert.ok(liveWorkerBefore)
+    const restartBrowser = context.browser()
+    assert.ok(restartBrowser)
+    const restartCdp = await restartBrowser.newBrowserCDPSession()
+    const restartTargets = await restartCdp.send('Target.getTargets')
+    const restartTarget = restartTargets.targetInfos.find(item => item.type === 'service_worker' && item.url.includes(extensionId))
+    assert.ok(restartTarget)
+    await restartCdp.send('Target.closeTarget', { targetId: restartTarget.targetId })
+    await app.reload()
+    await app.getByRole('button', { name: '重新检测会话' }).click()
+    await app.getByText('测试员').waitFor()
+    const recovered = await app.evaluate(async (sessionId) => {
+      const loaded = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'load' } })
+      const connection = loaded.payload.connection
+      const planned = await chrome.runtime.sendMessage({
+        type: 'WORKSPACE',
+        payload: {
+          action: 'createTaskPlan',
+          queryTemplateVersion: 0,
+          expectedScope: {
+            easyOrigin: connection.easyOrigin,
+            operatorId: connection.operatorId,
+            easyTabId: connection.easyTabId,
+            connectionVersion: connection.connectionVersion
+          },
+          files: [3, 4].map((page) => ({
+            fileId: `file-${page}`,
+            fileName: `通知书-${page}.pdf`,
+            fileDescription: '审查意见通知书',
+            customerName: '测试客户',
+            caseVolume: 'E2E-PAGE',
+            querySessionId: sessionId
+          }))
+        }
+      })
+      const taskId = planned.payload.createdTask && planned.payload.createdTask.taskId
+      const got = taskId ? await chrome.runtime.sendMessage({ type: 'GET_TASK', payload: { origin: connection.easyOrigin, operatorId: connection.operatorId, taskId } }) : null
+      const task = got && got.payload.task
+      return {
+        fileSource: planned.payload.createdTask && planned.payload.createdTask.fileSource,
+        historical: task && task.verifiedSelection ? task.verifiedSelection.map((item) => item.historicalObservation) : [],
+        recovery: task && task.verifiedSelection ? task.verifiedSelection.map((item) => item.recoveryState) : []
+      }
+    }, rememberedSession)
+    assert.equal(recovered.fileSource, 'FILE_SOURCE_UNVERIFIED')
+    assert.deepEqual(recovered.historical, [true, true])
+    assert.deepEqual(recovered.recovery, ['RECOVERED_PENDING_REVALIDATION', 'RECOVERED_PENDING_REVALIDATION'])
     const mailCalls = () => apiCalls.filter(item => item.path === '/AjaxServers/Mail.ashx').length
     const beforeMail = mailCalls()
     await app.getByRole('link', { name: '接口验收' }).click()

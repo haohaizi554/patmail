@@ -127,7 +127,8 @@ function rememberObservedSearch(frozen: AccountContextSnapshot, request: AppMess
 }
 
 function sourceMessageFor(recorded: QueryObservationResult): string {
-  if (!recorded.ok) return recorded.code === 'QUERY_SESSION_INVALID' ? '这次翻页的查询运行已失效，请重新查询。' : recorded.message
+  if (!recorded.ok) return recorded.code === 'QUERY_SESSION_INVALID' ? '这次翻页的查询运行已失效，请重新查询。' : recorded.code === 'QUERY_SESSION_REVALIDATION_REQUIRED' ? recorded.message : recorded.message
+  if (recorded.revocationDiagnostic) return recorded.revocationDiagnostic
   if (recorded.status === 'CONFLICT') return '查询运行冲突。'
   if (recorded.persistence === 'PERSISTED') return '已保存查询来源。'
   if (recorded.persistence === 'MEMORY_ONLY') return '仅内存保存。'
@@ -385,6 +386,10 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
       }
       if (resolved.issue === 'FILE_DATA_CONFLICT') {
         task.issues.push({ code: 'FILE_DATA_CONFLICT', message: '同一文件在查询响应中的业务字段不一致，不能进入可信计划。', itemId: '' })
+        if (task.status !== 'UNKNOWN') task.status = 'BLOCKED'
+      }
+      if (resolved.requiresRevalidation) {
+        task.issues.push({ code: 'EVIDENCE_REVALIDATION_REQUIRED', message: '查询证据需要重新核验后才能当作当前来源。', itemId: '' })
         if (task.status !== 'UNKNOWN') task.status = 'BLOCKED'
       }
       if (resolved.mismatches.length > 0) {

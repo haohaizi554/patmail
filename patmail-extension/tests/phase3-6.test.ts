@@ -55,7 +55,7 @@ function diskFrom(store: Map<string, unknown>): QueryDisk {
     async put(id, session) { store.set(id, session); return 'PERSISTED' },
     async get(id) { return (store.get(id) as never) ?? null },
     async all() { return [...store.values()] as never },
-    async delete(id) { store.delete(id) }
+    async delete(id) { return store.delete(id) ? 'DELETED' as const : 'NOT_FOUND' as const }
   }
 }
 
@@ -239,7 +239,7 @@ describe('Phase 3.6 查询快照与内部标识', () => {
       async put() { return 'FAILED' },
       async get() { return null },
       async all() { return [] },
-      async delete() { return undefined }
+      async delete() { return 'FAILED' as const }
     })
     const failed = await observeSearchPage({ scope: scopeA, query: { caseVolume: 'Q', pageIndex: 1, pageSize: 20 }, result: page([patent('A')], 1) })
     if (!failed.ok) throw new Error(failed.reason)
@@ -255,6 +255,8 @@ describe('Phase 3.6 查询快照与内部标识', () => {
     expect(saved.persistence).toBe('PERSISTED')
     dropQuerySessionMemory()
     const restored = await resolveSelectedFiles([file('B', saved.session.querySessionId)], scopeA, { profiles: [profile()] })
-    expect(restored.selections[0]?.verification).toBe('SEARCH_RESPONSE_OBSERVED')
+    expect(restored.selections[0]?.verification).toBe('FILE_SOURCE_UNVERIFIED')
+    expect(restored.selections[0]?.historicalObservation).toBe(true)
+    expect(restored.selections[0]?.recoveryState).toBe('RECOVERED_PENDING_REVALIDATION')
   })
 })

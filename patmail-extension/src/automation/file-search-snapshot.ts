@@ -40,7 +40,9 @@ export interface FileSearchPageSnapshot {
 }
 
 export type QuerySessionStatus = 'ACTIVE' | 'STALE' | 'CONFLICT' | 'EXPIRED'
-export type PersistenceResult = 'PERSISTED' | 'MEMORY_ONLY' | 'FAILED'
+export type PersistenceResult = 'PERSISTED' | 'MEMORY_ONLY' | 'FAILED' | 'UNKNOWN'
+export type RecoveryState = 'CURRENT' | 'RECOVERED_PENDING_REVALIDATION'
+export type DeleteResult = 'DELETED' | 'NOT_FOUND' | 'FAILED'
 
 export interface FileQuerySession {
   querySessionId: string
@@ -59,6 +61,11 @@ export interface FileQuerySession {
   files: ObservedPatentFile[]
   status: QuerySessionStatus
   persistence: PersistenceResult
+  recordVersion: number
+  lastObservedAt: string
+  recoveryState: RecoveryState
+  /** 删除旧磁盘记录失败时的说明。不能写成已经撤销。 */
+  revocationDiagnostic?: string
 }
 
 export interface QueryScope {
@@ -72,7 +79,7 @@ export interface QueryDisk {
   put(id: string, session: FileQuerySession): Promise<'PERSISTED' | 'FAILED'>
   get(id: string): Promise<FileQuerySession | null>
   all(): Promise<FileQuerySession[]>
-  delete(id: string): Promise<void>
+  delete(id: string): Promise<DeleteResult>
 }
 
 export interface ResolveContext {
@@ -90,13 +97,13 @@ export type QueryObservationResult =
       observation: 'SEARCH_RESPONSE_OBSERVED'
       persistence: PersistenceResult
       status: QuerySessionStatus
+      revocationDiagnostic?: string
     }
   | { ok: false; code: string; message: string }
 
 const hot = new Map<string, FileQuerySession>()
 const durable = new Map<string, FileQuerySession>()
 const activeRuns = new Map<string, string>()
-const memoryDisk = new Map<string, FileQuerySession>()
 let diskOverride: QueryDisk | 'unavailable' | null = null
 const queues = new Map<string, Promise<unknown>>()
 
@@ -221,7 +228,12 @@ function fresh(session: FileQuerySession, now = Date.now()): FileQuerySession | 
   return session
 }
 
-function normalize(value: FileQuerySession | null | undefined): FileQuerySession | null {
+function knownPersistence(value: string | undefined): PersistenceResult {
+  if (value === 'PERSISTED' || value === 'MEMORY_ONLY' || value === 'FAILED' || value === 'UNKNOWN') return value
+  return 'UNKNOWN'
+}
+
+function normalize(value: FileQuerySession | null | undefined, source: 'memory' | 'disk'): FileQuerySession | null {
   if (!value?.querySessionId || !value.queryFingerprint) return null
   const pages = (value.pages ?? []).map(page => ({
     ...page,
@@ -229,13 +241,19 @@ function normalize(value: FileQuerySession | null | undefined): FileQuerySession
     fileIds: page.fileIds ?? [],
     files: page.files ?? []
   }))
+  const recoveryState: RecoveryState = source === 'disk'
+    ? 'RECOVERED_PENDING_REVALIDATION'
+    : value.recoveryState === 'RECOVERED_PENDING_REVALIDATION' ? 'RECOVERED_PENDING_REVALIDATION' : 'CURRENT'
   return {
     ...value,
     pageSize: value.pageSize || pages[0]?.pageSize || 0,
     sortFingerprint: value.sortFingerprint ?? '',
     caseTypeId: value.caseTypeId ?? '',
     status: value.status ?? 'STALE',
-    persistence: value.persistence ?? 'PERSISTED',
+    persistence: knownPersistence(value.persistence),
+    recordVersion: typeof value.recordVersion === 'number' && Number.isFinite(value.recordVersion) ? value.recordVersion : 0,
+    lastObservedAt: value.lastObservedAt || value.updatedAt || value.createdAt || '',
+    recoveryState,
     pages,
     files: value.files ?? []
   }
@@ -262,10 +280,7 @@ async function defaultPut(id: string, session: FileQuerySession): Promise<'PERSI
       return 'FAILED'
     }
   }
-  if (typeof indexedDB === 'undefined') {
-    memoryDisk.set(id, session)
-    return 'PERSISTED'
-  }
+  if (typeof indexedDB === 'undefined') return 'UNAVAILABLE'
   const database = await openDb()
   if (!database) return 'UNAVAILABLE'
   return await new Promise(resolve => {
@@ -284,13 +299,13 @@ async function defaultPut(id: string, session: FileQuerySession): Promise<'PERSI
 async function defaultGet(id: string): Promise<FileQuerySession | null> {
   if (diskOverride === 'unavailable') return null
   if (diskOverride) return diskOverride.get(id)
-  if (typeof indexedDB === 'undefined') return memoryDisk.get(id) ?? null
+  if (typeof indexedDB === 'undefined') return null
   const database = await openDb()
   if (!database) return null
   return await new Promise(resolve => {
     const tx = database.transaction(STORE, 'readonly')
     const request = tx.objectStore(STORE).get(id)
-    request.onsuccess = () => resolve(normalize(request.result as FileQuerySession | undefined) )
+    request.onsuccess = () => resolve((request.result as FileQuerySession | undefined) ?? null)
     request.onerror = () => resolve(null)
   })
 }
@@ -298,53 +313,75 @@ async function defaultGet(id: string): Promise<FileQuerySession | null> {
 async function defaultAll(): Promise<FileQuerySession[]> {
   if (diskOverride === 'unavailable') return []
   if (diskOverride) return diskOverride.all()
-  if (typeof indexedDB === 'undefined') return [...memoryDisk.values()]
+  if (typeof indexedDB === 'undefined') return []
   const database = await openDb()
   if (!database) return []
   return await new Promise(resolve => {
     const tx = database.transaction(STORE, 'readonly')
     const request = tx.objectStore(STORE).getAll()
-    request.onsuccess = () => resolve((Array.isArray(request.result) ? request.result : []).map(item => normalize(item as FileQuerySession)).filter((item): item is FileQuerySession => Boolean(item)))
+    request.onsuccess = () => resolve(Array.isArray(request.result) ? request.result as FileQuerySession[] : [])
     request.onerror = () => resolve([])
   })
 }
 
-async function defaultDelete(id: string): Promise<void> {
-  if (diskOverride === 'unavailable') return
+async function defaultDelete(id: string): Promise<DeleteResult> {
+  if (diskOverride === 'unavailable') return 'FAILED'
   if (diskOverride) {
-    await diskOverride.delete(id)
-    return
+    try {
+      return await diskOverride.delete(id)
+    } catch {
+      return 'FAILED'
+    }
   }
-  memoryDisk.delete(id)
-  if (typeof indexedDB === 'undefined') return
+  if (typeof indexedDB === 'undefined') return 'FAILED'
   const database = await openDb()
-  if (!database) return
-  await new Promise<void>(resolve => {
-    const tx = database.transaction(STORE, 'readwrite')
-    tx.objectStore(STORE).delete(id)
-    tx.oncomplete = () => resolve()
-    tx.onabort = () => resolve()
-    tx.onerror = () => resolve()
+  if (!database) return 'FAILED'
+  return await new Promise(resolve => {
+    try {
+      const tx = database.transaction(STORE, 'readwrite')
+      const store = tx.objectStore(STORE)
+      const current = store.get(id)
+      let found = false
+      current.onsuccess = () => {
+        found = current.result !== undefined
+        if (found) store.delete(id)
+      }
+      current.onerror = () => undefined
+      tx.oncomplete = () => resolve(found ? 'DELETED' : 'NOT_FOUND')
+      tx.onabort = () => resolve('FAILED')
+      tx.onerror = () => resolve('FAILED')
+    } catch {
+      resolve('FAILED')
+    }
   })
 }
 
 async function persist(session: FileQuerySession): Promise<FileQuerySession> {
-  const candidate: FileQuerySession = { ...session, persistence: 'PERSISTED' }
+  const candidate: FileQuerySession = { ...session, persistence: 'PERSISTED', recoveryState: 'CURRENT' }
   const outcome = await defaultPut(session.querySessionId, candidate)
   if (outcome === 'PERSISTED') {
-    hot.set(session.querySessionId, candidate)
-    durable.set(session.querySessionId, candidate)
-    return candidate
+    const stored = { ...candidate, revocationDiagnostic: undefined }
+    hot.set(session.querySessionId, stored)
+    durable.set(session.querySessionId, stored)
+    return stored
   }
-  const kept: FileQuerySession = { ...session, persistence: outcome === 'UNAVAILABLE' ? 'MEMORY_ONLY' : 'FAILED' }
+  const deletion = outcome === 'FAILED' ? await defaultDelete(session.querySessionId) : 'FAILED'
+  const kept: FileQuerySession = {
+    ...session,
+    persistence: outcome === 'UNAVAILABLE' ? 'MEMORY_ONLY' : 'FAILED',
+    recoveryState: 'CURRENT',
+    ...(deletion === 'FAILED' && outcome === 'FAILED'
+      ? { revocationDiagnostic: '磁盘上的旧查询记录未能删除，不能视为已撤销。' }
+      : { revocationDiagnostic: undefined })
+  }
   hot.set(session.querySessionId, kept)
   durable.delete(session.querySessionId)
-  await defaultDelete(session.querySessionId)
   return kept
 }
 
 async function readSession(id: string, now = Date.now()): Promise<FileQuerySession | null> {
-  const stored = normalize(hot.get(id) ?? durable.get(id) ?? await defaultGet(id))
+  const memory = normalize(hot.get(id) ?? durable.get(id), 'memory')
+  const stored = memory ?? normalize(await defaultGet(id), 'disk')
   if (!stored) return null
   const alive = fresh(stored, now)
   if (!alive) {
@@ -353,7 +390,7 @@ async function readSession(id: string, now = Date.now()): Promise<FileQuerySessi
     await defaultDelete(id)
     return null
   }
-  if (alive.persistence === 'PERSISTED') durable.set(id, alive)
+  if (!memory) hot.set(id, alive)
   return alive
 }
 
@@ -365,13 +402,12 @@ export function dropQuerySessionMemory(): void {
 }
 
 export async function clearQuerySessionStore(): Promise<void> {
-  const ids = new Set<string>([...hot.keys(), ...durable.keys(), ...memoryDisk.keys()])
+  const ids = new Set<string>([...hot.keys(), ...durable.keys()])
   const rest = await defaultAll()
   for (const session of rest) ids.add(session.querySessionId)
   hot.clear()
   durable.clear()
   activeRuns.clear()
-  memoryDisk.clear()
   diskOverride = null
   clearFileTypeTrees()
   await Promise.all([...ids].map(id => defaultDelete(id)))
@@ -408,6 +444,9 @@ function compose(current: FileQuerySession, page: FileSearchPageSnapshot, observ
   return {
     ...current,
     updatedAt: observedAt,
+    lastObservedAt: observedAt,
+    recordVersion: (current.recordVersion || 0) + 1,
+    recoveryState: 'CURRENT',
     expiresAt,
     pages,
     files: indexed.files,
@@ -420,10 +459,10 @@ async function findActive(scope: QueryScope, fingerprint: string, pageSize: numb
   const pointed = activeRuns.get(key)
   if (pointed) {
     const current = await readSession(pointed)
-    if (current?.status === 'ACTIVE' && sameScope(current, scope) && current.queryFingerprint === fingerprint && current.pageSize === pageSize && current.sortFingerprint === sortFingerprint) return current
+    if (current?.status === 'ACTIVE' && current.recoveryState === 'CURRENT' && sameScope(current, scope) && current.queryFingerprint === fingerprint && current.pageSize === pageSize && current.sortFingerprint === sortFingerprint) return current
   }
   const sessions = await sessionsFor(scope)
-  const matches = sessions.filter(item => item.status === 'ACTIVE' && item.queryFingerprint === fingerprint && item.pageSize === pageSize && item.sortFingerprint === sortFingerprint)
+  const matches = sessions.filter(item => item.status === 'ACTIVE' && item.recoveryState === 'CURRENT' && item.queryFingerprint === fingerprint && item.pageSize === pageSize && item.sortFingerprint === sortFingerprint)
     .sort((left, right) => left.updatedAt < right.updatedAt ? 1 : -1)
   const chosen = matches[0]
   if (chosen) activeRuns.set(key, chosen.querySessionId)
@@ -453,6 +492,9 @@ export async function observeSearchPage(input: {
       if (!current || current.status === 'STALE' || current.status === 'EXPIRED' || !sameScope(current, input.scope)) {
         return { ok: false as const, reason: '查询运行已失效，需要重新查询。', code: 'QUERY_SESSION_INVALID' }
       }
+      if (current.recoveryState === 'RECOVERED_PENDING_REVALIDATION') {
+        return { ok: false as const, reason: '查询记录已从本地恢复，需要重新查询后才能继续。', code: 'QUERY_SESSION_REVALIDATION_REQUIRED' }
+      }
       if (current.queryFingerprint !== fingerprint || current.pageSize !== pageSize || current.sortFingerprint !== sortFingerprint) {
         return { ok: false as const, reason: '分页布局或查询条件已变化，需要重新查询。', code: 'QUERY_LAYOUT_CHANGED' }
       }
@@ -475,7 +517,10 @@ export async function observeSearchPage(input: {
       pages: [],
       files: [],
       status: 'ACTIVE',
-      persistence: 'MEMORY_ONLY'
+      persistence: 'MEMORY_ONLY',
+      recordVersion: 0,
+      lastObservedAt: observedAt,
+      recoveryState: 'CURRENT'
     }
     const next = await persist(compose(created, page, observedAt))
     activeRuns.set(key, next.querySessionId)
@@ -485,9 +530,14 @@ export async function observeSearchPage(input: {
 
 export async function sessionsFor(scope: QueryScope): Promise<FileQuerySession[]> {
   const merged = new Map<string, FileQuerySession>()
-  for (const session of [...hot.values(), ...durable.values(), ...await defaultAll()]) {
-    const normalized = normalize(session)
+  for (const session of [...hot.values(), ...durable.values()]) {
+    const normalized = normalize(session, 'memory')
     if (normalized) merged.set(normalized.querySessionId, normalized)
+  }
+  for (const session of await defaultAll()) {
+    if (merged.has(session.querySessionId)) continue
+    const recovered = normalize(session, 'disk')
+    if (recovered) merged.set(recovered.querySessionId, recovered)
   }
   const alive: FileQuerySession[] = []
   for (const [id, session] of merged) {
@@ -587,34 +637,67 @@ function evidenceExpiresFor(session: FileQuerySession, fileId: string, now: numb
     .filter(page => pageStillValid(page, now) && page.files.some(file => file.fileId === fileId && !file.conflict))
     .map(page => page.evidenceExpiresAt)
     .sort()
-  return times[0] ?? ''
+  return times[times.length - 1] ?? ''
+}
+
+function historicalExpiry(session: FileQuerySession, fileId: string): string {
+  const times = session.pages
+    .filter(page => page.files.some(file => file.fileId === fileId))
+    .map(page => page.evidenceExpiresAt || evidenceExpiry(page.observedAt))
+    .sort()
+  return times[times.length - 1] ?? ''
+}
+
+function currentEvidence(session: FileQuerySession): boolean {
+  return session.recoveryState === 'CURRENT' && session.persistence !== 'UNKNOWN'
+}
+
+function rememberedFile(session: FileQuerySession, fileId: string): ObservedPatentFile | undefined {
+  return session.pages.flatMap(page => page.files).find(file => file.fileId === fileId)
+}
+
+function historicalSelection(request: SelectedPatentFile, scope: QueryScope, session: FileQuerySession, source: ObservedPatentFile): VerifiedSelectionSnapshot {
+  return {
+    ...unverifiedSelection(request, scope),
+    fileName: source.fileName || request.fileName,
+    fileDescription: source.fileDescription,
+    querySessionId: session.querySessionId,
+    fetchedAt: source.observedAt,
+    evidenceExpiresAt: historicalExpiry(session, request.fileId),
+    persistence: session.persistence,
+    historicalObservation: true,
+    recoveryState: session.recoveryState
+  }
 }
 
 export async function resolveSelectedFiles(requested: SelectedPatentFile[], scope: QueryScope, context: ResolveContext = {}): Promise<{
   files: SelectedPatentFile[]
   selections: VerifiedSelectionSnapshot[]
   mismatches: string[]
+  requiresRevalidation?: boolean
   issue?: 'MIXED_QUERY_SESSION' | 'FILE_DATA_CONFLICT'
 }> {
   const now = context.now ? Date.parse(context.now) : Date.now()
   const ids = [...new Set(requested.map(item => item.querySessionId?.trim() ?? ''))]
   const mixed = ids.filter(Boolean).length > 1
   let conflict = false
+  let requiresRevalidation = false
   const mismatches: string[] = []
   const files: SelectedPatentFile[] = []
   const selections: VerifiedSelectionSnapshot[] = []
   for (const request of requested) {
     const sessionId = request.querySessionId?.trim() ?? ''
     const session = sessionId ? await readSession(sessionId, now) : null
-    const copies = session && session.status !== 'STALE' && session.status !== 'EXPIRED' && sameScope(session, scope)
-      ? liveCopies(session, request.fileId, now)
-      : []
+    const executable = Boolean(session && currentEvidence(session) && session.status !== 'STALE' && session.status !== 'EXPIRED' && sameScope(session, scope))
+    const copies = executable && session ? liveCopies(session, request.fileId, now) : []
     const disagreed = copies.some(item => item.conflict) || copies.some(item => !sameBusiness(item, copies[0]!))
     if (disagreed) conflict = true
     const source = !disagreed ? copies[0] : undefined
     if (!session || !source) {
+      const remembered = session && sameScope(session, scope) ? rememberedFile(session, request.fileId) : undefined
       files.push(unverifiedFile(request))
-      selections.push(unverifiedSelection(request, scope))
+      selections.push(session && remembered ? historicalSelection(request, scope, session, remembered) : unverifiedSelection(request, scope))
+      if (remembered) requiresRevalidation = true
       continue
     }
     if (differs(request.fileName, source.fileName) || differs(request.fileDescription, source.fileDescription) ||
@@ -653,6 +736,8 @@ export async function resolveSelectedFiles(requested: SelectedPatentFile[], scop
       fetchedAt: source.observedAt,
       evidenceExpiresAt: evidenceExpiresFor(session, source.fileId, now),
       persistence: session.persistence,
+      historicalObservation: true,
+      recoveryState: session.recoveryState,
       descriptionSelectability: description.selectable,
       easyOrigin: session.easyOrigin,
       operatorId: session.operatorId,
@@ -661,7 +746,7 @@ export async function resolveSelectedFiles(requested: SelectedPatentFile[], scop
     })
   }
   const issue = mixed ? 'MIXED_QUERY_SESSION' as const : conflict ? 'FILE_DATA_CONFLICT' as const : undefined
-  return { files, selections, mismatches, ...(issue ? { issue } : {}) }
+  return { files, selections, mismatches, ...(requiresRevalidation ? { requiresRevalidation } : {}), ...(issue ? { issue } : {}) }
 }
 
 export function toQueryObservation(result: Awaited<ReturnType<typeof observeSearchPage>>): QueryObservationResult {
@@ -669,8 +754,9 @@ export function toQueryObservation(result: Awaited<ReturnType<typeof observeSear
   return {
     ok: true,
     querySessionId: result.session.querySessionId,
-    observation: 'SEARCH_RESPONSE_OBSERVED',
-    persistence: result.persistence,
-    status: result.session.status
-  }
+      observation: 'SEARCH_RESPONSE_OBSERVED',
+      persistence: result.persistence,
+      status: result.session.status,
+      ...(result.session.revocationDiagnostic ? { revocationDiagnostic: result.session.revocationDiagnostic } : {})
+    }
 }

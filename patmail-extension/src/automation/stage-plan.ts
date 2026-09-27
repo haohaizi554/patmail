@@ -1,5 +1,12 @@
+import { evaluateTaskEvidence, type EvidenceAccount, type EvidenceEvaluation } from './evidence-evaluation'
 import { STAGES } from './state'
 import type { AutomationStagePlan, AutomationTask, EvidenceLevel } from './types'
+
+export interface EvaluationContext {
+  now?: string
+  currentAccount?: EvidenceAccount | null
+  currentEvidenceState?: EvidenceEvaluation
+}
 
 const DIAGNOSTIC = new Set(['SESSION_CHECK', 'FILE_QUERY', 'MAIL_READ', 'MAIL_VERIFY', 'WORKFLOW_READ', 'WORKFLOW_VERIFY', 'FINAL_VERIFY'])
 
@@ -12,7 +19,8 @@ const ISSUE_STAGE: Record<string, AutomationStagePlan['stage']> = {
 }
 
 /** 按阶段声明生成计划。写阶段在契约和写开关未满足时不可执行。 */
-export function buildStagePlans(task: AutomationTask, contract: EvidenceLevel = 'UNKNOWN'): AutomationStagePlan[] {
+export function buildStagePlans(task: AutomationTask, contract: EvidenceLevel = 'UNKNOWN', context: EvaluationContext = {}): AutomationStagePlan[] {
+  const evidence = context.currentEvidenceState ?? evaluateTaskEvidence(task, context.currentAccount ?? null, context.now ?? new Date().toISOString())
   const plans: AutomationStagePlan[] = []
   for (const definition of Object.values(STAGES)) {
     for (const item of task.items.length > 0 ? task.items : [null]) {
@@ -27,6 +35,7 @@ export function buildStagePlans(task: AutomationTask, contract: EvidenceLevel = 
       if (gate && !gate.descriptionIdsVerified && (write || definition.id === 'DESCRIPTION_MAPPING')) blockers.push('文件描述内部 ID 尚未确认可用于发文。')
       if (gate && !gate.customerIdsVerified && (definition.id === 'MAIL_CREATE' || definition.id === 'MAIL_SAVE')) blockers.push('EASY 客户 GUID 尚未确认。')
       if (task.status === 'BLOCKED' && !DIAGNOSTIC.has(definition.id)) blockers.push('任务尚未满足执行条件。')
+      if (evidence.requiresRevalidation && !DIAGNOSTIC.has(definition.id) && evidence.message) blockers.push(evidence.message)
       plans.push({
         stage: definition.id,
         itemId: item?.itemId ?? '',
