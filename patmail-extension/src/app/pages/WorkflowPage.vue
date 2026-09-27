@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
+import PageHead from '../../../../src/components/PageHead.vue'
+import { bg } from '../../../../src/assets'
 import { isQueryGuid } from '../../query/query-validator'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { MAIL_FLOW_TYPE } from '../../workflow/contracts'
@@ -37,15 +39,16 @@ async function readFlow(): Promise<void> {
 </script>
 
 <template>
-  <section class="pm-card">
+  <PageHead title="工作流" desc="查看已有发文的流程位置，写操作保持关闭。" :art="bg('专业与信任.png')" />
+  <section class="card">
     <h2>工作流</h2>
     <p class="hint">只读 GetFlowInfo、GetFlowHistory、GetFlowSubmit、GetFlowLastStatus。默认不提交。写开关：{{ WORKFLOW_WRITES_ENABLED ? '异常开启' : '关闭' }}</p>
-    <form class="pm-form" @submit.prevent="readFlow">
+    <form class="stack-form" @submit.prevent="readFlow">
       <label>已有邮件 ID <input v-model="mailId" type="text" /></label>
       <button class="solid" type="submit">只读流程</button>
     </form>
     <p v-if="message" class="hint">{{ message }}</p>
-    <div v-if="snapshot" class="pm-form">
+    <div v-if="snapshot" class="stack-form">
       <p>邮件 ID {{ snapshot.mailId }}</p>
       <p>当前节点 {{ snapshot.currentNodeName || '未返回' }} · {{ snapshot.currentNodeCode || '' }} · {{ snapshot.currentNodeId || '' }}</p>
       <p>当前处理人 ID {{ snapshot.currentUserId || '未返回' }}<span v-if="snapshot.currentUserName">（{{ snapshot.currentUserName }}）</span></p>

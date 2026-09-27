@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import PageHead from '../../../../src/components/PageHead.vue'
+import { bg } from '../../../../src/assets'
 import { isFileSearchBusinessField } from '../../api/file-search-params'
 import { isQueryGuid } from '../../query/query-validator'
 import { scopeFromConnection, type ExpectedAccountScope } from '../../shared/connection'
@@ -111,13 +113,14 @@ watch(accountEpoch, () => {
 </script>
 
 <template>
-  <section v-if="!ready" class="pm-card"><p class="empty">尚未确认 EASY 用户，不能读取客户配置。</p></section>
+  <PageHead title="客户管理" desc="管理客户信息与发文配置，让每一位客户都享受专业、高效、贴心的服务。" :art="bg('靠近成功的一步.png')" />
+  <section v-if="!ready" class="card"><p class="empty">尚未确认 EASY 用户，不能读取客户配置。</p></section>
   <template v-else>
-    <section class="pm-card">
+    <section class="card">
       <h2>客户配置</h2>
       <p class="hint">左侧 ID 是 PatMail 本地配置。EASY 客户 GUID 单独保存，两者不会混用。</p>
       <p v-if="customers.length === 0" class="empty">暂无客户</p>
-      <table v-else class="pm-table">
+      <table v-else class="grid">
         <thead><tr><th>本地配置</th><th>名称</th><th>EASY GUID</th><th>模板</th><th>查询覆盖</th><th>状态</th><th></th></tr></thead>
         <tbody>
           <tr v-for="item in customers" :key="item.id">
@@ -132,7 +135,7 @@ watch(accountEpoch, () => {
         </tbody>
       </table>
     </section>
-    <form class="pm-card pm-form" @submit.prevent="save">
+    <form class="card stack-form" @submit.prevent="save">
       <h2>{{ editingId ? '编辑客户' : '新增客户' }}</h2>
       <label>名称 <input v-model="name" type="text" maxlength="80" /></label>
       <label>EASY 客户 GUID <input v-model="easyId" type="text" /></label>
@@ -142,7 +145,7 @@ watch(accountEpoch, () => {
       <label v-if="editingId"><input v-model="resetOverrides" type="checkbox" /> 重置查询条件</label>
       <label><input v-model="enabled" type="checkbox" /> 启用</label>
       <p v-if="formMessage" class="hint">{{ formMessage }}</p>
-      <div class="pm-row">
+      <div class="filters">
         <button class="solid" type="submit">保存到当前账号</button>
         <button v-if="editingId" class="ghost" type="button" @click="cancel">取消编辑</button>
       </div>

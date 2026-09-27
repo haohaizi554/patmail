@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import PageHead from '../../../../src/components/PageHead.vue'
+import { bg } from '../../../../src/assets'
 import { describeDraftState, describeTaskRecord } from '../record-status'
 import { MessageType } from '../../shared/message'
 import { sendToBackground } from '../../utils/runtime'
@@ -43,11 +45,12 @@ async function openDraft(taskId: string): Promise<void> {
 </script>
 
 <template>
-  <section class="pm-card">
+  <PageHead title="邮件草稿" desc="本地草稿来自发文计划，这里不会把任务完成当成已经发出。" :art="bg('发文记录.png')" />
+  <section class="card">
     <h2>邮件草稿</h2>
     <p class="hint">本地草稿来自已保存的发文计划。这里不会把任务完成当成邮件已经发出。</p>
     <p v-if="!ready || drafts.length === 0" class="empty">暂无草稿</p>
-    <table v-else class="pm-table">
+    <table v-else class="grid">
       <thead><tr><th>客户</th><th>预计邮件</th><th>状态</th><th></th></tr></thead>
       <tbody>
         <tr v-for="task in drafts" :key="task.taskId">

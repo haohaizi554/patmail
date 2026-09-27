@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PageHead from '../../../../src/components/PageHead.vue'
+import { bg } from '../../../../src/assets'
 import { computed, ref, watch } from 'vue'
 import { plainClone } from '../../automation/snapshot'
 import { upsertMapping } from '../../mail'
@@ -126,9 +128,10 @@ async function importRules(): Promise<void> {
 </script>
 
 <template>
-  <section v-if="!ready || !draft" class="pm-card"><p class="empty">尚未确认 EASY 用户，不能读取发文规则。</p></section>
+  <PageHead title="发文规则与映射配置" desc="配置企业个性化发文规则，让自动化更贴合您的业务场景。" :art="bg('专业细节，守护创新.png')" />
+  <section v-if="!ready || !draft" class="card"><p class="empty">尚未确认 EASY 用户，不能读取发文规则。</p></section>
   <template v-else>
-    <section class="pm-card">
+    <section class="card">
       <h2>发文规则</h2>
       <p class="hint">当前版本 {{ draft.revision }}。保存走后台规则服务。内容变化后，未发出的旧任务会标记为过期。</p>
       <p v-if="message" class="hint">{{ message }}</p>
@@ -137,13 +140,13 @@ async function importRules(): Promise<void> {
     <DescriptionMailTypeEditor :mappings="draft.mappings" @save="saveMapping" />
     <RecipientEditor :recipients="draft.recipients" :customers="customers" @save="saveRecipient" />
     <SignatureEditor :signatures="draft.signatures" @save="saveSignature" />
-    <form class="pm-card pm-form" @submit.prevent="saveText">
+    <form class="card stack-form" @submit.prevent="saveText">
       <h2>标题和正文</h2>
       <SubjectRuleEditor v-model="draft.subject" />
       <BodyRuleEditor v-model="draft.body" />
       <button class="solid" type="submit">保存标题和正文</button>
     </form>
-    <form class="pm-card pm-form" @submit.prevent="importRules">
+    <form class="card stack-form" @submit.prevent="importRules">
       <h2>配置导入</h2>
       <label>规则 JSON <textarea v-model="importText" rows="4"></textarea></label>
       <button class="ghost" type="submit">导入到当前账号</button>

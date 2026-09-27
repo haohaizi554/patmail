@@ -8,9 +8,9 @@ const content = defineModel<string>('content', { default: '' })
 </script>
 
 <template>
-  <section class="pm-card">
+  <section class="card">
     <h2>操作员签名</h2>
-    <div class="pm-form">
+    <div class="stack-form">
       <label>签名名称 <input v-model="name" type="text" /></label>
       <label>签名内容 <textarea v-model="content" rows="3"></textarea></label>
       <button type="button" class="solid" @click="emit('save', { name: name.trim(), content })">保存签名</button>

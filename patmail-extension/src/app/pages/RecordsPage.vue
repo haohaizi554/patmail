@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import PageHead from '../../../../src/components/PageHead.vue'
+import { bg } from '../../../../src/assets'
 import { describeTaskRecord } from '../record-status'
 import { useWorkspace } from '../composables/useWorkspace'
 
@@ -8,11 +10,12 @@ const ready = computed(() => connection.value.sessionStatus === 'authenticated')
 </script>
 
 <template>
-  <section class="pm-card">
+  <PageHead title="发文记录" desc="记录每一次专业的发送，让专利服务更透明、更可追溯。" :art="bg('靠近成功的一步.png')" />
+  <section class="card">
     <h2>发文记录</h2>
     <p class="hint">记录从已保存任务推导。没有发送核验时，不会显示已成功发送。</p>
     <p v-if="!ready || tasks.length === 0" class="empty">暂无记录</p>
-    <table v-else class="pm-table">
+    <table v-else class="grid">
       <thead><tr><th>时间</th><th>客户</th><th>状态</th><th>说明</th></tr></thead>
       <tbody>
         <tr v-for="task in tasks" :key="task.taskId">

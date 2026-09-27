@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PageHead from '../../../../src/components/PageHead.vue'
+import { bg } from '../../../../src/assets'
 import { EASY_MAIL_WRITES_ENABLED } from '../../mail/easy/gate'
 import { productionWriteAllowed } from '../../automation/contract-capture'
 import { WORKFLOW_WRITES_ENABLED } from '../../workflow/gate'
@@ -8,7 +10,8 @@ const { connection } = useWorkspace()
 </script>
 
 <template>
-  <section class="pm-card">
+  <PageHead title="系统设置" desc="当前连接和写入开关都在这里，生产写入保持关闭。" :art="bg('今天也要高效发文.png')" />
+  <section class="card">
     <h2>系统设置</h2>
     <p class="hint">站点 {{ connection.easyOrigin }}</p>
     <p class="hint">会话 {{ connection.sessionStatus }} · 标签页 {{ connection.easyTabId ?? '未绑定' }}</p>

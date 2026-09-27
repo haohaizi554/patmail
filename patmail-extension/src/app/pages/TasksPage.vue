@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import PageHead from '../../../../src/components/PageHead.vue'
+import { bg } from '../../../../src/assets'
 import { describeItemRecord, describeTaskRecord } from '../record-status'
 import { MessageType } from '../../shared/message'
 import { sendToBackground } from '../../utils/runtime'
@@ -44,13 +46,14 @@ onMounted(() => { if (ready.value) void call({ action: 'load' }) })
 </script>
 
 <template>
-  <section v-if="!ready" class="pm-card"><p class="empty">尚未确认 EASY 用户。刷新页面后也不会加载其他账号的任务。</p></section>
+  <PageHead title="发文任务" desc="高效执行专利发文任务，让重要文件准时送达！" :art="bg('创业路上的小胜利.png')" />
+  <section v-if="!ready" class="card"><p class="empty">尚未确认 EASY 用户。刷新页面后也不会加载其他账号的任务。</p></section>
   <template v-else>
-    <section class="pm-card">
+    <section class="card">
       <h2>发文任务</h2>
       <p class="hint">任务保存在扩展后台。Dry-run 只生成本地计划。Live Readonly 只读验收。Test Write 白名单为空。Production Write 保持关闭。</p>
       <p v-if="tasks.length === 0" class="empty">暂无任务</p>
-      <table v-else class="pm-table">
+      <table v-else class="grid">
         <thead><tr><th>客户</th><th>文件</th><th>预计邮件</th><th>状态</th><th>记录</th><th></th></tr></thead>
         <tbody>
           <tr v-for="task in tasks" :key="task.taskId">
@@ -64,7 +67,7 @@ onMounted(() => { if (ready.value) void call({ action: 'load' }) })
         </tbody>
       </table>
     </section>
-    <section v-if="detail" class="pm-card">
+    <section v-if="detail" class="card">
       <h2>任务详情</h2>
       <p v-if="evidenceMessage" class="hint" role="status">{{ evidenceMessage }}</p>
       <p class="hint">来源 Origin {{ String(detail.origin ?? '') }} · {{ String(detail.taskId) }} · {{ describeTaskRecord(String(detail.status ?? '')) }}</p>
@@ -74,7 +77,7 @@ onMounted(() => { if (ready.value) void call({ action: 'load' }) })
         <li v-for="row in identities" :key="String(row.profileId) + String(row.easyCustomerId)">配置 {{ row.profileName || row.profileId }} · EASY 客户 {{ row.easyCustomerId || '未绑定 GUID' }} · 模板 {{ row.baseTemplateId || '无' }}</li>
       </ul>
       <p v-if="items.length === 0" class="empty">这个任务没有邮件条目。</p>
-      <table v-else class="pm-table">
+      <table v-else class="grid">
         <thead><tr><th>文件</th><th>发文类型</th><th>草稿主题</th><th>当前阶段</th><th>说明</th></tr></thead>
         <tbody>
           <tr v-for="item in items" :key="String(item.itemId)">

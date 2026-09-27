@@ -1,52 +1,14 @@
-:root {
-  color-scheme: light;
-  --pink: #ff4f93;
-  --text: #243056;
-  --sub: #7d8cab;
-  --line: #f3e7ee;
-  --bg: #fff6fa;
-  font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
-}
-* { box-sizing: border-box; }
-html, body, #app { margin: 0; min-height: 100%; }
-body { background: var(--bg); color: var(--text); }
-button, input, select, textarea { font: inherit; color: inherit; }
-a { color: inherit; text-decoration: none; }
-
-.pm-shell { min-height: 100vh; display: grid; grid-template-columns: 220px minmax(0, 1fr); }
-.pm-side { background: #fff; border-right: 1px solid var(--line); padding: 18px 12px; display: flex; flex-direction: column; gap: 6px; }
-.pm-brand { display: flex; gap: 10px; align-items: center; padding: 4px 8px 14px; }
-.pm-mark { width: 36px; height: 36px; border-radius: 12px; display: grid; place-items: center; background: linear-gradient(180deg, #ff8eb8, var(--pink)); color: #fff; font-weight: 700; }
-.pm-brand small { display: block; color: var(--sub); font-size: 12px; }
-.pm-side a { display: block; border-radius: 10px; padding: 9px 12px; color: #66758f; }
-.pm-side a.active { background: #fff0f6; color: var(--pink); font-weight: 700; }
-.pm-main { min-width: 0; padding: 18px 22px 32px; }
-.pm-top { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 14px; }
-.pm-top h1 { margin: 0; font-size: 20px; }
 .demo-flag { background: #fff4d6; color: #946200; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; }
-.pm-card { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; margin-bottom: 14px; }
-.pm-card h2 { margin: 0 0 8px; font-size: 16px; }
-.pm-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.pm-metric { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 14px; min-height: 96px; }
-.pm-metric b { display: block; color: var(--sub); font-size: 13px; font-weight: 600; }
-.pm-metric strong { display: block; font-size: 28px; margin-top: 6px; }
-.pm-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.pm-table th { text-align: left; color: var(--sub); font-weight: 650; height: 36px; background: #fafbfe; }
-.pm-table td { height: 44px; border-top: 1px solid #f4f6fb; padding: 0 8px; }
-.pm-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.pm-row input, .pm-row select, .pm-row textarea, .pm-form input, .pm-form select, .pm-form textarea { border: 1px solid #eadff0; border-radius: 10px; background: #fff; padding: 8px 10px; }
-.pm-form { display: grid; gap: 10px; max-width: 640px; }
-.pm-form label { display: grid; gap: 4px; font-size: 13px; color: #66758f; }
-.solid, .ghost { height: 36px; border-radius: 10px; padding: 0 12px; cursor: pointer; }
-.solid { border: 0; color: #fff; background: linear-gradient(180deg, #ff78ae, #ff4f93); }
-.ghost { border: 1px solid #eadff0; background: #fff; color: #66758f; }
-.hint { color: var(--sub); font-size: 13px; }
-.empty { padding: 28px 8px; color: var(--sub); }
-.status-pill { border-radius: 999px; padding: 3px 8px; background: #f4f7ff; color: #7d8cab; font-size: 12px; }
-@media (max-width: 900px) {
-  .pm-shell { grid-template-columns: 1fr; }
-  .pm-side { flex-direction: row; overflow: auto; border-right: 0; border-bottom: 1px solid var(--line); }
-  .pm-brand { display: none; }
-  .pm-side a { white-space: nowrap; }
-  .pm-metrics { grid-template-columns: 1fr 1fr; }
-}
+.workspace > .page-head { margin-bottom: 8px; }
+.workspace > .card,
+.workspace > .metric-row,
+.workspace > form.card { margin-bottom: 14px; }
+.workspace .card > h2 { margin: 0 0 10px; font-size: 16px; }
+.workspace .empty { padding: 28px 8px; color: var(--sub); }
+.stack-form { display: grid; gap: 10px; max-width: 720px; }
+.stack-form label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; color: #66758f; }
+.stack-form input:not([type="checkbox"]):not([type="radio"]),
+.stack-form select,
+.stack-form textarea { width: 100%; border: 1px solid #eadff0; border-radius: 10px; background: #fff; padding: 8px 10px; }
+.stack-form textarea { min-height: 72px; }
+.stack-form label:has(input[type="checkbox"]) { display: flex; align-items: center; font-weight: 600; }
