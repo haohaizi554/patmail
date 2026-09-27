@@ -3,7 +3,7 @@ import { isFileSearchBusinessField, type FileSearchQuery } from './file-search-p
 import type { DictionarySnapshot } from './dictionaries'
 import type { HistoryQueryDetail, HistoryQueryOption } from './query-history'
 import type { FileSearchResult, PatentFile } from './file-search-types'
-import { isLimitMonitorType, type LimitMonitorQuery } from './limit-monitor-params'
+import { isLimitMonitorInputField, isLimitMonitorType, type LimitMonitorQuery } from './limit-monitor-params'
 import type { LimitMonitorResult, LimitMonitorRow } from './limit-monitor-types'
 import type { SessionSummary } from './session'
 import type { ApiError, ApiResult } from './types'
@@ -86,11 +86,12 @@ export function isFileSearchApiResult(value: unknown): value is ApiResult<FileSe
   return isApiResult(value, isFileSearchResult)
 }
 
-const LIMIT_QUERY_KEYS = new Set(['type', 'caseVolume', 'applicationNo', 'customerName', 'ctrlProcId', 'pageIndex', 'pageSize'])
+const LIMIT_QUERY_KEYS = new Set(['type', 'caseVolume', 'applicationNo', 'customerName', 'ctrlProcId', 'fields', 'pageIndex', 'pageSize'])
 
 export function isLimitMonitorQuery(value: unknown): value is LimitMonitorQuery {
   if (!isRecord(value) || Object.keys(value).some(key => !LIMIT_QUERY_KEYS.has(key))) return false
   if (typeof value.type !== 'string' || !isLimitMonitorType(value.type)) return false
+  if (value.fields !== undefined && (!isRecord(value.fields) || Object.entries(value.fields).some(([key, item]) => !isLimitMonitorInputField(key) || typeof item !== 'string' || item.length > 4000))) return false
   return Number.isSafeInteger(value.pageIndex) && Number(value.pageIndex) >= 1 &&
     Number.isSafeInteger(value.pageSize) && Number(value.pageSize) >= 1 && Number(value.pageSize) <= 100 &&
     ['caseVolume', 'applicationNo', 'customerName', 'ctrlProcId'].every(key => optionalString(value[key]))

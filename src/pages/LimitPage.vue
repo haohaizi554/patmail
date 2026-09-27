@@ -10,7 +10,8 @@ const props = defineProps({
   total: { type: Number, default: 0 },
   loading: Boolean,
   message: { type: String, default: '' },
-  connected: { type: Boolean, default: true }
+  connected: { type: Boolean, default: true },
+  hideForm: Boolean
 })
 const emit = defineEmits(['search'])
 const ui = inject('ui', null)
@@ -57,8 +58,9 @@ function reset() {
 </script>
 
 <template>
-  <PageHead title="期限监控" desc="各个业务页签共用同一套列表，选定处理事项后再进入发文。" :art="bg('让重复工作变简单.png')" />
-  <section class="card">
+  <PageHead title="期限监控" desc="期限监控自己的查询表。和文件查询不是同一张表。" :art="bg('让重复工作变简单.png')" />
+  <slot />
+  <section v-if="!hideForm" class="card">
     <div class="filters">
       <button v-for="item in types" :key="item[0]" :class="type === item[0] ? 'solid tiny' : 'ghost'" type="button" @click="type = item[0]">{{ item[1] }}</button>
       <button class="ghost" type="button" disabled title="流程页签使用 FlowMonitorInfo，字段尚未核对">流程</button>

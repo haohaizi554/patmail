@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { LIMIT_OPTION_KEYS } from '../src/api/limit-form'
 import { buildLimitMailCustomerParams, buildLimitMonitorParams, LIMIT_MONITOR_FIELDS, LIMIT_MONITOR_TYPES } from '../src/api/limit-monitor-params'
+import { pageSelectOptions } from '../src/query/form-page'
 import { normalizeLimitMonitor } from '../src/api/limit-monitor-normalizer'
 
 const query = { type: 'all' as const, caseVolume: 'PA2622582', pageIndex: 1, pageSize: 10 }
@@ -23,6 +25,18 @@ describe('期限监控', () => {
       expect(paramsOf(buildLimitMonitorParams({ ...query, type }, () => 1000)).get('Call')).toBe('GetLimitMonitorCaseList')
     }
     expect(buildLimitMonitorParams({ ...query, caseVolume: '  ' }).ok).toBe(false)
+    const withFields = paramsOf(buildLimitMonitorParams({ ...query, caseVolume: '', fields: { applicant: '张三', is_fuzzy_query_app_no_other: 'true' } }, () => 1000))
+    expect([...withFields.keys()]).toEqual([...LIMIT_MONITOR_FIELDS])
+    expect(withFields.get('applicant')).toBe('张三')
+    expect(withFields.get('business_type_other')).toBe('')
+    const withBusiness = paramsOf(buildLimitMonitorParams({ ...query, fields: { business_type_other: '05E75F37-60F5-44E1-8B57-456AC8B4CFF7' } }, () => 1000))
+    expect(withBusiness.get('business_type_other')).toBe('05E75F37-60F5-44E1-8B57-456AC8B4CFF7')
+    for (const key of ['country', 'business_type_other', 'dept_id', 'ctrl_proc', 'proc_pic_user', 'case_pic_user', 'proc_status', 'revise_user_id', 'sales', 'flow_user_id', 'user_assistant']) {
+      const options = pageSelectOptions(LIMIT_OPTION_KEYS[key])
+      expect(options && options.length > 0, key).toBe(true)
+    }
+    expect(withFields.get('is_fuzzy_query_app_no_other')).toBe('true')
+    expect(withFields.get('case_volume')).toBe('')
   })
 
   it('reads a list when Result is false but the rows are present', () => {

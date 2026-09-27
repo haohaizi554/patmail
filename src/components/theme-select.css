@@ -39,3 +39,19 @@ label > .theme-select,
 .theme-select-menu [role="option"].is-active { background: #fff0f6; }
 .theme-select-menu [role="option"].is-selected { background: #ffe4ef; color: #ff3f86; font-weight: 700; }
 .theme-select-empty { padding: 8px 10px; color: var(--sub, #8d97b0); }
+.theme-tree-menu { display: flex; flex-direction: column; gap: 6px; overflow: hidden; padding: 8px; }
+.theme-tree-search { display: flex; gap: 6px; }
+.theme-tree-search input { flex: 1; min-width: 0; height: 30px; border: 1px solid #eadff0; border-radius: 8px; padding: 0 8px; font: inherit; font-size: 12px; color: inherit; }
+.theme-tree-search input:focus-visible { outline: 2px solid #ffb3d0; outline-offset: 1px; }
+.theme-tree-query, .theme-tree-clear { height: 30px; border: 0; border-radius: 8px; background: #ff4f93; color: #fff; font: inherit; font-size: 12px; cursor: pointer; }
+.theme-tree-query { padding: 0 12px; }
+.theme-tree-query:focus-visible, .theme-tree-clear:focus-visible, .theme-tree-toggle:focus-visible { outline: 2px solid #ffb3d0; outline-offset: 1px; }
+.theme-tree-list { overflow: auto; min-height: 0; }
+.theme-tree-row { display: flex; align-items: center; gap: 4px; min-height: 28px; }
+.theme-tree-toggle { width: 22px; height: 22px; flex: none; border: 1px solid #eadff0; border-radius: 4px; background: #fff; color: #8d7693; font: 14px/1 inherit; cursor: pointer; }
+.theme-tree-leaf { width: 22px; flex: none; }
+.theme-tree-check { display: flex; align-items: center; gap: 6px; min-width: 0; color: #4e4056; font-size: 12px; cursor: pointer; }
+.theme-tree-check input { width: 16px; height: 16px; margin: 0; flex: none; }
+.theme-tree-check span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.theme-tree-children { margin-left: 18px; }
+.theme-tree-clear { background: #fff; color: #c44b7e; border: 1px solid #ffd0e2; }

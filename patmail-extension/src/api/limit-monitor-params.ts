@@ -12,13 +12,23 @@ export interface LimitMonitorQuery {
   applicationNo?: string
   customerName?: string
   ctrlProcId?: string
+  /** 期限监控表单里已填写的条件。只接收 115 项里的业务字段。 */
+  fields?: Record<string, string>
   pageIndex: number
   pageSize: number
 }
 
+const LIMIT_MONITOR_LOCKED = new Set<string>([
+  'pageIndex', 'pageSize', 'select_and', 'Call', 'is_first', 'type', 'colsel', '_t', 'log_pagename'
+])
+
+export function isLimitMonitorInputField(name: string): boolean {
+  return (LIMIT_MONITOR_FIELDS as readonly string[]).includes(name) && !LIMIT_MONITOR_LOCKED.has(name)
+}
+
 /**
  * API/09-期限监控.md 的 115 项顺序。未使用的条件传空字符串。
- * type=flow 不在这里，那个请求会改成 FlowMonitorInfo。
+ * 原网站还会多交 business_type_other。type=flow 不在这里，那个请求会改成 FlowMonitorInfo。
  */
 export const LIMIT_MONITOR_FIELDS = [
   'pageIndex', 'pageSize', 'select_and', 'Call', 'is_first', 'case_type', 'country',
@@ -47,7 +57,7 @@ export const LIMIT_MONITOR_FIELDS = [
   'cus_entrust_end', 'prompt_cus_end', 'reply_agengcy_end', 'agengcy_receipt_end',
   'agengcy_revise_end', 'prompt_agengcy_end', 'third_party_revise_end',
   'revise_third_party_end', 'receipt_third_party_end', 'column1', 'column2', 'column3',
-  'column4', 'column5', 'colsel', '_t', 'log_pagename'
+  'column4', 'column5', 'business_type_other', 'colsel', '_t', 'log_pagename'
 ] as const
 
 export const LIMIT_MONITOR_COLSEL = ';undefined;undefined;case_id;case_volume;case_name;ctrl_proc;pic;review_stage;doc_date;int_due_date;smallduc_date;cus_due_date;legal_due_date;foreign_pic_case;customer_name;customer_status;revise_user;case_mail_date;'
@@ -71,26 +81,34 @@ export function buildLimitMonitorParams(
   const applicationNo = query.applicationNo?.trim().replace(/\./g, '') ?? ''
   const customerName = query.customerName?.trim() ?? ''
   const ctrlProcId = query.ctrlProcId?.trim() ?? ''
-  if (![caseVolume, applicationNo, customerName, ctrlProcId].some(Boolean)) {
-    return apiError('INVALID_QUERY', '请输入我方文号、申请号、客户或处理事项。')
+  const fields = query.fields ?? {}
+  for (const [key, value] of Object.entries(fields)) {
+    if (!isLimitMonitorInputField(key) || typeof value !== 'string') {
+      return apiError('INVALID_QUERY', '期限条件里有不能提交的项目。')
+    }
   }
-  if (ctrlProcId && !GUID.test(ctrlProcId)) return apiError('INVALID_QUERY', '处理事项必须使用内部 ID。')
+  const filled = [caseVolume, applicationNo, customerName, ctrlProcId, ...Object.values(fields)].some(value => value.trim())
+  if (!filled) return apiError('INVALID_QUERY', '请输入我方文号、申请号、客户或处理事项。')
+  if ((ctrlProcId && !GUID.test(ctrlProcId)) || (fields.ctrl_proc?.trim() && !GUID.test(fields.ctrl_proc.trim()))) {
+    return apiError('INVALID_QUERY', '处理事项必须使用内部 ID。')
+  }
   const values: Record<string, string> = {}
   for (const field of LIMIT_MONITOR_FIELDS) values[field] = ''
+  for (const [key, value] of Object.entries(fields)) values[key] = value.trim()
   Object.assign(values, {
     pageIndex: String(query.pageIndex),
     pageSize: String(query.pageSize),
     select_and: 'false',
     Call: 'GetLimitMonitorCaseList',
     is_first: 'false',
-    case_type: CURRENT_ENVIRONMENT.caseTypeId,
-    case_volume: caseVolume,
-    is_fuzzy_query_case_volume_other: 'false',
-    is_fuzzy_query_app_no_other: 'false',
-    is_point_app_no_other: 'false',
-    app_no: applicationNo,
-    ctrl_proc: ctrlProcId,
-    customer_name: customerName,
+    case_type: values.case_type || CURRENT_ENVIRONMENT.caseTypeId,
+    case_volume: caseVolume || values.case_volume,
+    is_fuzzy_query_case_volume_other: values.is_fuzzy_query_case_volume_other || 'false',
+    is_fuzzy_query_app_no_other: values.is_fuzzy_query_app_no_other || 'false',
+    is_point_app_no_other: values.is_point_app_no_other || 'false',
+    app_no: applicationNo || values.app_no,
+    ctrl_proc: ctrlProcId || values.ctrl_proc,
+    customer_name: customerName || values.customer_name,
     type: query.type,
     colsel: LIMIT_MONITOR_COLSEL,
     _t: String(now()),

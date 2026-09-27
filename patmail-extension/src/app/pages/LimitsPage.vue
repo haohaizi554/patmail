@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
 import LimitPage from '../../../../src/pages/LimitPage.vue'
+import LimitQuerySection from '../../floating/LimitQuerySection.vue'
 import type { LimitMonitorResult, LimitMonitorRow } from '../../api/limit-monitor-types'
 import { isLimitMonitorType } from '../../api/limit-monitor-params'
 import { MessageType, type MessageBridge } from '../../shared/message'
@@ -21,7 +22,7 @@ function textFor(code: string, fallback: string): string {
   return fallback || '期限查询失败，请稍后重试。'
 }
 
-async function search(input: { type: string; caseVolume: string; applicationNo: string; customerName: string; reset?: boolean }): Promise<void> {
+async function search(input: { type: string; caseVolume?: string; applicationNo?: string; customerName?: string; ctrlProcId?: string; fields?: Record<string, string>; reset?: boolean }): Promise<void> {
   rows.value = []
   total.value = 0
   if (input.reset) {
@@ -44,9 +45,11 @@ async function search(input: { type: string; caseVolume: string; applicationNo: 
       payload: {
         query: {
           type: input.type,
-          caseVolume: input.caseVolume,
-          applicationNo: input.applicationNo,
-          customerName: input.customerName,
+          caseVolume: input.caseVolume ?? '',
+          applicationNo: input.applicationNo ?? '',
+          customerName: input.customerName ?? '',
+          ...(input.ctrlProcId ? { ctrlProcId: input.ctrlProcId } : {}),
+          ...(input.fields ? { fields: input.fields } : {}),
           pageIndex: 1,
           pageSize: 10
         }
@@ -78,5 +81,8 @@ async function search(input: { type: string; caseVolume: string; applicationNo: 
 </script>
 
 <template>
-  <LimitPage live :rows="rows" :total="total" :loading="loading" :message="message" :connected="connected" @search="search" />
+  <LimitPage live hide-form :rows="rows" :total="total" :loading="loading" :message="message" :connected="connected">
+    <section v-if="!connected" class="card"><p class="empty">尚未确认 EASY 用户，不能读取期限模板。</p></section>
+    <LimitQuerySection v-else :bridge="bridge" :user-id="connection.operatorId" :can-search="connected && !loading" @search="search" />
+  </LimitPage>
 </template>
