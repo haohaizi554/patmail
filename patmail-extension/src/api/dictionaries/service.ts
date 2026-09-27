@@ -11,9 +11,10 @@ import {
 import { DictionaryCache } from './cache'
 import { readDictionaryBody, responseKeyNames } from './guards'
 import type {
-  BasicDataSnapshot, DictionarySnapshot, FieldColumnSnapshot, FileTypeTreeSnapshot, FlowDataSnapshot, ListColumnSnapshot,   MailTypeSnapshot, PickerSnapshot
+  BasicDataSnapshot, DictionarySnapshot, FieldColumnSnapshot, FileTypeTreeSnapshot, FlowDataSnapshot, ListColumnSnapshot, MailTypeSnapshot, PickerSnapshot, ReviewerSnapshot
 } from './types'
 import { buildPickerCatalog } from './picker-catalog'
+import { readReviewers } from './reviewers'
 
 const PAGE = 'FileSearch.aspx'
 const FILE_SEARCH_COLUMNS = 'CaseInfo.ashx_GetSearchFiles'
@@ -159,6 +160,18 @@ export class DictionaryService {
     })
   }
 
+  loadReviewers(userKey: string, force: boolean, signal?: AbortSignal): Promise<ApiResult<ReviewerSnapshot>> {
+    return this.cache.load(this.cache.reviewerKey(userKey), force, async () => {
+      const response = await this.transport.post('treeUser', params({ Call: 'GetTreeUser', log_pagename: PAGE }), signal)
+      if (!response.ok) return response
+      const body = readDictionaryBody(response.data)
+      if (!body.ok) return body
+      const raw = body.data.TreeUser
+      if (raw !== null && raw !== undefined && !Array.isArray(raw)) return apiError('INVALID_RESPONSE', '审核人响应不是数组。')
+      return { ok: true, data: { kind: 'reviewer', reviewers: readReviewers(body.data) } }
+    })
+  }
+
   loadPicker(
     userKey: string,
     force: boolean,
@@ -219,6 +232,7 @@ export class DictionaryService {
     if (kind === 'fileType') return this.loadFileTypes(userKey, caseTypeId, force, signal)
     if (kind === 'fieldColumn') return this.loadFieldColumns(userKey, force, signal)
     if (kind === 'mailType') return this.loadMailTypes(userKey, force, signal)
+    if (kind === 'reviewer') return this.loadReviewers(userKey, force, signal)
     if (kind === 'picker') return this.loadPicker(userKey, force, caseTypeId, signal, picker)
     return this.loadListColumns(userKey, force, signal)
   }

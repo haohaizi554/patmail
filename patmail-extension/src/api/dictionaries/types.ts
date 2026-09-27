@@ -79,7 +79,7 @@ export interface PickerSnapshot {
 }
 
 export type DictionarySnapshot =
-  | BasicDataSnapshot | FlowDataSnapshot | FileTypeTreeSnapshot | FieldColumnSnapshot | ListColumnSnapshot | MailTypeSnapshot | PickerSnapshot
+  | BasicDataSnapshot | FlowDataSnapshot | FileTypeTreeSnapshot | FieldColumnSnapshot | ListColumnSnapshot | MailTypeSnapshot | ReviewerSnapshot | PickerSnapshot
 
 export interface MailTypeSnapshot {
   kind: 'mailType'
@@ -87,9 +87,14 @@ export interface MailTypeSnapshot {
   diagnostics: string[]
 }
 
-export type DictionaryKind = 'basic' | 'flow' | 'fileType' | 'fieldColumn' | 'listColumn' | 'mailType' | 'picker'
+export interface ReviewerSnapshot {
+  kind: 'reviewer'
+  reviewers: Array<{ id: string; name: string }>
+}
+
+export type DictionaryKind = 'basic' | 'flow' | 'fileType' | 'fieldColumn' | 'listColumn' | 'mailType' | 'reviewer' | 'picker'
 
 export type DictionaryLoadRequest =
-  | { kind: 'basic' | 'flow' | 'fieldColumn' | 'listColumn' | 'mailType'; force: boolean }
+  | { kind: 'basic' | 'flow' | 'fieldColumn' | 'listColumn' | 'mailType' | 'reviewer'; force: boolean }
   | { kind: 'picker'; force: boolean; caseTypeId?: string; country?: string; procType?: string }
   | { kind: 'fileType'; force: boolean; caseTypeId: string }

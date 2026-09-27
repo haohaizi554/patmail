@@ -94,6 +94,11 @@ export interface BodyRule {
   version: number
 }
 
+export interface DefaultReviewer {
+  userId: string
+  name: string
+}
+
 export interface MailRuleBundle {
   version: 1
   revision: number
@@ -104,6 +109,8 @@ export interface MailRuleBundle {
   signatures: OperatorSignature[]
   subject: SubjectRule
   body: BodyRule
+  /** 缺省表示还没设。旧配置没有这个字段时按未设置读取。 */
+  defaultReviewer: DefaultReviewer | null
 }
 
 export interface MailGroup {

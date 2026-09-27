@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, provide, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, provide, ref } from 'vue'
 import { createFullPageBridge } from './services/full-page-bridge'
 import { useWorkspace } from './composables/useWorkspace'
 import HomePage from './pages/HomePage.vue'
@@ -37,7 +37,12 @@ function readRoute(): string {
 }
 
 const route = ref(readRoute())
+const scrollTops = new Map<string, number>()
 const workspace = useWorkspace()
+
+function workspaceScroller(): HTMLElement | null {
+  return document.querySelector('.workspace')
+}
 const search = ref('')
 const pageName = computed(() => nav.find(item => item.hash === route.value)?.name ?? '首页')
 const page = computed(() => pages[route.value as keyof typeof pages] ?? HomePage)
@@ -50,7 +55,16 @@ function go(name: string): void {
 }
 provide('bridge', createFullPageBridge())
 
-function onHash(): void { route.value = readRoute() }
+function onHash(): void {
+  const scroller = workspaceScroller()
+  if (scroller) scrollTops.set(route.value, scroller.scrollTop)
+  route.value = readRoute()
+  const next = route.value
+  void nextTick(() => {
+    const node = workspaceScroller()
+    if (node) node.scrollTop = scrollTops.get(next) ?? 0
+  })
+}
 onMounted(() => {
   window.addEventListener('hashchange', onHash)
   void workspace.call({ action: 'load' })
@@ -60,6 +74,8 @@ onUnmounted(() => window.removeEventListener('hashchange', onHash))
 
 <template>
   <Shell :page="pageName" :search="search" placeholder="搜索我方文号、客户或申请号..." :items="nav" :profile-name="profileName" :profile-dept="profileDept" :show-demo="false" :show-settings="false" @navigate="go" @update:search="search = $event">
-    <component :is="page" />
+    <KeepAlive>
+      <component :is="page" :key="route" />
+    </KeepAlive>
   </Shell>
 </template>

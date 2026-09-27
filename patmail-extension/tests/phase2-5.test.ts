@@ -42,7 +42,8 @@ function rules(): MailRuleBundle {
     recipients: [{ id: 'to', customerProfileId: 'profile-a', name: '默认', to: ['a@example.com'], cc: [], enabled: true, isDefault: true, version: 1, updatedAt: '2026-09-24T00:00:00.000Z' }],
     signatures: [],
     subject: { template: '关于{文件名称}的通知', countInjection: false, anchor: '关于', missingAnchor: 'keep', version: 1 },
-    body: { template: '请查收{文件数量}个文件。', supplement: '', version: 1 }
+    body: { template: '请查收{文件数量}个文件。', supplement: '', version: 1 },
+    defaultReviewer: null
   }
 }
 function profile(): CustomerQueryProfile {

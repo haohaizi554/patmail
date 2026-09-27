@@ -48,6 +48,21 @@ function text(row: Record<string, unknown>, key: string): string {
   return typeof value === 'string' ? value : ''
 }
 
+function listParts(value: unknown): string[] {
+  if (typeof value !== 'string') return []
+  return value.split(';').map(item => item.trim()).filter(Boolean)
+}
+
+/** user_list_id 与 user_list_name 按分号对齐。人数不一致时不硬配。 */
+function pairedReviewers(ids: string[], names: string[]): { reviewers: WorkflowReviewer[]; reviewerFormat: WorkflowNode['reviewerFormat'] } | null {
+  if (ids.length === 0 || ids.length !== names.length || ids.some(id => !isQueryGuid(id))) return null
+  if (names.some(name => /[;,]/.test(name))) return null
+  return {
+    reviewers: ids.map((id, index) => ({ id, name: names[index] })),
+    reviewerFormat: ids.length === 1 ? 'single' : 'structured'
+  }
+}
+
 function reviewersOf(row: Record<string, unknown>): { reviewers: WorkflowReviewer[]; reviewerFormat: WorkflowNode['reviewerFormat'] } {
   if (Array.isArray(row.user_list)) {
     const reviewers: WorkflowReviewer[] = []
@@ -57,6 +72,11 @@ function reviewersOf(row: Record<string, unknown>): { reviewers: WorkflowReviewe
     }
     return { reviewers, reviewerFormat: 'structured' }
   }
+  const names = listParts(row.user_list_name)
+  const pairedIds = pairedReviewers(listParts(row.user_list_id), names)
+  if (pairedIds) return pairedIds
+  const pairedList = pairedReviewers(listParts(row.user_list), names)
+  if (pairedList) return pairedList
   if (typeof row.user_list_id === 'string' && isQueryGuid(row.user_list_id) && typeof row.user_list_name === 'string' && !/[;,]/.test(row.user_list_name)) {
     return { reviewers: [{ id: row.user_list_id, name: row.user_list_name }], reviewerFormat: 'single' }
   }
@@ -120,6 +140,11 @@ export function flowFields(row: Record<string, unknown>): FlowInfoFields {
 }
 
 /** 下一节点查询的参数全部来自本次 GetFlowInfo。缺字段就不发，不用历史 GUID 填上。 */
+export interface AccountReviewerList {
+  reviewers: Array<{ id: string; name: string }>
+  message: string
+}
+
 export function flowSubmitQuery(info: FlowInfoFields): URLSearchParams | null {
   if (!isQueryGuid(info.objId) || !isQueryGuid(info.flowId) || !info.flowType.trim()) return null
   if ([info.flowSubType, info.deptId, info.deptFullName, info.curNodeId, info.curUserId, info.nodeCode, info.cnName, info.urgencyId, info.updateTime, info.updateTimeDd, info.updateTimeMm, info.updateTimeSs].some(item => item === null)) return null

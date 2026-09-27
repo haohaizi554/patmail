@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import PageHead from '../../../../src/components/PageHead.vue'
 import { bg } from '../../../../src/assets'
-import { computed, ref, watch } from 'vue'
+import { computed, inject, ref, watch } from 'vue'
 import { plainClone } from '../../automation/snapshot'
 import { upsertMapping } from '../../mail'
 import type { MailRuleBundle } from '../../mail/types'
 import { isQueryGuid } from '../../query/query-validator'
 import { scopeFromConnection, type ExpectedAccountScope } from '../../shared/connection'
+import { MessageType, type MessageBridge } from '../../shared/message'
 import { useWorkspace } from '../composables/useWorkspace'
 import CustomerPolicyEditor from '../components/rules/CustomerPolicyEditor.vue'
 import DescriptionMailTypeEditor from '../components/rules/DescriptionMailTypeEditor.vue'
@@ -14,19 +15,46 @@ import RecipientEditor from '../components/rules/RecipientEditor.vue'
 import SignatureEditor from '../components/rules/SignatureEditor.vue'
 import SubjectRuleEditor from '../components/rules/SubjectRuleEditor.vue'
 import BodyRuleEditor from '../components/rules/BodyRuleEditor.vue'
+import DefaultReviewerEditor from '../components/rules/DefaultReviewerEditor.vue'
 
+const bridge = inject<MessageBridge>('bridge')
 const { connection, customers, rules, accountEpoch, call } = useWorkspace()
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
 const draft = ref<MailRuleBundle | null>(null)
 const draftScope = ref<ExpectedAccountScope | null>(null)
 const message = ref('')
 const importText = ref('')
+const reviewers = ref<Array<{ id: string; name: string }>>([])
+const reviewerNotice = ref('')
 
 watch(rules, (bundle) => {
   draft.value = bundle ? plainClone(bundle) : null
   draftScope.value = scopeFromConnection(connection.value)
 }, { immediate: true })
 watch(accountEpoch, () => { importText.value = '' })
+watch(ready, (ok) => { if (ok) void loadReviewers() }, { immediate: true })
+
+async function loadReviewers(): Promise<void> {
+  if (!bridge || !ready.value) return
+  const response = await bridge.request({ type: MessageType.ListFlowReviewers })
+  if (response.type === MessageType.Error) {
+    reviewerNotice.value = response.payload.message
+    reviewers.value = []
+    return
+  }
+  if (response.type !== MessageType.ListFlowReviewersResult) {
+    reviewerNotice.value = '审核人名单没有返回。'
+    reviewers.value = []
+    return
+  }
+  if (!response.payload.ok) {
+    reviewerNotice.value = response.payload.error.message
+    reviewers.value = []
+    return
+  }
+  reviewers.value = response.payload.data.reviewers
+  reviewerNotice.value = response.payload.data.message
+}
 
 async function persist(mutate: (bundle: MailRuleBundle) => void): Promise<void> {
   if (!draft.value || !draftScope.value) {
@@ -99,6 +127,11 @@ async function saveSignature(input: { name: string; content: string }): Promise<
   })
 }
 
+async function saveReviewer(input: { userId: string; name: string }): Promise<void> {
+  if (!isQueryGuid(input.userId) || !input.name.trim()) { message.value = '请从当前账号的人员里选择审核人。'; return }
+  await persist(bundle => { bundle.defaultReviewer = { userId: input.userId, name: input.name.trim() } })
+}
+
 async function saveText(): Promise<void> {
   await persist(bundle => {
     if (!draft.value) return
@@ -123,12 +156,13 @@ async function importRules(): Promise<void> {
     bundle.signatures = parsed.signatures
     bundle.subject = parsed.subject
     bundle.body = parsed.body
+    bundle.defaultReviewer = parsed.defaultReviewer ?? null
   })
 }
 </script>
 
 <template>
-  <PageHead title="发文规则与映射配置" desc="配置企业个性化发文规则，让自动化更贴合您的业务场景。" :art="bg('好的规则，是高效友好的开始.png')" />
+  <PageHead title="发文规则与映射配置" desc="配置企业个性化发文规则，让自动化更贴合您的业务场景。" :art="bg('规则配置好，发文更轻松.png')" art-large />
   <section v-if="!ready || !draft" class="card"><p class="empty">尚未确认 EASY 用户，不能读取发文规则。</p></section>
   <template v-else>
     <section class="card">
@@ -140,6 +174,7 @@ async function importRules(): Promise<void> {
     <DescriptionMailTypeEditor :mappings="draft.mappings" @save="saveMapping" />
     <RecipientEditor :recipients="draft.recipients" :customers="customers" @save="saveRecipient" />
     <SignatureEditor :signatures="draft.signatures" @save="saveSignature" />
+    <DefaultReviewerEditor :reviewers="reviewers" :current-id="connection.operatorId" :selected="draft.defaultReviewer" :notice="reviewerNotice" @save="saveReviewer" />
     <form class="card stack-form" @submit.prevent="saveText">
       <h2>标题和正文</h2>
       <SubjectRuleEditor v-model="draft.subject" />

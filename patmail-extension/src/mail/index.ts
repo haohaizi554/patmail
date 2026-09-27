@@ -1,3 +1,4 @@
+export { assembleMail, fillFromRules } from './assemble'
 export { planDrafts } from './planner'
 export { buildDraftPreview } from './preview'
 export { planMailGroups } from './rules/grouping'

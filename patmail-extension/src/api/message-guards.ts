@@ -5,6 +5,7 @@ import type { HistoryQueryDetail, HistoryQueryOption } from './query-history'
 import type { FileSearchResult, PatentFile } from './file-search-types'
 import { isLimitMonitorInputField, isLimitMonitorType, type LimitMonitorQuery } from './limit-monitor-params'
 import type { LimitMonitorResult, LimitMonitorRow } from './limit-monitor-types'
+import type { MailProcessQuery, MailProcessResult, MailProcessRow } from './mail-process'
 import type { SessionSummary } from './session'
 import type { ApiError, ApiResult } from './types'
 
@@ -114,6 +115,32 @@ export function isLimitMonitorApiResult(value: unknown): value is ApiResult<Limi
   return isApiResult(value, isLimitResult)
 }
 
+const MAIL_PROCESS_KEYS = new Set(['searchKey', 'pageIndex', 'pageSize'])
+const MAIL_PROCESS_ROW_KEYS = ['mailId', 'subject', 'mailTo', 'mailType', 'customerName', 'ownerName', 'nodeName', 'updatedAt', 'remark', 'urgency'] as const
+
+export function isMailProcessQuery(value: unknown): value is MailProcessQuery {
+  if (!isRecord(value) || Object.keys(value).some(key => !MAIL_PROCESS_KEYS.has(key))) return false
+  return typeof value.searchKey === 'string' && value.searchKey.length <= 200 &&
+    Number.isSafeInteger(value.pageIndex) && Number(value.pageIndex) >= 1 &&
+    Number.isSafeInteger(value.pageSize) && Number(value.pageSize) >= 1 && Number(value.pageSize) <= 100
+}
+
+function isMailProcessRow(value: unknown): value is MailProcessRow {
+  return isRecord(value) && MAIL_PROCESS_ROW_KEYS.every(key => typeof value[key] === 'string')
+}
+
+function isMailProcessResult(value: unknown): value is MailProcessResult {
+  return isRecord(value) && Array.isArray(value.items) && value.items.every(isMailProcessRow) &&
+    Number.isSafeInteger(value.total) && Number(value.total) >= 0 &&
+    Number.isSafeInteger(value.pageIndex) && Number(value.pageIndex) >= 1 &&
+    Number.isSafeInteger(value.pageSize) && Number(value.pageSize) >= 1 &&
+    Number.isSafeInteger(value.totalPages) && Number(value.totalPages) >= 0
+}
+
+export function isMailProcessApiResult(value: unknown): value is ApiResult<MailProcessResult> {
+  return isApiResult(value, isMailProcessResult)
+}
+
 function isHistoryOption(value: unknown): value is HistoryQueryOption {
   return isRecord(value) && typeof value.id === 'string' && typeof value.name === 'string' && value.source === 'easy'
 }
@@ -132,7 +159,7 @@ export function isHistoryDetailResult(value: unknown): value is ApiResult<Histor
 
 function isDictionarySnapshot(value: unknown): value is DictionarySnapshot {
   return isRecord(value) && (value.kind === 'basic' || value.kind === 'flow' || value.kind === 'fileType' ||
-    value.kind === 'fieldColumn' || value.kind === 'listColumn' || value.kind === 'mailType' || value.kind === 'picker')
+    value.kind === 'fieldColumn' || value.kind === 'listColumn' || value.kind === 'mailType' || value.kind === 'reviewer' || value.kind === 'picker')
 }
 
 export function isDictionaryResult(value: unknown): value is ApiResult<DictionarySnapshot> {

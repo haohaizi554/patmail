@@ -108,6 +108,12 @@ const bridge: MessageBridge = {
       case MessageType.SearchLimitMonitor:
         return { type: MessageType.SearchLimitMonitorResult,
           payload: await easyRuntime.searchLimitMonitor(message.payload.query) }
+      case MessageType.ListMailProcesses:
+        return { type: MessageType.ListMailProcessesResult,
+          payload: await easyRuntime.listMailProcesses(message.payload.query) }
+      case MessageType.ListFlowReviewers:
+        return { type: MessageType.ListFlowReviewersResult,
+          payload: await easyRuntime.listFlowReviewers() }
       case MessageType.ListHistoryQueries:
         return { type: MessageType.HistoryQueriesResult,
           payload: await easyRuntime.listHistoryQueries(message.payload.force, signal, message.payload.surface ?? 'file') }

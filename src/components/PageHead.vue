@@ -1,6 +1,6 @@
 <script setup>
 import Bunny from './Bunny.vue'
-defineProps({ title: String, desc: String, art: String })
+defineProps({ title: String, desc: String, art: String, artLarge: Boolean })
 </script>
 
 <template>
@@ -11,6 +11,6 @@ defineProps({ title: String, desc: String, art: String })
       <p>{{ desc }} <span>♥</span></p>
     </div>
     <slot />
-    <img v-if="art" class="page-art" :src="art" alt="" />
+    <img v-if="art" class="page-art" :class="{ 'page-art-lg': artLarge }" :src="art" alt="" />
   </header>
 </template>

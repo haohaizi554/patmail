@@ -5,6 +5,7 @@ import { DictionaryService } from './dictionaries'
 import type { DictionaryLoadRequest, DictionarySnapshot } from './dictionaries'
 import { buildGetSearchFilesFromFields, buildGetSearchFilesParams, type FileSearchQuery } from './file-search-params'
 import { buildLimitMonitorParams, type LimitMonitorQuery } from './limit-monitor-params'
+import { buildMailProcessParams, normalizeMailProcess, type MailProcessQuery, type MailProcessResult } from './mail-process'
 import { normalizeLimitMonitor } from './limit-monitor-normalizer'
 import type { LimitMonitorResult } from './limit-monitor-types'
 import { HistoryQueryService } from './query-history'
@@ -18,6 +19,8 @@ import { ExecutionStore, type ExecutionArea } from '../mail/easy/store'
 import type { MailExecutionView } from '../mail/easy/types'
 import type { MailDraftPreview } from '../mail/types'
 import { productionWorkflowGate } from '../workflow/gate'
+import { WorkflowReadService } from '../workflow/read-service'
+import type { AccountReviewerList } from '../workflow/contracts'
 import { WorkflowRuntime } from '../workflow/runtime'
 import { WorkflowStore } from '../workflow/store'
 import type { WorkflowView } from '../workflow/types'
@@ -328,6 +331,63 @@ export class EasyRuntime {
         workflow
       }
     })
+  }
+
+  listMailProcesses(query: MailProcessQuery): Promise<ApiResult<MailProcessResult>> {
+    return (async (): Promise<ApiResult<MailProcessResult>> => {
+      if (!(await this.confirmAccountRead())) {
+        return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
+      }
+      const params = buildMailProcessParams(query)
+      if (!params.ok) return params
+      const response = await this.transport.post('mailProcess', params.data)
+      if (!response.ok && response.error.code === 'SESSION_EXPIRED') this.session.expire()
+      return response.ok ? normalizeMailProcess(response.data, query) : response
+    })()
+  }
+
+  /** 审核人来自当前账号一封进行中发文的 GetFlowInfo + GetFlowSubmit。 */
+  listFlowReviewers(): Promise<ApiResult<AccountReviewerList>> {
+    return (async (): Promise<ApiResult<AccountReviewerList>> => {
+      if (!(await this.confirmAccountRead())) {
+        return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
+      }
+      const query = { searchKey: '', pageIndex: 1, pageSize: 5 }
+      const params = buildMailProcessParams(query)
+      if (!params.ok) return params
+      const listed = await this.transport.post('mailProcess', params.data)
+      if (!listed.ok) {
+        if (listed.error.code === 'SESSION_EXPIRED') this.session.expire()
+        return listed
+      }
+      const processes = normalizeMailProcess(listed.data, query)
+      if (!processes.ok) return processes
+      const mail = processes.data.items.find(item => item.mailId)
+      if (!mail) return { ok: true, data: { reviewers: [], message: '当前账号没有进行中的发文，读不到审核人。' } }
+      const reader = new WorkflowReadService(this.transport)
+      const info = await reader.reloadInfo(mail.mailId, 'CO')
+      if (!info.ok) return apiError('BUSINESS_ERROR', info.message)
+      const nodes = await reader.nodes(info.info)
+      if (nodes.nodes.length === 0) return apiError('BUSINESS_ERROR', nodes.message || '没有读到下一节点。')
+      const reviewers: AccountReviewerList['reviewers'] = []
+      const seen = new Set<string>()
+      for (const node of nodes.nodes) {
+        if (node.nodeCode === 'END') continue
+        for (const reviewer of node.reviewers) {
+          const key = reviewer.id.toLowerCase()
+          if (!reviewer.name.trim() || seen.has(key)) continue
+          seen.add(key)
+          reviewers.push({ id: reviewer.id, name: reviewer.name })
+        }
+      }
+      return {
+        ok: true,
+        data: {
+          reviewers,
+          message: reviewers.length ? '' : '下一节点没有带姓名的审核人。'
+        }
+      }
+    })()
   }
 
   searchLimitMonitor(query: LimitMonitorQuery): Promise<ApiResult<LimitMonitorResult>> {
