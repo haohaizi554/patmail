@@ -749,6 +749,15 @@ export async function resolveSelectedFiles(requested: SelectedPatentFile[], scop
   return { files, selections, mismatches, ...(requiresRevalidation ? { requiresRevalidation } : {}), ...(issue ? { issue } : {}) }
 }
 
+export interface QuerySessionRepository {
+  read(querySessionId: string, now: number): Promise<FileQuerySession | null>
+}
+
+/** 当前进程的查询记录。从磁盘读到的会话仍会标成待重新核验。 */
+export function liveQuerySessions(): QuerySessionRepository {
+  return { read: (querySessionId, now) => readSession(querySessionId, now) }
+}
+
 export function toQueryObservation(result: Awaited<ReturnType<typeof observeSearchPage>>): QueryObservationResult {
   if (!result.ok) return { ok: false, code: result.code, message: result.reason }
   return {

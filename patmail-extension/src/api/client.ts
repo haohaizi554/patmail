@@ -1,8 +1,12 @@
+import { isLiveWriteCall } from '../automation/live-readonly-policy'
 import { extractReadonlyEvidence, readonlyContract } from '../automation/readonly-contracts'
 import { CURRENT_ENVIRONMENT } from './config'
 import { DictionaryService } from './dictionaries'
 import type { DictionaryLoadRequest, DictionarySnapshot } from './dictionaries'
 import { buildGetSearchFilesFromFields, buildGetSearchFilesParams, type FileSearchQuery } from './file-search-params'
+import { buildLimitMonitorParams, type LimitMonitorQuery } from './limit-monitor-params'
+import { normalizeLimitMonitor } from './limit-monitor-normalizer'
+import type { LimitMonitorResult } from './limit-monitor-types'
 import { HistoryQueryService } from './query-history'
 import type { HistoryQueryDetail, HistoryQueryOption } from './query-history'
 import type { FileSearchResult } from './file-search-types'
@@ -85,6 +89,8 @@ export class EasyRuntime {
   private sessionController: AbortController | null = null
   private searchController: AbortController | null = null
   private searchSequence = 0
+  private limitController: AbortController | null = null
+  private limitSequence = 0
   private activeSearch: { signature: string; promise: Promise<ApiResult<FileSearchResult>> } | null = null
   private readonly history: HistoryQueryService
   private readonly dictionaries: DictionaryService
@@ -121,8 +127,14 @@ export class EasyRuntime {
     this.sessionController = controller
     const result = await this.session.check(controller.signal)
     if (this.sessionController === controller) this.sessionController = null
-    if (result.ok && result.data.status !== 'authenticated') this.cancelFileSearch()
-    if (!result.ok && result.error.code === 'SESSION_EXPIRED') this.cancelFileSearch()
+    if (result.ok && result.data.status !== 'authenticated') {
+      this.cancelFileSearch()
+      this.cancelLimitMonitor()
+    }
+    if (!result.ok && result.error.code === 'SESSION_EXPIRED') {
+      this.cancelFileSearch()
+      this.cancelLimitMonitor()
+    }
     const nextKey = result.ok && result.data.status === 'authenticated' ? result.data.userId ?? '' : ''
     if (nextKey !== this.historyUserKey) {
       this.history.invalidate()
@@ -260,6 +272,7 @@ export class EasyRuntime {
 
   /** 只读验收探测。写接口不在表内，不会发请求。 */
   async probeReadonly(call: string, context: { caseTypeId?: string; mailId?: string; flowType?: string } = {}): Promise<{ httpStatus: number; sessionOk: boolean; fields: Record<string, string>; shape: string }> {
+    if (isLiveWriteCall(call)) return { httpStatus: 0, sessionOk: true, fields: {}, shape: 'write-blocked' }
     const operation = ACCEPTANCE_ROUTE[call]
     const decision = readonlyContract(call, context)
     if (!operation || decision.state !== 'ready') return { httpStatus: 0, sessionOk: true, fields: {}, shape: decision.state === 'pending' ? 'CONTRACT_PENDING' : 'blocked' }
@@ -297,6 +310,37 @@ export class EasyRuntime {
     })
   }
 
+  searchLimitMonitor(query: LimitMonitorQuery): Promise<ApiResult<LimitMonitorResult>> {
+    if (this.session.status !== 'authenticated') {
+      return Promise.resolve(apiError(
+        this.session.status === 'expired' || this.session.status === 'unauthenticated' ? 'SESSION_EXPIRED' : 'AUTH_UNKNOWN',
+        '请先在 EASY 原网站登录并检测登录状态。'
+      ))
+    }
+    const params = buildLimitMonitorParams(query)
+    if (!params.ok) return Promise.resolve(params)
+    this.cancelLimitMonitor()
+    const controller = new AbortController()
+    this.limitController = controller
+    const requestNumber = ++this.limitSequence
+    return (async (): Promise<ApiResult<LimitMonitorResult>> => {
+      const response = await this.transport.post('limitMonitor', params.data, controller.signal)
+      if (requestNumber !== this.limitSequence) return apiError('REQUEST_ABORTED', '旧查询已取消。')
+      const result = response.ok ? normalizeLimitMonitor(response.data, query) : response
+      if (!result.ok && result.error.code === 'SESSION_EXPIRED') {
+        this.session.expire()
+        this.cancelLimitMonitor()
+      }
+      return result
+    })()
+  }
+
+  cancelLimitMonitor(): void {
+    this.limitSequence++
+    this.limitController?.abort()
+    this.limitController = null
+  }
+
   cancelFileSearch(): void {
     this.searchSequence++
     this.searchController?.abort()
@@ -307,6 +351,7 @@ export class EasyRuntime {
   dispose(): void {
     this.cancelSessionCheck()
     this.cancelFileSearch()
+    this.cancelLimitMonitor()
     this.history.invalidate()
     this.dictionaries.invalidate(this.historyUserKey)
     this.historyUserKey = ''

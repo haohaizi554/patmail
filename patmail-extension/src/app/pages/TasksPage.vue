@@ -9,6 +9,7 @@ const { connection, tasks, call } = useWorkspace()
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
 const detail = ref<Record<string, unknown> | null>(null)
 const detailMessage = ref('')
+const evidenceMessage = ref('')
 
 async function openTask(taskId: string): Promise<void> {
   const response = await sendToBackground({
@@ -18,10 +19,13 @@ async function openTask(taskId: string): Promise<void> {
   if (!response || response.type !== MessageType.TaskResult || !response.payload.task) {
     detailMessage.value = response?.type === MessageType.Error ? response.payload.message : '没有读取到任务。'
     detail.value = null
+    evidenceMessage.value = ''
     return
   }
   detail.value = response.payload.task
   detailMessage.value = ''
+  const evidence = response.payload.currentEvidence
+  evidenceMessage.value = evidence && typeof evidence === 'object' && evidence.requiresRevalidation === true && typeof evidence.message === 'string' ? evidence.message : ''
 }
 
 const items = computed(() => Array.isArray(detail.value?.items) ? detail.value.items as Array<Record<string, unknown>> : [])
@@ -55,13 +59,14 @@ onMounted(() => { if (ready.value) void call({ action: 'load' }) })
             <td>{{ task.mailCount }}</td>
             <td>{{ task.status }}</td>
             <td>{{ describeTaskRecord(task.status) }}</td>
-            <td><button type="button" class="ghost" @click="openTask(task.taskId)">详情</button></td>
+            <td><button type="button" class="ghost" :aria-label="`${task.taskId} 详情`" @click="openTask(task.taskId)">详情</button></td>
           </tr>
         </tbody>
       </table>
     </section>
     <section v-if="detail" class="pm-card">
       <h2>任务详情</h2>
+      <p v-if="evidenceMessage" class="hint" role="status">{{ evidenceMessage }}</p>
       <p class="hint">来源 Origin {{ String(detail.origin ?? '') }} · {{ String(detail.taskId) }} · {{ describeTaskRecord(String(detail.status ?? '')) }}</p>
       <p class="hint">客户 {{ String(detail.customerName ?? '') }} · 规则版本 {{ ruleRevision }} · 文件 {{ Array.isArray(detail.selectedFiles) ? detail.selectedFiles.length : 0 }} · 阶段 {{ String(detail.status ?? '') }}</p>
       <p v-if="issues.length" class="hint">阻塞：{{ issues.map(item => String(item.message ?? '')).filter(Boolean).join('；') }}</p>

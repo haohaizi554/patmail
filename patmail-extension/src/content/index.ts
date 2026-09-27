@@ -30,6 +30,9 @@ const bridge: MessageBridge = {
       case MessageType.SearchFiles:
         return { type: MessageType.SearchFilesResult,
           payload: await easyRuntime.searchFiles(message.payload.query) }
+      case MessageType.SearchLimitMonitor:
+        return { type: MessageType.SearchLimitMonitorResult,
+          payload: await easyRuntime.searchLimitMonitor(message.payload.query) }
       case MessageType.ListHistoryQueries:
         return { type: MessageType.HistoryQueriesResult,
           payload: await easyRuntime.listHistoryQueries(message.payload.force, signal) }

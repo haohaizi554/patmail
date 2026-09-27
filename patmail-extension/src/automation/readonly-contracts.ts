@@ -1,4 +1,6 @@
+import { adaptCaseType } from '../api/dictionaries/adapters'
 import { isRecord } from '../api/response-guards'
+import { isLiveWriteCall } from './live-readonly-policy'
 import { listParams } from '../mail/easy/contracts'
 import { isQueryGuid } from '../query/query-validator'
 import { flowFields, flowHistoryParams, flowInfoParams, lastStatusParams, urgencyParams } from '../workflow/contracts'
@@ -21,6 +23,7 @@ function pending(call: string): ContractDecision {
 
 /** 每个接口使用已经核对过的参数名。缺字段或不确认的接口不发请求。 */
 export function readonlyContract(call: string, context: { caseTypeId?: string; mailId?: string; flowType?: string }): ContractDecision {
+  if (isLiveWriteCall(call)) return { state: 'blocked', reason: `${call} 属于写接口，READ_ONLY_AUTO 不发送。` }
   if (call === 'GetUserModel') {
     const params = new URLSearchParams()
     params.set('Call', 'GetUserModel')
@@ -115,6 +118,24 @@ export function extractReadonlyEvidence(call: string, data: unknown): Record<str
     if (info.status !== null) fields.status = String(info.status)
     if (info.curUserId) fields.current_user_id = info.curUserId
     if (info.updateTimeSs) fields.update_time_ss = info.updateTimeSs
+  }
+  if (call === 'IPGetBasicData') {
+    const caseTypes = adaptCaseType(data.CaseType)
+    fields.caseTypeCount = String(caseTypes.options.length)
+    const first = caseTypes.options[0]
+    if (first) {
+      fields.caseTypeId = first.value
+      fields.caseTypeLabel = first.label.slice(0, 80)
+    }
+  }
+  if (call === 'LoadMailType' && Array.isArray(data.MailType)) {
+    const rows = data.MailType.filter(isRecord).filter(row => typeof row.id === 'string' && typeof row.name === 'string' && isQueryGuid(row.id))
+    fields.mailTypeCount = String(rows.length)
+    const first = rows[0]
+    if (first && typeof first.id === 'string' && typeof first.name === 'string') {
+      fields.mailTypeId = first.id
+      fields.mailTypeName = first.name.slice(0, 80)
+    }
   }
   if (call === 'LoadFileTypeByCaseType' && Array.isArray(data.FileType)) fields.nodeCount = String(data.FileType.length)
   if (call === 'GetSearchFiles') {

@@ -6,7 +6,8 @@ import type { MailRuleBundle, SelectedPatentFile } from '../mail/types'
 import { buildQueryDependencies, referencedProfileIds } from './query-dependency'
 import { sha256Hex } from './sha256'
 import { customerIdentities, createTaskSnapshot, emptyIdentity } from './snapshot'
-import type { AutomationIssue, AutomationTask, AutomationTaskItem, CustomerIdentitySnapshot, EvidencePersistence, TaskCustomer, TaskIdentityGate, VerifiedSelectionSnapshot } from './types'
+import { aggregatePersistence } from './evidence-evaluation'
+import type { AutomationIssue, AutomationTask, AutomationTaskItem, CustomerIdentitySnapshot, TaskCustomer, TaskIdentityGate, VerifiedSelectionSnapshot } from './types'
 import type { QueryTemplate } from '../query/query-types'
 
 export interface TaskBuildInput {
@@ -22,12 +23,8 @@ export interface TaskBuildInput {
   now?: string
 }
 
-function evidencePersistence(items: VerifiedSelectionSnapshot[]): EvidencePersistence | 'UNKNOWN' {
-  const values = items.map(item => item.persistence).filter((value): value is EvidencePersistence => value === 'PERSISTED' || value === 'MEMORY_ONLY' || value === 'FAILED' || value === 'UNKNOWN')
-  if (values.includes('FAILED')) return 'FAILED'
-  if (values.includes('MEMORY_ONLY')) return 'MEMORY_ONLY'
-  if (values.length > 0 && values.every(value => value === 'PERSISTED')) return 'PERSISTED'
-  return 'UNKNOWN'
+function evidencePersistence(items: VerifiedSelectionSnapshot[]) {
+  return aggregatePersistence(items)
 }
 
 function identityForItem(profileId: string, easyCustomerId: string, identities: CustomerIdentitySnapshot[]): CustomerIdentitySnapshot {

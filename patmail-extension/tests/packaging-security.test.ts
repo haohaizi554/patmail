@@ -34,6 +34,18 @@ describe('交付包私钥检查', () => {
     expect(classify(names).some(item => item.reason === 'private-key')).toBe(true)
   })
 
+  it('fails verify:archive when a zip contains a private key name', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'patmail-verify-'))
+    writeFileSync(join(directory, 'dist.pem'), 'placeholder\n')
+    writeFileSync(join(directory, 'readme.txt'), 'notes\n')
+    const archive = join(directory, 'sample.zip')
+    const packed = spawnSync('tar', ['-a', '-c', '-f', archive, 'dist.pem', 'readme.txt'], { cwd: directory, encoding: 'utf8' })
+    expect(packed.status).toBe(0)
+    const checked = spawnSync(process.execPath, ['scripts/verify-archive.mjs', archive], { cwd: root, encoding: 'utf8' })
+    expect(checked.status).not.toBe(0)
+    expect(`${checked.stdout}${checked.stderr}`).not.toContain('placeholder')
+  })
+
   it('builds the source package without a private key name', () => {
     const packed = spawnSync('node', ['scripts/pack-source.mjs'], { cwd: root, encoding: 'utf8' })
     expect(packed.status).toBe(0)
@@ -41,5 +53,7 @@ describe('交付包私钥检查', () => {
     const names = listed.stdout.split(/\r?\n/).filter(Boolean)
     expect(classify(names).every(item => item.reason === null)).toBe(true)
     expect(names.some(name => name.toLowerCase().endsWith('.pem'))).toBe(false)
+    const verified = spawnSync(process.execPath, ['scripts/verify-archive.mjs', 'test-results/patmail-source.zip'], { cwd: root, encoding: 'utf8' })
+    expect(verified.status).toBe(0)
   })
 })

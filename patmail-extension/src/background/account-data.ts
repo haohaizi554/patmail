@@ -1,5 +1,7 @@
 import { isConfirmedOperator } from '../automation/operator'
 import type { TaskStore } from '../automation/task-service'
+import { evaluateCurrentTaskEvidence } from '../automation/evidence-evaluation'
+import { liveQuerySessions } from '../automation/file-search-snapshot'
 import { validateTask } from '../automation/task-validator'
 import type { AutomationTask } from '../automation/types'
 import { CustomerQueryService } from '../customer/service'
@@ -125,9 +127,11 @@ export async function refreshStaleTasks(store: TaskStore, origin: string, operat
     return report
   }
   for (const task of tasks) {
+    const now = new Date().toISOString()
+    const live = await evaluateCurrentTaskEvidence(task, { easyOrigin: origin, operatorId }, liveQuerySessions(), now)
     const next = validateTask(task, {
-      origin, operatorId, files: task.selectedFiles, rules, profiles, templates, queryTemplateVersion: task.queryTemplateVersion
-    })
+      origin, operatorId, files: task.selectedFiles, rules, profiles, templates, queryTemplateVersion: task.queryTemplateVersion, now
+    }, live)
     if (sameTaskRevision(task, next)) {
       report.unchangedCount += 1
       continue

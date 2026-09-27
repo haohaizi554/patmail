@@ -7,6 +7,7 @@ export type EasyOperation =
   | 'mailCustomer' | 'mailInfoInit' | 'getMailInfo' | 'getMailFile' | 'getMailCase'
   | 'getMailRule' | 'getCustomerContact' | 'getSignature' | 'saveMailInfo' | 'saveMailRelatedFiles'
   | 'getFlowInfo' | 'getFlowHistory' | 'getUrgencyList' | 'getFlowSubmit' | 'getFlowLastStatus'
+  | 'limitMonitor'
 
 export interface TransportOptions {
   fetcher?: typeof fetch
@@ -37,7 +38,8 @@ const ROUTES: Record<EasyOperation, { path: string; call: string }> = {
   getFlowHistory: { path: '/AjaxServers/Common.ashx', call: 'GetFlowHistory' },
   getUrgencyList: { path: '/AjaxServers/Common.ashx', call: 'GetUrgencyList' },
   getFlowSubmit: { path: '/AjaxServers/Common.ashx', call: 'GetFlowSubmit' },
-  getFlowLastStatus: { path: '/AjaxServers/Common.ashx', call: 'GetFlowLastStatus' }
+  getFlowLastStatus: { path: '/AjaxServers/Common.ashx', call: 'GetFlowLastStatus' },
+  limitMonitor: { path: '/AjaxServers/Report.ashx', call: 'GetLimitMonitorCaseList' }
 }
 
 function loginRedirect(response: Response, origin: string): boolean {
@@ -72,8 +74,21 @@ export class EasyTransport {
     this.timeoutMs = options.timeoutMs ?? 15_000
   }
 
-  /** Handler、Call、方法和目标 Origin 由内部白名单固定，页面消息不能提供 URL。 */
+  /** 只读请求遇到网关 502/503 时再试。写请求不重试，避免一次 502 后面又创建出第二封。 */
   async post(operation: EasyOperation, params: URLSearchParams, signal?: AbortSignal): Promise<ApiResult<unknown>> {
+    const retryable = operation !== 'mailCustomer' && operation !== 'saveMailInfo' && operation !== 'saveMailRelatedFiles'
+    let result = await this.postOnce(operation, params, signal)
+    for (let attempt = 1; retryable && !result.ok && (result.error.status === 502 || result.error.status === 503) && attempt < 3; attempt += 1) {
+      if (signal?.aborted) return apiError('REQUEST_ABORTED', '请求已取消。')
+      await new Promise(resolve => setTimeout(resolve, 200 * attempt))
+      if (signal?.aborted) return apiError('REQUEST_ABORTED', '请求已取消。')
+      result = await this.postOnce(operation, params, signal)
+    }
+    return result
+  }
+
+  /** Handler、Call、方法和目标 Origin 由内部白名单固定，页面消息不能提供 URL。 */
+  private async postOnce(operation: EasyOperation, params: URLSearchParams, signal?: AbortSignal): Promise<ApiResult<unknown>> {
     if (!this.origin) return apiError('INVALID_ORIGIN', '当前页面不属于受信任的 EASY 站点。')
     const route = ROUTES[operation]
     if (!route || params.getAll('Call').length !== 1 || params.get('Call') !== route.call) {

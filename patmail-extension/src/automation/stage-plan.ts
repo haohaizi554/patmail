@@ -35,7 +35,7 @@ export function buildStagePlans(task: AutomationTask, contract: EvidenceLevel = 
       if (gate && !gate.descriptionIdsVerified && (write || definition.id === 'DESCRIPTION_MAPPING')) blockers.push('文件描述内部 ID 尚未确认可用于发文。')
       if (gate && !gate.customerIdsVerified && (definition.id === 'MAIL_CREATE' || definition.id === 'MAIL_SAVE')) blockers.push('EASY 客户 GUID 尚未确认。')
       if (task.status === 'BLOCKED' && !DIAGNOSTIC.has(definition.id)) blockers.push('任务尚未满足执行条件。')
-      if (evidence.requiresRevalidation && !DIAGNOSTIC.has(definition.id) && evidence.message) blockers.push(evidence.message)
+      if (!evidence.currentTrust && evidence.requiresRevalidation && !DIAGNOSTIC.has(definition.id) && evidence.message) blockers.push(evidence.message)
       plans.push({
         stage: definition.id,
         itemId: item?.itemId ?? '',

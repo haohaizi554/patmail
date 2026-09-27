@@ -500,7 +500,7 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
       ok: true,
       message: `${row.call} ${row.result}`,
       connection: host.connection.context,
-      forwarded: { type: MessageType.AcceptanceResult, payload: { records: [row as unknown as Record<string, unknown>] } }
+      forwarded: { type: MessageType.AcceptanceResult, payload: { records: [row as unknown as Record<string, unknown>], probe } }
     })
   }
   return workspaceResult({ ok: false, message: '后台没有处理这条消息。', connection: host.connection.context })

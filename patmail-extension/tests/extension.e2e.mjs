@@ -30,6 +30,7 @@ try {
   throw error
 }
 // 整个 EASY Origin 由测试路由拦截；绝不触达真实服务器。
+let revokeReads = 0
 await context.route('http://183.36.43.66:88/**', async route => {
   const request = route.request()
   const pathName = new URL(request.url()).pathname
@@ -75,6 +76,9 @@ await context.route('http://183.36.43.66:88/**', async route => {
     const empty = params.get('file_name') === 'empty'
     const failed = params.get('file_name') === 'error'
     const pageIndex = Number(params.get('pageIndex'))
+    const revoke = params.get('case_volume') === 'E2E-REVOKE'
+    const revokeFirst = revoke && revokeReads === 0
+    if (revoke) revokeReads += 1
     const body = !authenticated
       ? { ClientInfo: { IsLogin: false, Status: false, Result: false }, TableRows: null, TableRowsCount: '0' }
       : failed
@@ -85,7 +89,12 @@ await context.route('http://183.36.43.66:88/**', async route => {
             TableRows: empty ? null : params.get('file_name') === 'dup-id' ? [
               { file_id: 'file-dup', file_name: '重复.pdf', file_desc: '专利证书', case_volume: params.get('case_volume'), app_no: 'CN123', customer_name: '测试客户', post_date: '2026-09-24', file_status: '已发文' },
               { file_id: 'file-dup', file_name: '重复.pdf', file_desc: '审查意见通知书', case_volume: params.get('case_volume'), app_no: 'CN123', customer_name: '测试客户', post_date: '2026-09-24', file_status: '已发文' }
-            ] : [{
+            ] : [revoke ? {
+              file_id: revokeFirst ? 'file-revoke-a' : 'file-revoke-b',
+              file_name: revokeFirst ? '文件A.pdf' : '文件B.pdf',
+              file_desc: '专利证书', case_volume: 'E2E-REVOKE',
+              app_no: 'CN123', customer_name: '测试客户', post_date: '2026-09-24', file_status: '已发文'
+            } : {
               file_id: `file-${pageIndex}`, file_name: `通知书-${pageIndex}.pdf`,
               file_desc: '审查意见通知书', case_volume: params.get('case_volume'),
               app_no: 'CN123', customer_name: '测试客户', post_date: '2026-09-24', file_status: '已发文'
@@ -936,6 +945,65 @@ try {
     assert.deepEqual(recovered.historical, [true, true])
     assert.deepEqual(recovered.recovery, ['RECOVERED_PENDING_REVALIDATION', 'RECOVERED_PENDING_REVALIDATION'])
     const mailCalls = () => apiCalls.filter(item => item.path === '/AjaxServers/Mail.ashx').length
+    const beforeRevoke = mailCalls()
+    const revoked = await app.evaluate(async () => {
+      const loaded = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'load' } })
+      const connection = loaded.payload.connection
+      const scope = {
+        easyOrigin: connection.easyOrigin,
+        operatorId: connection.operatorId,
+        easyTabId: connection.easyTabId,
+        connectionVersion: connection.connectionVersion
+      }
+      const query = { caseVolume: 'E2E-REVOKE', pageIndex: 1, pageSize: 20 }
+      const first = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'forward', message: { type: 'SEARCH_FILES', payload: { query } } } })
+      const data = first.payload.forwarded && first.payload.forwarded.payload && first.payload.forwarded.payload.data
+      const sessionId = data && data.querySessionId
+      const planned = await chrome.runtime.sendMessage({
+        type: 'WORKSPACE',
+        payload: {
+          action: 'createTaskPlan',
+          queryTemplateVersion: 0,
+          expectedScope: scope,
+          files: [{
+            fileId: 'file-revoke-a',
+            fileName: '文件A.pdf',
+            fileDescription: '专利证书',
+            customerName: '测试客户',
+            caseVolume: 'E2E-REVOKE',
+            querySessionId: sessionId
+          }]
+        }
+      })
+      const taskId = planned.payload.createdTask && planned.payload.createdTask.taskId
+      const before = taskId ? await chrome.runtime.sendMessage({ type: 'GET_TASK', payload: { origin: connection.easyOrigin, operatorId: connection.operatorId, taskId } }) : null
+      const fetchedAt = before && before.payload.task && before.payload.task.verifiedSelection && before.payload.task.verifiedSelection[0] && before.payload.task.verifiedSelection[0].fetchedAt
+      const second = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'forward', message: { type: 'SEARCH_FILES', payload: { query, continuation: { querySessionId: sessionId } } } } })
+      const after = taskId ? await chrome.runtime.sendMessage({ type: 'GET_TASK', payload: { origin: connection.easyOrigin, operatorId: connection.operatorId, taskId } }) : null
+      const evidence = after && after.payload.currentEvidence
+      return {
+        planOk: planned.payload.ok,
+        secondOk: second.payload.ok,
+        taskId,
+        fetchedAt,
+        kept: after && after.payload.task && after.payload.task.verifiedSelection && after.payload.task.verifiedSelection[0] && after.payload.task.verifiedSelection[0].fetchedAt,
+        reason: evidence && evidence.reason,
+        trust: evidence && evidence.currentTrust,
+        message: evidence && evidence.message
+      }
+    })
+    assert.equal(revoked.planOk, true)
+    assert.equal(revoked.secondOk, true)
+    assert.equal(revoked.reason, 'FILE_REMOVED')
+    assert.equal(revoked.trust, false)
+    assert.equal(revoked.kept, revoked.fetchedAt)
+    assert.match(revoked.message, /不再包含/)
+    assert.equal(mailCalls(), beforeRevoke)
+    await app.getByRole('link', { name: '首页' }).click()
+    await app.getByRole('link', { name: '发文任务' }).click()
+    await app.getByRole('button', { name: new RegExp(revoked.taskId) }).click()
+    await app.getByText(/不再包含/).waitFor()
+    assert.equal(mailCalls(), beforeRevoke)
     const beforeMail = mailCalls()
     await app.getByRole('link', { name: '接口验收' }).click()
     await app.getByLabel('接口').selectOption('GetMailInfo')

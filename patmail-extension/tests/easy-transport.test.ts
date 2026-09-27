@@ -81,6 +81,25 @@ describe('EASY 受限传输', () => {
     }
   })
 
+  it('retries a readonly 502 and keeps a write 502 to a single request', async () => {
+    let reads = 0
+    const read: typeof fetch = async () => {
+      reads += 1
+      return reads === 1 ? new Response('gateway down', { status: 502 }) : jsonResponse({ ClientInfo: { IsLogin: true } })
+    }
+    const recovered = await new EasyTransport('http://183.36.43.66:88', { fetcher: read }).post('session', sessionParams())
+    expect(recovered.ok).toBe(true)
+    expect(reads).toBe(2)
+    let writes = 0
+    const write: typeof fetch = async () => {
+      writes += 1
+      return new Response('gateway down', { status: 502 })
+    }
+    const blocked = await new EasyTransport('http://183.36.43.66:88', { fetcher: write }).post('mailCustomer', new URLSearchParams({ Call: 'MailCustomer' }))
+    expect(blocked).toMatchObject({ ok: false, error: { code: 'HTTP_ERROR', status: 502 } })
+    expect(writes).toBe(1)
+  })
+
   it('detects a login redirect even when the final HTTP status is 200', async () => {
     const fetcher: typeof fetch = async () => jsonResponse(
       { anything: true }, 200, 'http://183.36.43.66:88/Login.aspx'

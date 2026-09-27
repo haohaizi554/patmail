@@ -4,6 +4,7 @@ export const nav = [
   { name: '发文规则与映射配置', path: 'rule' },
   { name: '客户管理', path: 'users' },
   { name: '文件管理', path: 'file' },
+  { name: '期限监控', path: 'limit' },
   { name: '发文记录', path: 'record' },
   { name: '统计报表', path: 'chart' }
 ]
@@ -56,6 +57,11 @@ export const files = [
   { ext: 'pptx', name: '技术方案说明.pptx', brand: 'netease', customer: '网易（杭州）网络有限公司', desc: '技术交底书', type: '客户发文', time: '2024-04-21 17:22', status: '待处理', size: '3.1 MB' },
   { ext: 'pdf', name: '检索报告.pdf', brand: 'pingan', customer: '中国平安科技（集团）有限公司', desc: '专利检索报告', type: '内部文件', time: '2024-04-21 16:08', status: '已归档', size: '2.2 MB' },
   { ext: 'docx', name: '审查意见答复.docx', brand: 'xiaomi', customer: '小米科技有限责任公司', desc: '审查意见答复', type: '客户发文', time: '2024-04-21 15:36', status: '待处理', size: '540 KB' }
+]
+
+export const limitRows = [
+  { procId: 'demo-1', caseVolume: 'PA示例001', caseName: '电池模组结构', ctrlProc: '新申请', customerName: '宁德时代新能源科技股份有限公司', appNo: '202410000001.1', docDate: '2026-08-01', intDueDate: '2026-09-15', cusDueDate: '2026-09-20', legalDueDate: '2026-10-01' },
+  { procId: 'demo-2', caseVolume: 'PA示例002', caseName: '充电控制方法', ctrlProc: '答复审查意见', customerName: '华为技术有限公司', appNo: '202410000002.8', docDate: '2026-08-12', intDueDate: '2026-09-18', cusDueDate: '2026-09-25', legalDueDate: '2026-10-08' }
 ]
 
 export const records = [

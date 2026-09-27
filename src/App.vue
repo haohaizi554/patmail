@@ -6,6 +6,7 @@ import TaskPage from './pages/TaskPage.vue'
 import RulePage from './pages/RulePage.vue'
 import CustomerPage from './pages/CustomerPage.vue'
 import FilePage from './pages/FilePage.vue'
+import LimitPage from './pages/LimitPage.vue'
 import RecordPage from './pages/RecordPage.vue'
 import StatsPage from './pages/StatsPage.vue'
 import FloatPage from './pages/FloatPage.vue'
@@ -16,6 +17,7 @@ const views = {
   发文规则与映射配置: RulePage,
   客户管理: CustomerPage,
   文件管理: FilePage,
+  期限监控: LimitPage,
   发文记录: RecordPage,
   统计报表: StatsPage,
   浮窗: FloatPage

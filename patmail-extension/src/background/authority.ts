@@ -1,4 +1,7 @@
 import type { LiveAcceptanceRecord } from '../automation/acceptance-runner'
+import { evaluateCurrentTaskEvidence, type EvidenceAccount } from '../automation/evidence-evaluation'
+import { liveQuerySessions } from '../automation/file-search-snapshot'
+import { buildStagePlans } from '../automation/stage-plan'
 import { downgradeClientAcceptance, downgradeClientEvidence } from '../automation/acceptance-trust'
 import { type EvidenceRepository, type EvidenceSource, type StoredEvidence } from '../automation/evidence-store'
 import { ExecutionLedger } from '../automation/ledger'
@@ -13,6 +16,7 @@ export interface AuthorityDeps {
   ledger: ExecutionLedger | null
   tasks: TaskStore | null
   evidence: EvidenceRepository
+  account?: EvidenceAccount | null
 }
 
 function summary(task: AutomationTask): TaskSummary {
@@ -88,7 +92,24 @@ export async function handleAuthorityMessage(message: AppMessage, deps: Authorit
     if (message.type === MessageType.ValidateTaskMetadata) {
       return { type: MessageType.TaskResult, payload: { ok: Boolean(task), message: task ? '' : '没有这个任务。', tasks: [], task: null } }
     }
-    return { type: MessageType.TaskResult, payload: { ok: Boolean(task), message: task ? '' : '没有这个任务。', tasks: [], task: task as unknown as Record<string, unknown> | null } }
+    if (!task) return { type: MessageType.TaskResult, payload: { ok: false, message: '没有这个任务。', tasks: [], task: null } }
+    const bound = deps.account && deps.account.easyOrigin === task.origin && deps.account.operatorId === task.operatorId
+      ? deps.account
+      : { easyOrigin: task.origin, operatorId: task.operatorId }
+    const now = new Date().toISOString()
+    const currentEvidence = await evaluateCurrentTaskEvidence(task, bound, liveQuerySessions(), now)
+    const stagePlans = buildStagePlans(task, 'UNKNOWN', { now, currentAccount: bound, currentEvidenceState: currentEvidence })
+    return {
+      type: MessageType.TaskResult,
+      payload: {
+        ok: true,
+        message: '',
+        tasks: [],
+        task: task as unknown as Record<string, unknown>,
+        currentEvidence: currentEvidence as unknown as Record<string, unknown>,
+        stagePlans: stagePlans as unknown as Record<string, unknown>[]
+      }
+    }
   }
   if (message.type === MessageType.SaveTask) {
     const task = message.payload.task as unknown as AutomationTask

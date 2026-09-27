@@ -108,7 +108,16 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
       }
       scoped = next
     }
-    const response = await handleAuthorityMessage(scoped, { ledger, tasks, evidence })
+    const response = await handleAuthorityMessage(scoped, {
+      ledger,
+      tasks,
+      evidence,
+      account: {
+        easyOrigin: connection.context.easyOrigin,
+        operatorId: connection.context.operatorId,
+        ...(connection.context.easyTabId == null ? {} : { easyTabId: connection.context.easyTabId, connectionVersion: connection.context.connectionVersion })
+      }
+    })
     sendResponse(response ?? { type: MessageType.Error, payload: { message: '后台没有处理这条消息。' } })
   })()
   return true

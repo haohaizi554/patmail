@@ -6,10 +6,10 @@ import { LIVE_EASY_ACCEPTANCE } from '../automation/easy-acceptance'
 import { exportDiagnostic } from '../automation/logger'
 import { isConfirmedOperator } from '../automation/operator'
 import { recoverTask } from '../automation/recovery'
-import { evaluateTaskEvidence } from '../automation/evidence-evaluation'
+import { evaluateTaskEvidence, type CurrentEvidenceEvaluation } from '../automation/evidence-evaluation'
 import { buildStagePlans } from '../automation/stage-plan'
 import { validateTask } from '../automation/task-validator'
-import type { AutomationTask } from '../automation/types'
+import type { AutomationStagePlan, AutomationTask } from '../automation/types'
 import { sendToBackground } from '../utils/runtime'
 import { EASY_MAIL_WRITES_ENABLED } from '../mail/easy/gate'
 import type { CustomerQueryProfile } from '../customer/types'
@@ -44,8 +44,13 @@ const acceptance = LIVE_EASY_ACCEPTANCE
 const items = computed(() => checked.value?.items ?? [])
 const active = computed(() => items.value.find(item => item.itemId === selectedItem.value) ?? items.value[0] ?? null)
 const recovery = computed(() => checked.value ? recoverTask(checked.value) : null)
-const evidenceNow = computed(() => checked.value ? evaluateTaskEvidence(checked.value, { easyOrigin: props.businessOrigin, operatorId: props.userId }, new Date().toISOString()) : null)
-const blockedPlans = computed(() => checked.value ? buildStagePlans(checked.value, 'UNKNOWN', { now: new Date().toISOString(), currentAccount: { easyOrigin: props.businessOrigin, operatorId: props.userId } }).filter(item => item.itemId === (active.value?.itemId ?? '') && !item.canExecute).slice(0, 8) : [])
+const liveEvidence = ref<CurrentEvidenceEvaluation | null>(null)
+const livePlans = ref<AutomationStagePlan[] | null>(null)
+const evidenceNow = computed(() => liveEvidence.value ?? (checked.value ? evaluateTaskEvidence(checked.value, { easyOrigin: props.businessOrigin, operatorId: props.userId }, new Date().toISOString()) : null))
+const blockedPlans = computed(() => {
+  const plans = livePlans.value ?? (checked.value ? buildStagePlans(checked.value, 'UNKNOWN', { now: new Date().toISOString(), currentAccount: { easyOrigin: props.businessOrigin, operatorId: props.userId }, ...(liveEvidence.value ? { currentEvidenceState: liveEvidence.value } : {}) }) : [])
+  return plans.filter(item => item.itemId === (active.value?.itemId ?? '') && !item.canExecute).slice(0, 8)
+})
 const customerLabel = computed(() => checked.value?.customers.map(item => item.name).join('、') || checked.value?.customerName || '未绑定')
 
 const identityReady = computed(() => isConfirmedOperator(props.userId))
@@ -74,6 +79,8 @@ onMounted(() => { void reload() })
 watch(() => props.userId, () => {
   checked.value = null
   persisted.value = false
+  liveEvidence.value = null
+  livePlans.value = null
   history.value = []
   void reload()
 })
@@ -86,6 +93,8 @@ async function plan(): Promise<void> {
     return
   }
   const task = validateTask(result.task, input)
+  liveEvidence.value = null
+  livePlans.value = null
   checked.value = task
   selectedItem.value = result.task.items[0]?.itemId ?? ''
   if (!identityReady.value) {
@@ -123,9 +132,29 @@ async function plan(): Promise<void> {
   }
 }
 
+function applyBackgroundReview(payload: { task: Record<string, unknown> | null; currentEvidence?: Record<string, unknown> | null; stagePlans?: Record<string, unknown>[] }): AutomationTask | null {
+  if (!payload.task) return null
+  const evidence = payload.currentEvidence as unknown as CurrentEvidenceEvaluation | null | undefined
+  liveEvidence.value = evidence ?? null
+  livePlans.value = (payload.stagePlans as unknown as AutomationStagePlan[] | undefined) ?? null
+  return validateTask(payload.task as unknown as AutomationTask, currentInput(), evidence ?? undefined)
+}
+
 async function recheck(): Promise<void> {
   if (!checked.value) return
-  checked.value = validateTask(checked.value, currentInput())
+  if (persisted.value) {
+    const response = await sendToBackground({
+      type: MessageType.GetTask,
+      payload: { origin: props.businessOrigin, operatorId: props.userId, taskId: checked.value.taskId }
+    })
+    if (response?.type === MessageType.TaskResult && response.payload.task) {
+      const task = applyBackgroundReview(response.payload)
+      if (task) checked.value = task
+      message.value = task?.status === 'UNKNOWN' ? '结果未知，只做只读核对，没有改回可执行。' : task?.issues.some(item => item.code === 'CURRENT_EVIDENCE_INVALID' || item.code === 'EVIDENCE_EXPIRED') ? (liveEvidence.value?.message || '当前查询来源需要重新核验。') : task?.status === 'STALE' ? '当前文件或规则内容已经变化，旧计划不能继续。' : '已按当前配置重新核对。'
+      return
+    }
+  }
+  checked.value = validateTask(checked.value, currentInput(), liveEvidence.value ?? undefined)
   message.value = checked.value.status === 'UNKNOWN' ? '结果未知，只做只读核对，没有改回可执行。' : checked.value.status === 'STALE' ? '当前文件或规则内容已经变化，旧计划不能继续。' : '已按当前配置重新核对。'
 }
 
@@ -139,7 +168,8 @@ async function openHistory(item: TaskSummary): Promise<void> {
     message.value = '没有读到这个任务。'
     return
   }
-  const task = validateTask(response.payload.task as unknown as AutomationTask, currentInput())
+  const task = applyBackgroundReview(response.payload)
+  if (!task) return
   checked.value = task
   persisted.value = true
   selectedItem.value = task.items[0]?.itemId ?? ''
@@ -202,6 +232,7 @@ async function diagnose(): Promise<void> {
       <p class="hint">客户 {{ customerLabel }} · 文件 {{ checked.selectedFiles.length }} · 预计邮件 {{ checked.items.length }}</p>
       <p class="hint">状态 {{ checked.status }} · 创建 {{ checked.createdAt }} · 最近核对 {{ checked.updatedAt }}</p>
       <p v-if="evidenceNow?.requiresRevalidation" class="hint" role="status">{{ evidenceNow.message }}</p>
+      <p v-for="file in evidenceNow?.requiresRevalidation ? (liveEvidence?.files ?? []) : []" :key="file.fileId" class="hint">文件 {{ file.historical.fileName }} 曾在 {{ file.historical.fetchedAt }} 被查询到。历史记录仍保留。</p>
       <label v-if="items.length">分组
         <select v-model="selectedItem">
           <option v-for="item in items" :key="item.itemId" :value="item.itemId">{{ item.mailTypeName || '未映射' }} · {{ item.status }}</option>

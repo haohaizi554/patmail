@@ -3,6 +3,8 @@ import { isFileSearchBusinessField, type FileSearchQuery } from './file-search-p
 import type { DictionarySnapshot } from './dictionaries'
 import type { HistoryQueryDetail, HistoryQueryOption } from './query-history'
 import type { FileSearchResult, PatentFile } from './file-search-types'
+import { isLimitMonitorType, type LimitMonitorQuery } from './limit-monitor-params'
+import type { LimitMonitorResult, LimitMonitorRow } from './limit-monitor-types'
 import type { SessionSummary } from './session'
 import type { ApiError, ApiResult } from './types'
 
@@ -82,6 +84,33 @@ export function isSessionResult(value: unknown): value is ApiResult<SessionSumma
 
 export function isFileSearchApiResult(value: unknown): value is ApiResult<FileSearchResult> {
   return isApiResult(value, isFileSearchResult)
+}
+
+const LIMIT_QUERY_KEYS = new Set(['type', 'caseVolume', 'applicationNo', 'customerName', 'ctrlProcId', 'pageIndex', 'pageSize'])
+
+export function isLimitMonitorQuery(value: unknown): value is LimitMonitorQuery {
+  if (!isRecord(value) || Object.keys(value).some(key => !LIMIT_QUERY_KEYS.has(key))) return false
+  if (typeof value.type !== 'string' || !isLimitMonitorType(value.type)) return false
+  return Number.isSafeInteger(value.pageIndex) && Number(value.pageIndex) >= 1 &&
+    Number.isSafeInteger(value.pageSize) && Number(value.pageSize) >= 1 && Number(value.pageSize) <= 100 &&
+    ['caseVolume', 'applicationNo', 'customerName', 'ctrlProcId'].every(key => optionalString(value[key]))
+}
+
+function isLimitRow(value: unknown): value is LimitMonitorRow {
+  return isRecord(value) && ['procId', 'caseId', 'caseVolume', 'caseName', 'ctrlProc', 'customerName', 'appNo', 'docDate', 'intDueDate', 'cusDueDate', 'legalDueDate']
+    .every(key => typeof value[key] === 'string')
+}
+
+function isLimitResult(value: unknown): value is LimitMonitorResult {
+  return isRecord(value) && Array.isArray(value.items) && value.items.every(isLimitRow) &&
+    Number.isSafeInteger(value.total) && Number(value.total) >= 0 &&
+    Number.isSafeInteger(value.pageIndex) && Number(value.pageIndex) >= 1 &&
+    Number.isSafeInteger(value.pageSize) && Number(value.pageSize) >= 1 &&
+    Number.isSafeInteger(value.totalPages) && Number(value.totalPages) >= 0
+}
+
+export function isLimitMonitorApiResult(value: unknown): value is ApiResult<LimitMonitorResult> {
+  return isApiResult(value, isLimitResult)
 }
 
 function isHistoryOption(value: unknown): value is HistoryQueryOption {

@@ -12,7 +12,9 @@
     "test": "vitest run",
     "test:e2e": "node tests/extension.e2e.mjs",
     "pack:source": "node scripts/pack-source.mjs",
-    "pack:delivery": "node scripts/pack-delivery.mjs"
+    "pack:delivery": "node scripts/pack-delivery.mjs",
+    "verify:archive": "node scripts/verify-archive.mjs",
+    "live:readonly": "node scripts/live-readonly.mjs"
   },
   "dependencies": {
     "vue": "^3.5.13"

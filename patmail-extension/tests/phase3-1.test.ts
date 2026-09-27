@@ -152,4 +152,32 @@ describe('Phase 3.1 连接、规则与任务来源', () => {
     }
     expect(emptyConnection().connectionVersion).toBe(0)
   })
+
+  it('returns the readonly probe fields with the acceptance record', async () => {
+    const caseTypeId = guid('cccccccc')
+    const runtime = host([
+      session(userA),
+      session(userA),
+      {
+        type: MessageType.AcceptanceResult,
+        payload: {
+          records: [],
+          probe: {
+            httpStatus: 200,
+            sessionOk: true,
+            fields: { caseTypeCount: '7', caseTypeId, caseTypeLabel: '专利' },
+            shape: 'object(CaseType,ClientInfo)'
+          }
+        }
+      }
+    ])
+    const bound = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'bind', tabId: 3 } }, runtime)
+    if (bound.type !== MessageType.WorkspaceResult) throw new Error('bind')
+    const result = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'runAcceptance', call: 'IPGetBasicData' } }, runtime)
+    if (result.type !== MessageType.WorkspaceResult) throw new Error('acceptance')
+    expect(result.payload.forwarded?.type).toBe(MessageType.AcceptanceResult)
+    if (result.payload.forwarded?.type !== MessageType.AcceptanceResult) return
+    expect(result.payload.forwarded.payload.probe?.fields.caseTypeId).toBe(caseTypeId)
+    expect(result.payload.forwarded.payload.probe?.fields.caseTypeLabel).toBe('专利')
+  })
 })

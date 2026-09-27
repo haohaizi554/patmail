@@ -7,7 +7,9 @@ import type { MailRuleBundle } from '../mail/types'
 import { isQueryGuid, isQueryTemplate } from '../query/query-validator'
 import type { QueryTemplate } from '../query/query-types'
 import { isEasyConnection, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope } from './connection'
-import { isDictionaryResult, isFileSearchApiResult, isFileSearchQuery, isHistoryDetailResult, isHistoryListResult, isSessionResult } from '../api/message-guards'
+import { isDictionaryResult, isFileSearchApiResult, isFileSearchQuery, isHistoryDetailResult, isHistoryListResult, isLimitMonitorApiResult, isLimitMonitorQuery, isSessionResult } from '../api/message-guards'
+import type { LimitMonitorQuery } from '../api/limit-monitor-params'
+import type { LimitMonitorResult } from '../api/limit-monitor-types'
 import type { DictionaryLoadRequest, DictionarySnapshot } from '../api/dictionaries'
 import type { FileSearchQuery } from '../api/file-search-params'
 import type { FileSearchResult } from '../api/file-search-types'
@@ -42,6 +44,8 @@ export const MessageType = {
   SessionCheckCancelled: 'SESSION_CHECK_CANCELLED',
   SearchFiles: 'SEARCH_FILES',
   SearchFilesResult: 'SEARCH_FILES_RESULT',
+  SearchLimitMonitor: 'SEARCH_LIMIT_MONITOR',
+  SearchLimitMonitorResult: 'SEARCH_LIMIT_MONITOR_RESULT',
   CancelFileSearch: 'CANCEL_FILE_SEARCH',
   FileSearchCancelled: 'FILE_SEARCH_CANCELLED',
   ListHistoryQueries: 'LIST_HISTORY_QUERIES',
@@ -98,6 +102,7 @@ export type ContentRequest =
   | Request<'SCAN_PAGE'> | Request<'GET_PAGE_INFO'> | Request<'SHOW_PANEL'> | Request<'PING'>
   | Request<'CHECK_SESSION'> | Request<'CANCEL_SESSION_CHECK'>
   | Request<'CANCEL_FILE_SEARCH'> | Response<'SEARCH_FILES', { query: FileSearchQuery; continuation?: { querySessionId: string } }>
+  | Response<'SEARCH_LIMIT_MONITOR', { query: LimitMonitorQuery }>
   | Response<'LIST_HISTORY_QUERIES', { force: boolean }>
   | Response<'GET_HISTORY_QUERY', { queryId: string }>
   | Response<'LOAD_DICTIONARY', DictionaryLoadRequest>
@@ -150,7 +155,7 @@ export type BackgroundResponse =
   | Response<'PONG', { ok: true }>
   | Response<'EXECUTION_LEASE', ExecutionLeasePayload>
   | Response<'EXECUTION_RECOVERED', { leases: ExecutionLeasePayload['lease'][] }>
-  | Response<'TASK_RESULT', { ok: boolean; message: string; tasks: TaskSummary[]; task: Record<string, unknown> | null }>
+  | Response<'TASK_RESULT', { ok: boolean; message: string; tasks: TaskSummary[]; task: Record<string, unknown> | null; currentEvidence?: Record<string, unknown> | null; stagePlans?: Record<string, unknown>[] }>
   | Response<'ACCEPTANCE_RESULT', { records: Record<string, unknown>[]; probe?: { httpStatus: number; sessionOk: boolean; fields: Record<string, string>; shape: string } }>
   | Response<'EVIDENCE_RESULT', { records: Record<string, unknown>[] }>
   | Response<'WORKSPACE_RESULT', WorkspaceResultPayload>
@@ -221,6 +226,7 @@ export type ContentResponse =
   | Response<'SESSION_RESULT', ApiResult<SessionSummary>>
   | Response<'SESSION_CHECK_CANCELLED', { ok: true }>
   | Response<'SEARCH_FILES_RESULT', ApiResult<FileSearchResult>>
+  | Response<'SEARCH_LIMIT_MONITOR_RESULT', ApiResult<LimitMonitorResult>>
   | Response<'FILE_SEARCH_CANCELLED', { ok: true }>
   | Response<'HISTORY_QUERIES_RESULT', ApiResult<HistoryQueryOption[]>>
   | Response<'HISTORY_QUERY_RESULT', ApiResult<HistoryQueryDetail>>
@@ -310,6 +316,8 @@ export function isMessage(value: unknown): value is AppMessage {
     case MessageType.SearchFiles:
       return isRecord(value.payload) && isFileSearchQuery(value.payload.query) && isSearchContinuation(value.payload.continuation) &&
         (Object.keys(value.payload).length === 1 || (Object.keys(value.payload).length === 2 && value.payload.continuation !== undefined))
+    case MessageType.SearchLimitMonitor:
+      return isRecord(value.payload) && isLimitMonitorQuery(value.payload.query) && Object.keys(value.payload).length === 1
     case MessageType.ScanResult:
       return isPageSnapshot(value.payload)
     case MessageType.PageInfo:
@@ -323,6 +331,8 @@ export function isMessage(value: unknown): value is AppMessage {
       return isSessionResult(value.payload)
     case MessageType.SearchFilesResult:
       return isFileSearchApiResult(value.payload)
+    case MessageType.SearchLimitMonitorResult:
+      return isLimitMonitorApiResult(value.payload)
     case MessageType.HistoryQueriesResult:
       return isHistoryListResult(value.payload)
     case MessageType.HistoryQueryResult:
@@ -362,6 +372,7 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.ShowPanel || value.type === MessageType.Ping ||
     value.type === MessageType.CheckSession || value.type === MessageType.CancelSessionCheck ||
     value.type === MessageType.SearchFiles || value.type === MessageType.CancelFileSearch ||
+    value.type === MessageType.SearchLimitMonitor ||
     value.type === MessageType.ListHistoryQueries || value.type === MessageType.GetHistoryQuery ||
     value.type === MessageType.LoadDictionary || value.type === MessageType.CreateEasyMail ||
     value.type === MessageType.SaveEasyMail || value.type === MessageType.FindMailExecution ||
@@ -372,7 +383,7 @@ export function isContentRequest(value: unknown): value is ContentRequest {
   )
 }
 
-const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
+const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'SEARCH_LIMIT_MONITOR', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
 
 function isSearchContinuation(value: unknown): boolean {
   if (value === undefined) return true

@@ -1,16 +1,19 @@
 import { isQueryGuid } from '../query/query-validator'
-import { evaluateTaskEvidence } from './evidence-evaluation'
+import { evaluateTaskEvidence, type CurrentEvidenceEvaluation } from './evidence-evaluation'
 import { buildQueryDependencies, sameQueryDependencies } from './query-dependency'
 import { customerIdentities } from './snapshot'
 import { taskFingerprint, type TaskBuildInput } from './task-builder'
 import type { AutomationTask } from './types'
 
-export function validateTask(task: AutomationTask, current: TaskBuildInput): AutomationTask {
+export function validateTask(task: AutomationTask, current: TaskBuildInput, live?: CurrentEvidenceEvaluation): AutomationTask {
   const now = current.now ?? new Date().toISOString()
   const evidence = evaluateTaskEvidence(task, { easyOrigin: current.origin, operatorId: current.operatorId }, now)
-  const issues = task.issues.filter(item => item.code !== 'EVIDENCE_EXPIRED' && item.code !== 'EVIDENCE_REVALIDATION_REQUIRED')
-  if (evidence.freshness === 'EXPIRED') issues.push({ code: 'EVIDENCE_EXPIRED', message: evidence.message, itemId: '' })
+  const issues = task.issues.filter(item => item.code !== 'EVIDENCE_EXPIRED' && item.code !== 'EVIDENCE_REVALIDATION_REQUIRED' && item.code !== 'CURRENT_EVIDENCE_INVALID')
+  if (live && !live.currentTrust && live.requiresRevalidation && live.message) {
+    issues.push({ code: live.reason === 'EVIDENCE_EXPIRED' ? 'EVIDENCE_EXPIRED' : 'CURRENT_EVIDENCE_INVALID', message: live.message, itemId: '' })
+  } else if (evidence.freshness === 'EXPIRED') issues.push({ code: 'EVIDENCE_EXPIRED', message: evidence.message, itemId: '' })
   else if (evidence.requiresRevalidation && evidence.message) issues.push({ code: 'EVIDENCE_REVALIDATION_REQUIRED', message: evidence.message, itemId: '' })
+  const evidenceStale = Boolean(live && !live.currentTrust && live.requiresRevalidation)
   if (task.origin !== current.origin || task.operatorId !== current.operatorId) {
     issues.push({ code: 'ACCOUNT_MISMATCH', message: '任务不能跨账号或跨站点复用。', itemId: '' })
   }
@@ -47,18 +50,18 @@ export function validateTask(task: AutomationTask, current: TaskBuildInput): Aut
       }
     }
   }
-  const sent = task.status === 'UNKNOWN' || task.readonly || task.checkpoints.some(item => item.requestSent)
+  const sent = task.status === 'UNKNOWN' || task.readonly || task.checkpoints.some(item => item.requestSent) || task.items.some(item => item.easyMailId)
   if (sent) {
-    const dependencyChanged = issues.some(item => item.code === 'STALE_TASK' || item.code === 'LEGACY_DEPENDENCY_UNKNOWN' || item.code === 'ACCOUNT_MISMATCH')
+    const dependencyChanged = issues.some(item => item.code === 'STALE_TASK' || item.code === 'LEGACY_DEPENDENCY_UNKNOWN' || item.code === 'ACCOUNT_MISMATCH' || item.code === 'CURRENT_EVIDENCE_INVALID' || item.code === 'EVIDENCE_EXPIRED')
     return {
       ...task,
       issues,
-      needsRevalidation: dependencyChanged || task.needsRevalidation === true,
+      needsRevalidation: dependencyChanged || evidenceStale || task.needsRevalidation === true,
       status: 'UNKNOWN',
       readonly: true,
       updatedAt: current.now ?? new Date().toISOString()
     }
   }
-  const stale = issues.some(item => item.code === 'STALE_TASK' || item.code === 'ACCOUNT_MISMATCH' || item.code === 'SESSION_USER')
+  const stale = evidenceStale || issues.some(item => item.code === 'STALE_TASK' || item.code === 'ACCOUNT_MISMATCH' || item.code === 'SESSION_USER')
   return { ...task, issues, status: stale ? 'STALE' : task.status, updatedAt: current.now ?? new Date().toISOString() }
 }
