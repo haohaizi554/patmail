@@ -26,6 +26,7 @@ const applicationNo = ref('')
 const customerName = ref('')
 const fileName = ref('')
 const pageSize = ref(20)
+const querySessionId = ref('')
 const searchState = ref<'idle' | 'loading' | 'success' | 'empty' | 'error'>('idle')
 const searchMessage = ref('')
 const result = ref<FileSearchResult | null>(null)
@@ -125,7 +126,7 @@ function formQuery(): FileSearchQuery {
   }
 }
 
-async function executeSearch(query: FileSearchQuery): Promise<void> {
+async function executeSearch(query: FileSearchQuery, run: 'start' | 'continue' = 'start'): Promise<void> {
   if (!bridge || !canSearch.value) return
   const resolvedEnough = query.resolvedFields ? assessQueryScope(query.resolvedFields).sufficient : false
   if (!resolvedEnough && ![query.caseVolume, query.applicationNo, query.customerName, query.fileName, query.fileDescriptionId].some(value => value?.trim())) {
@@ -142,7 +143,8 @@ async function executeSearch(query: FileSearchQuery): Promise<void> {
   searchMessage.value = ''
   result.value = null
   try {
-    const response = await bridge.request({ type: MessageType.SearchFiles, payload: { query } })
+    const continuation = run === 'continue' && querySessionId.value ? { querySessionId: querySessionId.value } : undefined
+    const response = await bridge.request({ type: MessageType.SearchFiles, payload: continuation ? { query, continuation } : { query } })
     if (current !== generation) return
     if (response.type !== MessageType.SearchFilesResult) {
       searchState.value = 'error'
@@ -158,6 +160,8 @@ async function executeSearch(query: FileSearchQuery): Promise<void> {
       return
     }
     result.value = response.payload.data
+    if (response.payload.data.querySessionId) querySessionId.value = response.payload.data.querySessionId
+    if (run === 'start') selected.value = {}
     searchState.value = result.value.total === 0 ? 'empty' : 'success'
     void showResults()
   } catch {
@@ -168,11 +172,11 @@ async function executeSearch(query: FileSearchQuery): Promise<void> {
   }
 }
 
-function search(): void { void executeSearch(formQuery()) }
-function refresh(): void { if (lastQuery.value) void executeSearch({ ...lastQuery.value }) }
+function search(): void { void executeSearch(formQuery(), 'start') }
+function refresh(): void { if (lastQuery.value) void executeSearch({ ...lastQuery.value }, 'continue') }
 function changePageSize(): void {
   if (!lastQuery.value || !canSearch.value || ![20, 50, 100].includes(pageSize.value)) return
-  void executeSearch({ ...lastQuery.value, pageIndex: 1, pageSize: pageSize.value })
+  void executeSearch({ ...lastQuery.value, pageIndex: 1, pageSize: pageSize.value }, 'start')
 }
 function startBind(): void {
   const profile = bindCustomers.value.find(item => item.id === bindProfileId.value)
@@ -209,6 +213,7 @@ watch(() => workspace.connection.value.operatorId, (next, previous) => {
   selected.value = {}
   result.value = null
   lastQuery.value = null
+  querySessionId.value = ''
   bindProfileId.value = ''
   bindCustomers.value = []
   showMail.value = false
@@ -218,7 +223,7 @@ function page(delta: number): void {
   if (!lastQuery.value || !result.value || searchState.value === 'loading') return
   const next = lastQuery.value.pageIndex + delta
   if (next < 1 || next > result.value.totalPages) return
-  void executeSearch({ ...lastQuery.value, pageIndex: next })
+  void executeSearch({ ...lastQuery.value, pageIndex: next }, 'continue')
 }
 
 onMounted(() => { void checkSession() })
@@ -266,13 +271,13 @@ onBeforeUnmount(() => {
       <template v-else-if="result">
         <div class="result-toolbar">
           <span>已选 {{ Object.keys(selected).length }} 个文件</span>
-          <button type="button" class="text-button" @click="selected = selectPage(selected, result.items.map(file => toSelectedFile(file)), true)">当前页全选</button>
+          <button type="button" class="text-button" @click="selected = selectPage(selected, result.items.map(file => toSelectedFile(file, undefined, querySessionId)), true)">当前页全选</button>
           <button type="button" class="text-button" @click="selected = {}">清空已选</button>
           <button type="button" class="text-button" @click="showSelected = !showSelected">查看已选</button>
           <button type="button" class="text-button" :disabled="Object.keys(selected).length === 0" @click="showMail = true">生成发文计划</button>
         </div>
         <article v-for="file in result.items" :key="file.fileId" class="file-card">
-          <label class="check-line"><input type="checkbox" :checked="Boolean(selected[file.fileId])" @change="selected = toggleSelected(selected, toSelectedFile(file, selected[file.fileId]?.customerProfileId))" />{{ file.fileName }}</label>
+          <label class="check-line"><input type="checkbox" :checked="Boolean(selected[file.fileId])" @change="selected = toggleSelected(selected, toSelectedFile(file, selected[file.fileId]?.customerProfileId, querySessionId))" />{{ file.fileName }}</label>
           <dl>
             <div><dt>文件描述</dt><dd>{{ file.fileDescription || '暂无' }}</dd></div>
             <div><dt>我方文号</dt><dd>{{ file.caseVolume || '暂无' }}</dd></div>

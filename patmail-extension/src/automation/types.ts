@@ -47,16 +47,38 @@ export interface Checkpoint {
   note: string
 }
 
-/** 文件选择当时能核对到的范围。没有单文件回读契约时 verification 保持未验证。 */
+export type FieldEvidenceSource = 'EASY_SEARCH_RESPONSE' | 'EASY_DICTIONARY' | 'EASY_READBACK' | 'LOCAL_PROFILE' | 'USER_INPUT' | 'UNKNOWN'
+
+/** 关键字段各自的来源。一个文件级标签不能代表全部身份都已验证。 */
+export interface FileFieldEvidence {
+  field: string
+  source: FieldEvidenceSource
+  verified: boolean
+}
+
+export interface TaskIdentityGate {
+  fileSource: 'FILE_SOURCE_UNVERIFIED' | 'SEARCH_RESPONSE_OBSERVED'
+  descriptionIdsVerified: boolean
+  customerIdsVerified: boolean
+  mixedQuerySession: boolean
+}
+
+/** 每一份文件自己的查询来源。任务总等级不能高于其中最低的一份。 */
 export interface VerifiedSelectionSnapshot {
   fileId: string
   querySource: 'FILE_SEARCH_PAGE'
   customerProfileId: string
   fileDescription: string
+  fileName?: string
+  sourceCustomerName?: string
+  caseVolume?: string
+  caseId?: string
+  querySessionId?: string
   fetchedAt: string
   easyOrigin: string
   operatorId: string
-  verification: 'FILE_SOURCE_UNVERIFIED'
+  verification: 'FILE_SOURCE_UNVERIFIED' | 'SEARCH_RESPONSE_OBSERVED'
+  fieldEvidence?: FileFieldEvidence[]
 }
 
 export interface TaskCustomer {
@@ -134,8 +156,11 @@ export interface AutomationTask {
   dependencyState?: 'CURRENT' | 'LEGACY_DEPENDENCY_UNKNOWN'
   /** 每次原子更新加一。缺失时按 1 参与版本比较。 */
   recordVersion?: number
+  needsRevalidation?: boolean
   /** 查询响应观察和按 ID 回读是两种证据，不能混用。 */
   fileSource?: 'FILE_SOURCE_UNVERIFIED' | 'SEARCH_RESPONSE_OBSERVED' | 'FILE_READBACK_VERIFIED'
+  /** 文件、描述 ID、客户 GUID 分开计算，不能用一个标签代表全部已验证。 */
+  identityGate?: TaskIdentityGate
   verifiedSelection?: VerifiedSelectionSnapshot[]
   mailGroups: MailGroup[]
   mailDrafts: MailDraftPreview[]

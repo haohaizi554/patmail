@@ -1,5 +1,5 @@
-import { applyAtomicTaskUpdate, commitTasks, isProtectedTask, readStoredTasks } from './repository'
-import { preservedEvidence } from './task-transition'
+import { applyAtomicTaskUpdate, commitTasks, decideTaskSave, isProtectedTask, readStoredTasks } from './repository'
+import type { TaskSaveResult } from './repository'
 import type { TaskStore } from './task-service'
 import type { AutomationTask } from './types'
 
@@ -41,37 +41,43 @@ export class IndexedTaskStore implements TaskStore {
     })
   }
 
-  async save(task: AutomationTask): Promise<void> {
+  async save(task: AutomationTask): Promise<TaskSaveResult> {
     const key = `${task.origin}\u0000${task.operatorId}`
     const database = await this.open()
-    await new Promise<void>((resolve, reject) => {
+    return await new Promise((resolve, reject) => {
       const tx = database.transaction(STORE, 'readwrite')
       const store = tx.objectStore(STORE)
       const current = store.get(key)
+      let outcome: TaskSaveResult = { ok: false, code: 'INVALID_TRANSITION', message: '任务没有写入存储。' }
       current.onsuccess = () => {
         const stored = readStoredTasks(current.result, task.origin, task.operatorId)
         const prior = stored.tasks.find(item => item.taskId === task.taskId)
-        if (prior && preservedEvidence(prior, task)) return
-        const tasks = commitTasks(stored.tasks, task)
+        const decided = decideTaskSave(prior, task)
+        outcome = decided.result
+        if (!decided.write) return
+        const tasks = commitTasks(stored.tasks, decided.write)
         store.put({ version: 2, tasks: [...stored.opaque, ...tasks], migrations: stored.migrations }, key)
       }
-      tx.oncomplete = () => resolve()
+      current.onerror = () => reject(current.error)
+      tx.oncomplete = () => resolve(outcome)
       tx.onerror = () => reject(tx.error)
     })
   }
 
-  async updateTaskAtomically(origin: string, operatorId: string, taskId: string, expectedVersion: number, transition: (current: AutomationTask) => { ok: true; task: AutomationTask } | { ok: false; message: string }): Promise<{ ok: boolean; message: string; task: AutomationTask | null }> {
+  async updateTaskAtomically(origin: string, operatorId: string, taskId: string, expectedVersion: number, transition: (current: AutomationTask) => { ok: true; task: AutomationTask } | { ok: false; message: string }): Promise<TaskSaveResult> {
     const key = `${origin}\u0000${operatorId}`
     const database = await this.open()
     return await new Promise((resolve, reject) => {
       const tx = database.transaction(STORE, 'readwrite')
       const store = tx.objectStore(STORE)
       const current = store.get(key)
-      let outcome: { ok: boolean; message: string; task: AutomationTask | null } = { ok: false, message: '没有这个任务。', task: null }
+      let outcome: TaskSaveResult = { ok: false, code: 'INVALID_TRANSITION', message: '没有这个任务。' }
       current.onsuccess = () => {
         const stored = readStoredTasks(current.result, origin, operatorId)
         const result = applyAtomicTaskUpdate(stored.tasks, taskId, expectedVersion, transition)
-        outcome = { ok: result.ok, message: result.message, task: result.task }
+        outcome = result.ok && result.task
+          ? { ok: true, task: result.task, recordVersion: result.task.recordVersion ?? 1 }
+          : { ok: false, code: result.code ?? 'INVALID_TRANSITION', message: result.message, current: result.task ?? undefined }
         if (result.ok) store.put({ version: 2, tasks: [...stored.opaque, ...result.tasks], migrations: stored.migrations }, key)
       }
       current.onerror = () => reject(current.error)
@@ -121,22 +127,26 @@ export class SerialTaskStore implements TaskStore {
     })
   }
 
-  save(task: AutomationTask): Promise<void> {
+  save(task: AutomationTask): Promise<TaskSaveResult> {
     return this.run(() => {
       const stored = readStoredTasks(this.raw, task.origin, task.operatorId)
       const prior = stored.tasks.find(item => item.taskId === task.taskId)
-      if (prior && preservedEvidence(prior, task)) return
-      const tasks = commitTasks(stored.tasks, task)
-      this.raw = { version: 2, tasks: [...stored.opaque, ...tasks], migrations: stored.migrations }
+      const decided = decideTaskSave(prior, task)
+      if (decided.write) {
+        const tasks = commitTasks(stored.tasks, decided.write)
+        this.raw = { version: 2, tasks: [...stored.opaque, ...tasks], migrations: stored.migrations }
+      }
+      return decided.result
     })
   }
 
-  updateTaskAtomically(origin: string, operatorId: string, taskId: string, expectedVersion: number, transition: (current: AutomationTask) => { ok: true; task: AutomationTask } | { ok: false; message: string }): Promise<{ ok: boolean; message: string; task: AutomationTask | null }> {
+  updateTaskAtomically(origin: string, operatorId: string, taskId: string, expectedVersion: number, transition: (current: AutomationTask) => { ok: true; task: AutomationTask } | { ok: false; message: string }): Promise<TaskSaveResult> {
     return this.run(() => {
       const stored = readStoredTasks(this.raw, origin, operatorId)
       const result = applyAtomicTaskUpdate(stored.tasks, taskId, expectedVersion, transition)
       if (result.ok) this.raw = { version: 2, tasks: [...stored.opaque, ...result.tasks], migrations: stored.migrations }
-      return { ok: result.ok, message: result.message, task: result.task }
+      if (result.ok && result.task) return { ok: true as const, task: result.task, recordVersion: result.task.recordVersion ?? 1 }
+      return { ok: false as const, code: result.code ?? 'INVALID_TRANSITION', message: result.message, current: result.task ?? undefined }
     })
   }
 
@@ -169,7 +179,7 @@ function emptyStore(): TaskStore {
   return {
     list: async () => [],
     save: async () => { throw new Error('当前环境没有任务存储。') },
-    updateTaskAtomically: async () => ({ ok: false, message: '当前环境没有任务存储。', task: null }),
+    updateTaskAtomically: async () => ({ ok: false as const, code: 'INVALID_TRANSITION' as const, message: '当前环境没有任务存储。' }),
     archive: async () => ({ ok: false, message: '当前环境没有任务存储。' })
   }
 }

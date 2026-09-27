@@ -25,4 +25,6 @@ export interface FileSearchResult {
   pageIndex: number
   pageSize: number
   totalPages: number
+  /** Background 在记录查询运行后写回。不是 EASY 响应字段。 */
+  querySessionId?: string
 }

@@ -1,6 +1,7 @@
 import { isConfirmedOperator } from '../automation/operator'
 import type { TaskStore } from '../automation/task-service'
 import { validateTask } from '../automation/task-validator'
+import type { AutomationTask } from '../automation/types'
 import { CustomerQueryService } from '../customer/service'
 import { BundleCustomerRepository } from '../customer/repository'
 import type { CustomerQueryProfile } from '../customer/types'
@@ -93,19 +94,55 @@ function enqueueBundle<T>(origin: string, operatorId: string, work: () => Promis
   return run
 }
 
-export async function refreshStaleTasks(store: TaskStore, origin: string, operatorId: string, rules: MailRuleBundle, profiles: CustomerQueryProfile[], templates: QueryTemplate[] = []): Promise<number> {
-  const tasks = await store.list(origin, operatorId)
-  let changed = 0
+export interface RevalidationReport {
+  updatedCount: number
+  unchangedCount: number
+  protectedCount: number
+  conflictCount: number
+  errors: string[]
+}
+
+export interface RuleSaveOutcome extends MailRuleBundle {
+  rulesSaved: true
+  tasksRevalidated: boolean
+  pendingRevalidation: boolean
+  revalidation: RevalidationReport
+}
+
+function sameTaskRevision(left: AutomationTask, right: AutomationTask): boolean {
+  return left.status === right.status && left.readonly === right.readonly &&
+    left.needsRevalidation === right.needsRevalidation &&
+    JSON.stringify(left.issues) === JSON.stringify(right.issues)
+}
+
+export async function refreshStaleTasks(store: TaskStore, origin: string, operatorId: string, rules: MailRuleBundle, profiles: CustomerQueryProfile[], templates: QueryTemplate[] = []): Promise<RevalidationReport> {
+  const report: RevalidationReport = { updatedCount: 0, unchangedCount: 0, protectedCount: 0, conflictCount: 0, errors: [] }
+  let tasks: AutomationTask[]
+  try {
+    tasks = await store.list(origin, operatorId)
+  } catch (error) {
+    report.errors.push(error instanceof Error ? error.message : '任务重新核验失败。')
+    return report
+  }
   for (const task of tasks) {
     const next = validateTask(task, {
       origin, operatorId, files: task.selectedFiles, rules, profiles, templates, queryTemplateVersion: task.queryTemplateVersion
     })
-    if (next.status !== task.status || next.readonly !== task.readonly) {
-      await store.save(next)
-      changed += 1
+    if (sameTaskRevision(task, next)) {
+      report.unchangedCount += 1
+      continue
+    }
+    try {
+      const saved = await store.updateTaskAtomically(origin, operatorId, task.taskId, task.recordVersion ?? 1, () => ({ ok: true, task: next }))
+      if (saved.ok) report.updatedCount += 1
+      else if (saved.code === 'VERSION_CONFLICT') report.conflictCount += 1
+      else if (saved.code === 'PROTECTED_EVIDENCE') report.protectedCount += 1
+      else report.errors.push(saved.message)
+    } catch (error) {
+      report.errors.push(error instanceof Error ? error.message : '任务重新核验失败。')
     }
   }
-  return changed
+  return report
 }
 
 const ruleQueues = new Map<string, Promise<unknown>>()
@@ -117,7 +154,7 @@ function enqueue<T>(key: string, work: () => Promise<T>): Promise<T> {
   return run
 }
 
-export async function saveRuleAccount(area: LocalArea, origin: string, operatorId: string, bundle: MailRuleBundle, tasks: TaskStore | null): Promise<MailRuleBundle> {
+export async function saveRuleAccount(area: LocalArea, origin: string, operatorId: string, bundle: MailRuleBundle, tasks: TaskStore | null): Promise<RuleSaveOutcome> {
   if (!isConfirmedOperator(operatorId)) throw new Error('尚未确认 EASY 用户。')
   const key = mailStorageKey(origin, operatorId) ?? `${origin}:${operatorId}`
   return enqueue(key, async () => {
@@ -133,10 +170,11 @@ export async function saveRuleAccount(area: LocalArea, origin: string, operatorI
     draft.subject = bundle.subject
     draft.body = bundle.body
   })
-  if (tasks) {
-    const account = await loadAccount(area, origin, operatorId)
-    await refreshStaleTasks(tasks, origin, operatorId, saved, account.customers, account.templates)
-  }
-  return saved
+  const account = tasks ? await loadAccount(area, origin, operatorId) : null
+  const revalidation = tasks
+    ? await refreshStaleTasks(tasks, origin, operatorId, saved, account?.customers ?? [], account?.templates ?? [])
+    : { updatedCount: 0, unchangedCount: 0, protectedCount: 0, conflictCount: 0, errors: [] }
+  const pendingRevalidation = revalidation.errors.length > 0
+  return { ...saved, rulesSaved: true as const, tasksRevalidated: !pendingRevalidation, pendingRevalidation, revalidation }
   })
 }

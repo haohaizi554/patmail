@@ -6,7 +6,7 @@ import type { MailRuleBundle, SelectedPatentFile } from '../mail/types'
 import { buildQueryDependencies, referencedProfileIds } from './query-dependency'
 import { sha256Hex } from './sha256'
 import { customerIdentities, createTaskSnapshot, emptyIdentity } from './snapshot'
-import type { AutomationIssue, AutomationTask, AutomationTaskItem, CustomerIdentitySnapshot, TaskCustomer, VerifiedSelectionSnapshot } from './types'
+import type { AutomationIssue, AutomationTask, AutomationTaskItem, CustomerIdentitySnapshot, TaskCustomer, TaskIdentityGate, VerifiedSelectionSnapshot } from './types'
 import type { QueryTemplate } from '../query/query-types'
 
 export interface TaskBuildInput {
@@ -18,6 +18,7 @@ export interface TaskBuildInput {
   templates?: QueryTemplate[]
   queryTemplateVersion: number
   fileSource?: 'FILE_SOURCE_UNVERIFIED' | 'SEARCH_RESPONSE_OBSERVED'
+  verifiedSelection?: VerifiedSelectionSnapshot[]
   now?: string
 }
 
@@ -124,16 +125,28 @@ export function buildTask(input: TaskBuildInput): AutomationTask {
   const warning = new Set(['UNRESOLVED_VARIABLE', 'SUBJECT_NEEDS_CONFIRM'])
   const blocked = items.length === 0 || items.some(item => item.status === 'BLOCKED') || issues.some(item => !warning.has(item.code))
   const sole = customers.length === 1 ? customers[0] : undefined
-  const verifiedSelection: VerifiedSelectionSnapshot[] = files.map(file => ({
+  const verifiedSelection: VerifiedSelectionSnapshot[] = input.verifiedSelection ?? files.map(file => ({
     fileId: file.fileId,
-    querySource: 'FILE_SEARCH_PAGE',
+    querySource: 'FILE_SEARCH_PAGE' as const,
     customerProfileId: file.customerProfileId ?? '',
     fileDescription: file.fileDescription,
+    fileName: file.fileName,
+    sourceCustomerName: file.customerName,
+    caseVolume: file.caseVolume,
     fetchedAt: now,
     easyOrigin: input.origin,
     operatorId: input.operatorId,
-    verification: 'FILE_SOURCE_UNVERIFIED'
+    verification: 'FILE_SOURCE_UNVERIFIED' as const
   }))
+  const sessions = new Set(verifiedSelection.map(item => item.querySessionId ?? ''))
+  const observed = verifiedSelection.length > 0 && verifiedSelection.every(item => item.verification === 'SEARCH_RESPONSE_OBSERVED') && sessions.size === 1 && !sessions.has('')
+  const verifiedField = (field: string) => verifiedSelection.length > 0 && verifiedSelection.every(item => item.fieldEvidence?.some(entry => entry.field === field && entry.verified))
+  const identityGate: TaskIdentityGate = {
+    fileSource: observed ? 'SEARCH_RESPONSE_OBSERVED' : 'FILE_SOURCE_UNVERIFIED',
+    descriptionIdsVerified: verifiedField('fileDescriptionId'),
+    customerIdsVerified: verifiedField('customerId'),
+    mixedQuerySession: sessions.size > 1
+  }
   return {
     taskId, name: `${customers.length > 1 ? '多个客户' : sole?.name || '未绑定客户'} · ${input.files.length} 个文件`,
     origin: input.origin, operatorId: input.operatorId,
@@ -145,7 +158,7 @@ export function buildTask(input: TaskBuildInput): AutomationTask {
     queryDependencies: buildQueryDependencies(profiles, input.templates ?? [], referencedProfileIds(files)),
     dependencyState: 'CURRENT',
     recordVersion: 1,
-    fileSource: input.fileSource ?? 'FILE_SOURCE_UNVERIFIED', verifiedSelection,
+    fileSource: observed ? 'SEARCH_RESPONSE_OBSERVED' : 'FILE_SOURCE_UNVERIFIED', identityGate, verifiedSelection,
     mailGroups: grouped.groups, mailDrafts: drafts, status: blocked ? 'BLOCKED' : 'DRY_RUN_COMPLETED',
     createdAt: now, updatedAt: now, checkpoints: [], issues, items
   }

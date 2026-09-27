@@ -134,6 +134,7 @@ describe('Phase 3.4 任务权威、依赖范围与文件来源', () => {
     const [first, second] = await Promise.all([unknown, ready])
     expect(first.ok).toBe(true)
     expect(second.ok).toBe(false)
+    if (second.ok) return
     expect(second.message).toContain('任务版本已变化')
     const kept = (await store.list(origin, userA, true)).find(item => item.taskId === built.taskId)
     expect(kept?.status).toBe('UNKNOWN')
@@ -195,16 +196,17 @@ describe('Phase 3.4 任务权威、依赖范围与文件来源', () => {
       type: MessageType.Workspace,
       payload: { action: 'forward', message: { type: MessageType.SearchFiles, payload: { query: { pageIndex: 1, pageSize: 20 } } } }
     }, runtime)
-    if (searched.type !== MessageType.WorkspaceResult || !searched.payload.ok) throw new Error('search')
+    if (searched.type !== MessageType.WorkspaceResult || !searched.payload.forwarded || searched.payload.forwarded.type !== MessageType.SearchFilesResult || !searched.payload.forwarded.payload.ok) throw new Error('search')
+    const sessionId = searched.payload.forwarded.payload.data.querySessionId
     const planned = await handleWorkspaceMessage({
       type: MessageType.Workspace,
-      payload: { action: 'createTaskPlan', files: [file()], queryTemplateVersion: 0, expectedScope: scope }
+      payload: { action: 'createTaskPlan', files: [{ ...file(), querySessionId: sessionId }], queryTemplateVersion: 0, expectedScope: scope }
     }, runtime)
     if (planned.type !== MessageType.WorkspaceResult) throw new Error('plan')
     expect(planned.payload.createdTask?.fileSource).toBe('SEARCH_RESPONSE_OBSERVED')
     const missing = await handleWorkspaceMessage({
       type: MessageType.Workspace,
-      payload: { action: 'createTaskPlan', files: [{ ...file(), fileId: 'not-in-the-query' }], queryTemplateVersion: 0, expectedScope: scope }
+      payload: { action: 'createTaskPlan', files: [{ ...file(), fileId: 'not-in-the-query', querySessionId: sessionId }], queryTemplateVersion: 0, expectedScope: scope }
     }, runtime)
     if (missing.type !== MessageType.WorkspaceResult) throw new Error('missing')
     expect(missing.payload.createdTask?.fileSource).toBe('FILE_SOURCE_UNVERIFIED')

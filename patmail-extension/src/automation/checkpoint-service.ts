@@ -1,9 +1,10 @@
 import { appendCheckpoint, markRequestSent, markUnknown } from './checkpoint'
 import { STAGES } from './state'
 import type { AutomationTask, StageId } from './types'
+import type { TaskSaveResult } from './repository'
 
 export interface CheckpointSink {
-  save(task: AutomationTask): Promise<void>
+  save(task: AutomationTask): Promise<TaskSaveResult | void>
 }
 
 /** 落盘失败时返回原任务，调用方不得发出写请求。 */
@@ -36,7 +37,9 @@ export class CheckpointService {
 
   private persist(previous: AutomationTask, next: AutomationTask): Promise<{ ok: boolean; task: AutomationTask; reason: string }> {
     return this.sink.save(next).then(
-      () => ({ ok: true, task: next, reason: '' }),
+      result => result && result.ok === false
+        ? { ok: false, task: previous, reason: result.message }
+        : { ok: true, task: result && result.ok ? result.task : next, reason: '' },
       () => ({ ok: false, task: previous, reason: '检查点没有写入，请求不会发出。' })
     )
   }

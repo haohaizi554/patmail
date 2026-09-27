@@ -10,7 +10,8 @@ import type { QueryTemplate } from '../query/query-types'
 import { chooseAppTab, EasyConnectionController, emptyConnection, accountScopeMatches, freezeAccount, sameAccountContext, tabOrigin, type AccountContextSnapshot, type BrowserTabRef, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope } from '../shared/connection'
 import { isMessage, MessageType, type AppMessage, type BackgroundResponse, type CreatedTaskResult } from '../shared/message'
 import { loadAccount, deleteCustomerAccount, deleteQueryTemplateAccount, refreshStaleTasks, saveCustomerAccount, saveQueryTemplateAccount, saveRuleAccount, type LocalArea } from './account-data'
-import { fileSearchFor, provenanceFor, rememberFileSearch, snapshotFromItems } from '../automation/file-search-snapshot'
+import { observeSearchPage, resolveSelectedFiles } from '../automation/file-search-snapshot'
+import { rememberFileTypeTree } from '../automation/file-description-resolver'
 import { planTrustedTask } from '../automation/task-planner'
 import type { AutomationTask } from '../automation/types'
 
@@ -27,6 +28,9 @@ export interface WorkspacePayload {
   appTab: { tabId: number; created: boolean } | null
   createdTask: CreatedTaskResult | null
   contextError?: 'STALE_CONTEXT'
+  rulesSaved?: boolean
+  tasksRevalidated?: boolean
+  pendingRevalidation?: boolean
 }
 
 export function workspaceResult(partial: Partial<WorkspacePayload> & { connection: EasyConnectionContext }): BackgroundResponse {
@@ -42,7 +46,8 @@ export function workspaceResult(partial: Partial<WorkspacePayload> & { connectio
     forwarded: partial.forwarded ?? null,
     appTab: partial.appTab ?? null,
     createdTask: partial.createdTask ?? null,
-    ...(partial.contextError ? { contextError: partial.contextError } : {})
+    ...(partial.contextError ? { contextError: partial.contextError } : {}),
+    ...(partial.rulesSaved !== undefined ? { rulesSaved: partial.rulesSaved, tasksRevalidated: partial.tasksRevalidated, pendingRevalidation: partial.pendingRevalidation } : {})
   }
   return { type: MessageType.WorkspaceResult, payload }
 }
@@ -110,13 +115,20 @@ function staleResult(host: WorkspaceHost): BackgroundResponse {
   })
 }
 
-function rememberObservedSearch(host: WorkspaceHost, response: AppMessage): void {
-  if (response.type !== MessageType.SearchFilesResult || !response.payload.ok) return
-  const data = response.payload.data
-  if (!data || !Array.isArray(data.items)) return
-  const frozen = freezeAccount(host.connection.context)
-  if (!frozen) return
-  rememberFileSearch(snapshotFromItems(frozen, data.items, new Date().toISOString()))
+function rememberObservedSearch(frozen: AccountContextSnapshot, request: AppMessage, response: AppMessage): Promise<{ querySessionId: string } | null> {
+  if (request.type !== MessageType.SearchFiles || response.type !== MessageType.SearchFilesResult || !response.payload.ok || !response.payload.data) return Promise.resolve(null)
+  const continuation = request.payload.continuation
+  return observeSearchPage({
+    scope: frozen,
+    query: request.payload.query,
+    result: response.payload.data,
+    ...(continuation ? { run: { mode: 'continue' as const, querySessionId: continuation.querySessionId } } : { run: { mode: 'start' as const } })
+  }).then(result => result.ok ? { querySessionId: result.session.querySessionId } : null)
+}
+
+function stripSearchContinuation(message: AppMessage): AppMessage {
+  if (message.type !== MessageType.SearchFiles) return message
+  return { type: MessageType.SearchFiles, payload: { query: message.payload.query } }
 }
 
 function createdOf(task: AutomationTask): CreatedTaskResult {
@@ -304,8 +316,22 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
       const frozen = frozenNow()
       const checked = readMailRules(action.bundle, frozen.operatorId)
       if (!checked.writable) return failWrite(checked.warning ?? '发文配置未通过校验。')
-      await saveRuleAccount(host.area, frozen.easyOrigin, frozen.operatorId, checked.bundle, host.tasks)
-      return await finishWrite('发文规则已保存。内容变化的旧任务会标记为过期。')
+      const outcome = await saveRuleAccount(host.area, frozen.easyOrigin, frozen.operatorId, checked.bundle, host.tasks)
+      const message = outcome.pendingRevalidation
+        ? '发文规则已保存。旧任务重新核验没有完成，可以单独重试，不必再次保存规则。'
+        : '发文规则已保存。内容变化的旧任务会标记为过期。'
+      if (!frozenAccount || !sameAccountContext(host.connection.context, frozen)) return staleResult(host)
+      const account = await readAccount(host, frozen)
+      if (!account) return staleResult(host)
+      return workspaceResult({
+        ok: true,
+        message,
+        connection: host.connection.context,
+        rulesSaved: true,
+        tasksRevalidated: outcome.tasksRevalidated,
+        pendingRevalidation: outcome.pendingRevalidation,
+        ...account
+      })
     } catch (error) {
       if (error instanceof StaleContextError) return staleResult(host)
       return failWrite(error instanceof Error ? error.message : '规则没有保存。')
@@ -319,21 +345,31 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
       if (!accountNow.rules || !host.tasks) {
         return workspaceResult({ ok: false, message: '没有可核验的发文规则，任务未保存。', connection: host.connection.context })
       }
-      const observed = fileSearchFor(frozen.easyOrigin, frozen.operatorId)
-      const fileSource = provenanceFor(action.files.map(file => file.fileId), observed, frozen)
+      const resolved = await resolveSelectedFiles(action.files, frozen, { profiles: accountNow.customers })
       const task = planTrustedTask({
         origin: frozen.easyOrigin,
         operatorId: frozen.operatorId,
-        files: action.files,
+        files: resolved.files,
         rules: accountNow.rules,
         profiles: accountNow.customers,
         templates: accountNow.templates,
-        fileSource
+        verifiedSelection: resolved.selections
       })
+      if (resolved.issue === 'MIXED_QUERY_SESSION') {
+        task.issues.push({ code: 'MIXED_QUERY_SESSION', message: '所选文件不属于同一次查询运行。', itemId: '' })
+        if (task.status !== 'UNKNOWN') task.status = 'BLOCKED'
+      }
+      if (resolved.mismatches.length > 0) {
+        task.issues.push({ code: 'FILE_FIELD_MISMATCH', message: '页面提交的文件字段与查询响应不一致，已按查询快照重建。', itemId: '' })
+        if (task.status !== 'UNKNOWN') task.status = 'BLOCKED'
+      }
       if (!sameAccountContext(host.connection.context, frozen)) return staleResult(host)
-      await host.tasks.save(task)
+      const persisted = await host.tasks.save(task)
+      if (!persisted.ok) {
+        return workspaceResult({ ok: false, message: persisted.message, connection: host.connection.context })
+      }
       if (!sameAccountContext(host.connection.context, frozen)) return staleResult(host)
-      return await finishWrite(`已保存 · 任务 ${task.taskId}`, createdOf(task))
+      return await finishWrite(`已保存 · 任务 ${persisted.task.taskId}`, createdOf(persisted.task))
     } catch (error) {
       if (error instanceof StaleContextError) return staleResult(host)
       return workspaceResult({ ok: false, message: error instanceof Error ? error.message : '任务没有保存。', connection: host.connection.context })
@@ -351,17 +387,33 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
     if (!FORWARDED.has(action.message.type)) {
       return workspaceResult({ ok: false, message: '完整页面不能转发这个请求。', connection: host.connection.context })
     }
+    const frozen = freezeAccount(host.connection.context)
     const version = host.connection.context.connectionVersion
     try {
-      const response = await host.sendToTab(target.tabId, action.message)
-      if (host.connection.context.connectionVersion !== version) {
+      const response = await host.sendToTab(target.tabId, stripSearchContinuation(action.message))
+      if (frozen && !sameAccountContext(host.connection.context, frozen)) {
+        return workspaceResult({ ok: false, message: '账号已经变化，这次查询结果已丢弃。', connection: host.connection.context })
+      }
+      if (!frozen && host.connection.context.connectionVersion !== version) {
         return workspaceResult({ ok: false, message: '连接已经变化，这次结果已丢弃。', connection: host.connection.context })
       }
       if (!isMessage(response) || response.type === MessageType.Workspace || response.type === MessageType.WorkspaceResult) {
         return workspaceResult({ ok: false, message: 'EASY 页面没有返回可识别的结果。', connection: host.connection.context })
       }
-      rememberObservedSearch(host, response)
-      return workspaceResult({ ok: true, message: '', connection: host.connection.context, forwarded: response })
+      let forwarded = response
+      if (frozen && action.message.type === MessageType.SearchFiles) {
+        const recorded = await rememberObservedSearch(frozen, action.message, response)
+        if (!sameAccountContext(host.connection.context, frozen)) {
+          return workspaceResult({ ok: false, message: '账号已经变化，这次查询结果已丢弃。', connection: host.connection.context })
+        }
+        if (recorded && response.type === MessageType.SearchFilesResult && response.payload.ok && response.payload.data) {
+          forwarded = { ...response, payload: { ...response.payload, data: { ...response.payload.data, querySessionId: recorded.querySessionId } } }
+        }
+      }
+      if (frozen && action.message.type === MessageType.LoadDictionary && response.type === MessageType.DictionaryResult && response.payload.ok && response.payload.data.kind === 'fileType') {
+        rememberFileTypeTree(frozen, response.payload.data.caseTypeId, response.payload.data.nodes)
+      }
+      return workspaceResult({ ok: true, message: '', connection: host.connection.context, forwarded })
     } catch {
       host.connection.detach(target.tabId)
       remember(host)

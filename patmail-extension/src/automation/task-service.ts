@@ -1,22 +1,24 @@
 import { isConfirmedOperator } from './operator'
 import { recoverTask, type RecoveryAction } from './recovery'
-import type { MemoryTaskRepository, TaskRepository } from './repository'
+import type { MemoryTaskRepository, TaskRepository, TaskSaveResult } from './repository'
 import { buildTask, type TaskBuildInput } from './task-builder'
 import { validateTask } from './task-validator'
 import type { AutomationTask, StageId } from './types'
 
 export interface TaskStore {
   list(origin: string, operatorId: string, includeArchived?: boolean): Promise<AutomationTask[]>
-  save(task: AutomationTask): Promise<void>
+  save(task: AutomationTask): Promise<TaskSaveResult>
   updateTaskAtomically(
     origin: string,
     operatorId: string,
     taskId: string,
     expectedVersion: number,
     transition: (current: AutomationTask) => { ok: true; task: AutomationTask } | { ok: false; message: string }
-  ): Promise<{ ok: boolean; message: string; task: AutomationTask | null }>
+  ): Promise<TaskSaveResult>
   archive(origin: string, operatorId: string, taskId: string): Promise<{ ok: boolean; message: string }>
 }
+
+export type { TaskSaveResult }
 
 /** 任务读写都经过这一层。保存失败时不会把任务当成已经持久化。 */
 export class AutomationTaskService {
@@ -27,12 +29,15 @@ export class AutomationTaskService {
     if (!isConfirmedOperator(input.operatorId)) {
       return Promise.resolve({ ok: false, task, persisted: false, message: '当前 EASY 用户身份尚未确认。计划不会持久化，也不能执行。' })
     }
-    return this.store.save(task).then(() => this.store.list(task.origin, task.operatorId, true).then(tasks => {
-      if (!tasks.some(item => item.taskId === task.taskId)) {
-        return { ok: false as const, task, persisted: false as const, message: '任务没有写入存储。' }
-      }
-      return { ok: true as const, task, persisted: true as const }
-    })).catch(() => ({ ok: false as const, task, persisted: false as const, message: '任务保存失败，没有当成已保存。' }))
+    return this.store.save(task).then(saved => {
+      if (saved && saved.ok === false) return { ok: false as const, task, persisted: false as const, message: saved.message }
+      return this.store.list(task.origin, task.operatorId, true).then(tasks => {
+        if (!tasks.some(item => item.taskId === task.taskId)) {
+          return { ok: false as const, task, persisted: false as const, message: '任务没有写入存储。' }
+        }
+        return { ok: true as const, task: saved && saved.ok ? saved.task : task, persisted: true as const }
+      })
+    }).catch(() => ({ ok: false as const, task, persisted: false as const, message: '任务保存失败，没有当成已保存。' }))
   }
 
   listTasks(origin: string, operatorId: string): Promise<AutomationTask[]> {
@@ -50,8 +55,8 @@ export class AutomationTaskService {
       return { ok: false, message: '当前 EASY 用户身份尚未确认。计划不会持久化，也不能执行。' }
     }
     try {
-      await this.store.save(task)
-      return { ok: true, message: '' }
+      const saved = await this.store.save(task)
+      return saved.ok ? { ok: true, message: '' } : { ok: false, message: saved.message }
     } catch {
       return { ok: false, message: '任务保存失败。' }
     }

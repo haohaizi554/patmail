@@ -97,7 +97,7 @@ type Response<T extends string, P> = Message<P> & { type: T; payload: P }
 export type ContentRequest =
   | Request<'SCAN_PAGE'> | Request<'GET_PAGE_INFO'> | Request<'SHOW_PANEL'> | Request<'PING'>
   | Request<'CHECK_SESSION'> | Request<'CANCEL_SESSION_CHECK'>
-  | Request<'CANCEL_FILE_SEARCH'> | Response<'SEARCH_FILES', { query: FileSearchQuery }>
+  | Request<'CANCEL_FILE_SEARCH'> | Response<'SEARCH_FILES', { query: FileSearchQuery; continuation?: { querySessionId: string } }>
   | Response<'LIST_HISTORY_QUERIES', { force: boolean }>
   | Response<'GET_HISTORY_QUERY', { queryId: string }>
   | Response<'LOAD_DICTIONARY', DictionaryLoadRequest>
@@ -199,6 +199,9 @@ export interface WorkspaceResultPayload {
   appTab: { tabId: number; created: boolean } | null
   createdTask: CreatedTaskResult | null
   contextError?: 'STALE_CONTEXT'
+  rulesSaved?: boolean
+  tasksRevalidated?: boolean
+  pendingRevalidation?: boolean
 }
 
 export interface TaskSummary {
@@ -305,8 +308,8 @@ export function isMessage(value: unknown): value is AppMessage {
     case MessageType.InspectEasyMail:
       return isRecord(value.payload) && typeof value.payload.executionId === 'string' && Object.keys(value.payload).length === 1
     case MessageType.SearchFiles:
-      return isRecord(value.payload) && isFileSearchQuery(value.payload.query) &&
-        Object.keys(value.payload).length === 1
+      return isRecord(value.payload) && isFileSearchQuery(value.payload.query) && isSearchContinuation(value.payload.continuation) &&
+        (Object.keys(value.payload).length === 1 || (Object.keys(value.payload).length === 2 && value.payload.continuation !== undefined))
     case MessageType.ScanResult:
       return isPageSnapshot(value.payload)
     case MessageType.PageInfo:
@@ -371,6 +374,12 @@ export function isContentRequest(value: unknown): value is ContentRequest {
 
 const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
 
+function isSearchContinuation(value: unknown): boolean {
+  if (value === undefined) return true
+  return isRecord(value) && Object.keys(value).length === 1 && typeof value.querySessionId === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.querySessionId)
+}
+
 function isExpectedScope(value: unknown): value is ExpectedAccountScope {
   return isRecord(value) && value.easyOrigin === EASY_ORIGIN && typeof value.operatorId === 'string' && isQueryGuid(value.operatorId) &&
     typeof value.easyTabId === 'number' && Number.isInteger(value.easyTabId) &&
@@ -425,6 +434,9 @@ function isWorkspaceResult(value: unknown): value is WorkspaceResultPayload {
   if (!isForwardedMessage(value.forwarded)) return false
   if (value.createdTask != null && !isCreatedTask(value.createdTask)) return false
   if (value.contextError !== undefined && value.contextError !== 'STALE_CONTEXT') return false
+  if (value.rulesSaved !== undefined && typeof value.rulesSaved !== 'boolean') return false
+  if (value.tasksRevalidated !== undefined && typeof value.tasksRevalidated !== 'boolean') return false
+  if (value.pendingRevalidation !== undefined && typeof value.pendingRevalidation !== 'boolean') return false
   return value.appTab === null || (isRecord(value.appTab) && typeof value.appTab.tabId === 'number' && typeof value.appTab.created === 'boolean')
 }
 

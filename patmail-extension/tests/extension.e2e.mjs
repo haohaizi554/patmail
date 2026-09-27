@@ -578,6 +578,32 @@ try {
     await app.getByText(/已保存 · 任务 /).first().waitFor()
     const taskId = (await app.getByText(/已保存 · 任务 /).first().innerText()).split('任务').pop().trim()
     assert.match(taskId, /^[0-9a-f-]{36}$/i)
+    const provenance = await app.evaluate(async (id) => {
+      const loaded = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'load' } })
+      const connection = loaded.payload.connection
+      const got = await chrome.runtime.sendMessage({ type: 'GET_TASK', payload: { origin: connection.easyOrigin, operatorId: connection.operatorId, taskId: id } })
+      const task = got.payload.task
+      const selection = task.verifiedSelection || []
+      return {
+        fileSource: task.fileSource,
+        selections: selection.map((item) => item.verification),
+        sessions: [...new Set(selection.map((item) => item.querySessionId))],
+        names: selection.map((item) => item.fileName),
+        customers: selection.map((item) => item.sourceCustomerName),
+        descriptionIds: (task.selectedFiles || []).map((item) => item.fileDescriptionId || ''),
+        customerIds: (task.selectedFiles || []).map((item) => item.customerId || ''),
+        caseIds: (task.selectedFiles || []).map((item) => item.caseId || '')
+      }
+    }, taskId)
+    assert.equal(provenance.fileSource, 'SEARCH_RESPONSE_OBSERVED')
+    assert.deepEqual(provenance.selections, ['SEARCH_RESPONSE_OBSERVED', 'SEARCH_RESPONSE_OBSERVED'])
+    assert.equal(provenance.sessions.length, 1)
+    assert.ok(provenance.sessions[0])
+    assert.deepEqual(provenance.names, ['通知书-1.pdf', '通知书-2.pdf'])
+    assert.deepEqual(provenance.customers, ['测试客户', '测试客户'])
+    assert.deepEqual(provenance.descriptionIds, ['', ''])
+    assert.deepEqual(provenance.customerIds, ['', ''])
+    assert.deepEqual(provenance.caseIds, ['', ''])
     const templated = await app.evaluate(async (id) => {
       const loaded = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'load' } })
       const connection = loaded.payload.connection
@@ -686,6 +712,65 @@ try {
       return saved.payload.message
     })
     assert.match(forged, /不能由页面声明子任务完成/)
+    const crossPage = await app.evaluate(async () => {
+      const loaded = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'load' } })
+      const connection = loaded.payload.connection
+      const scope = {
+        easyOrigin: connection.easyOrigin,
+        operatorId: connection.operatorId,
+        easyTabId: connection.easyTabId,
+        connectionVersion: connection.connectionVersion
+      }
+      const query = { caseVolume: 'E2E-PAGE', pageIndex: 3, pageSize: 20 }
+      const first = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'forward', message: { type: 'SEARCH_FILES', payload: { query } } } })
+      const sessionId = first.payload.forwarded && first.payload.forwarded.payload && first.payload.forwarded.payload.data && first.payload.forwarded.payload.data.querySessionId
+      const second = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'forward', message: { type: 'SEARCH_FILES', payload: { query: { ...query, pageIndex: 4 }, continuation: { querySessionId: sessionId } } } } })
+      const planned = await chrome.runtime.sendMessage({
+        type: 'WORKSPACE',
+        payload: {
+          action: 'createTaskPlan',
+          queryTemplateVersion: 0,
+          expectedScope: scope,
+          files: [3, 4].map((page) => ({
+            fileId: `file-${page}`,
+            fileName: `通知书-${page}.pdf`,
+            fileDescription: '审查意见通知书',
+            customerName: '测试客户',
+            caseVolume: 'E2E-PAGE',
+            caseId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+            fileDescriptionId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+            customerId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+            querySessionId: sessionId,
+            customerProfileId: 'profile-a',
+            customerBinding: { profileId: 'profile-a', profileName: '测试客户', sourceCustomerName: '测试客户', confirmed: true, source: 'explicit' }
+          }))
+        }
+      })
+      const taskId = planned.payload.createdTask && planned.payload.createdTask.taskId
+      const got = taskId ? await chrome.runtime.sendMessage({ type: 'GET_TASK', payload: { origin: connection.easyOrigin, operatorId: connection.operatorId, taskId } }) : null
+      const stored = got && got.payload.task ? got.payload.task.selectedFiles || [] : []
+      return {
+        firstOk: first.payload.ok,
+        secondOk: second.payload.ok,
+        planOk: planned.payload.ok,
+        fileSource: planned.payload.createdTask && planned.payload.createdTask.fileSource,
+        selections: got && got.payload.task ? (got.payload.task.verifiedSelection || []).map((item) => item.verification) : [],
+        sessions: got && got.payload.task ? [...new Set((got.payload.task.verifiedSelection || []).map((item) => item.querySessionId))] : [],
+        caseIds: stored.map((item) => item.caseId || ''),
+        descriptionIds: stored.map((item) => item.fileDescriptionId || ''),
+        customerIds: stored.map((item) => item.customerId || '')
+      }
+    })
+    assert.equal(crossPage.firstOk, true)
+    assert.equal(crossPage.secondOk, true)
+    assert.equal(crossPage.planOk, true)
+    assert.equal(crossPage.fileSource, 'SEARCH_RESPONSE_OBSERVED')
+    assert.deepEqual(crossPage.selections, ['SEARCH_RESPONSE_OBSERVED', 'SEARCH_RESPONSE_OBSERVED'])
+    assert.deepEqual(crossPage.sessions, [crossPage.sessions[0]])
+    assert.ok(crossPage.sessions[0])
+    assert.deepEqual(crossPage.caseIds, ['', ''])
+    assert.deepEqual(crossPage.descriptionIds, ['', ''])
+    assert.deepEqual(crossPage.customerIds, ['', ''])
     const mailCalls = () => apiCalls.filter(item => item.path === '/AjaxServers/Mail.ashx').length
     const beforeMail = mailCalls()
     await app.getByRole('link', { name: '接口验收' }).click()

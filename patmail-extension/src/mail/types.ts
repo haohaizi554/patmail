@@ -22,6 +22,8 @@ export interface SelectedPatentFile {
   caseId?: string
   caseVolume?: string
   applicationNo?: string
+  /** 由 Background 签发。页面自行编造的值不会被当成可信查询运行。 */
+  querySessionId?: string
 }
 
 export interface SelectionSnapshot {

@@ -29,6 +29,7 @@ export function validateTask(task: AutomationTask, current: TaskBuildInput): Aut
         ...task,
         issues,
         dependencyState: 'LEGACY_DEPENDENCY_UNKNOWN',
+        needsRevalidation: true,
         readonly: true,
         status: keepUnknown ? 'UNKNOWN' : 'STALE',
         updatedAt: current.now ?? new Date().toISOString()
@@ -42,7 +43,17 @@ export function validateTask(task: AutomationTask, current: TaskBuildInput): Aut
     }
   }
   const sent = task.status === 'UNKNOWN' || task.readonly || task.checkpoints.some(item => item.requestSent)
-  if (sent) return { ...task, issues, status: 'UNKNOWN', readonly: true, updatedAt: current.now ?? new Date().toISOString() }
+  if (sent) {
+    const dependencyChanged = issues.some(item => item.code === 'STALE_TASK' || item.code === 'LEGACY_DEPENDENCY_UNKNOWN' || item.code === 'ACCOUNT_MISMATCH')
+    return {
+      ...task,
+      issues,
+      needsRevalidation: dependencyChanged || task.needsRevalidation === true,
+      status: 'UNKNOWN',
+      readonly: true,
+      updatedAt: current.now ?? new Date().toISOString()
+    }
+  }
   const stale = issues.some(item => item.code === 'STALE_TASK' || item.code === 'ACCOUNT_MISMATCH' || item.code === 'SESSION_USER')
   return { ...task, issues, status: stale ? 'STALE' : task.status, updatedAt: current.now ?? new Date().toISOString() }
 }

@@ -9,16 +9,16 @@ export interface BindReviewGroup {
   nameMatches: boolean
 }
 
-export function toSelectedFile(file: PatentFile, customerProfileId?: string): SelectedPatentFile {
+export function toSelectedFile(file: PatentFile, customerProfileId?: string, querySessionId?: string): SelectedPatentFile {
   return {
     fileId: file.fileId,
     fileName: file.fileName,
     fileDescription: file.fileDescription?.trim() ?? '',
     customerName: file.customerName?.trim() ?? '',
     ...(customerProfileId ? { customerProfileId } : {}),
-    ...(file.caseId ? { caseId: file.caseId } : {}),
     ...(file.caseVolume ? { caseVolume: file.caseVolume } : {}),
-    ...(file.applicationNo ? { applicationNo: file.applicationNo } : {})
+    ...(file.applicationNo ? { applicationNo: file.applicationNo } : {}),
+    ...(querySessionId ? { querySessionId } : {})
   }
 }
 
