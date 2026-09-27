@@ -71,4 +71,38 @@ describe('EASY Runtime 请求生命周期', () => {
     expect(await runtime.searchFiles({ caseVolume: 'C', pageIndex: 1, pageSize: 20 }))
       .toMatchObject({ ok: false, error: { code: 'SESSION_EXPIRED' } })
   })
+
+  it('loads saved queries after confirming the current page session', async () => {
+    const calls: string[] = []
+    const fetcher: typeof fetch = async (url, init) => {
+      const call = new URLSearchParams(String(init?.body)).get('Call') ?? ''
+      calls.push(`${String(url).split('/').pop()}:${call}`)
+      if (call === 'GetUserModel') return new Response(JSON.stringify(authenticated))
+      return new Response(JSON.stringify({
+        ClientInfo: authenticated.ClientInfo,
+        Options: [{ query_id: '31d1a147-2931-43b5-94ae-b72b1525ba8a', title: '微众新申请' }]
+      }))
+    }
+    const runtime = new EasyRuntime('http://183.36.43.66:88', { fetcher })
+    expect(await runtime.listHistoryQueries()).toMatchObject({ ok: true, data: [{ name: '微众新申请' }] })
+    expect(calls).toEqual(['Login.ashx:GetUserModel', 'CaseInfo.ashx:SearchQueryHisList'])
+  })
+
+  it('returns saved queries from SearchQueryHisList when the local session flag is not authenticated', async () => {
+    const calls: string[] = []
+    const fetcher: typeof fetch = async (_url, init) => {
+      const call = new URLSearchParams(String(init?.body)).get('Call') ?? ''
+      calls.push(call)
+      if (call === 'GetUserModel') {
+        return new Response(JSON.stringify({ ClientInfo: { IsLogin: false, Status: true, Result: false } }))
+      }
+      return new Response(JSON.stringify({
+        ClientInfo: { IsLogin: true, Status: true, Result: false },
+        Options: [{ query_id: '31d1a147-2931-43b5-94ae-b72b1525ba8a', title: '宁德授权请款' }]
+      }))
+    }
+    const runtime = new EasyRuntime('http://183.36.43.66:88', { fetcher })
+    expect(await runtime.listHistoryQueries(true)).toMatchObject({ ok: true, data: [{ name: '宁德授权请款', source: 'easy' }] })
+    expect(calls).toEqual(['GetUserModel', 'SearchQueryHisList'])
+  })
 })

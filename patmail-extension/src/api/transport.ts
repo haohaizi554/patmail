@@ -4,6 +4,7 @@ import { apiError, type ApiResult } from './types'
 export type EasyOperation =
   | 'session' | 'fileSearch' | 'historyQuery'
   | 'basicData' | 'flowDirection' | 'fileTypeTree' | 'fieldColumn' | 'listColumn' | 'mailType'
+  | 'deptTree' | 'treeUser' | 'treeAgent' | 'fileTempList' | 'deptBranch' | 'applyTags' | 'limitInit' | 'limitCtrlProc'
   | 'mailCustomer' | 'mailInfoInit' | 'getMailInfo' | 'getMailFile' | 'getMailCase'
   | 'getMailRule' | 'getCustomerContact' | 'getSignature' | 'saveMailInfo' | 'saveMailRelatedFiles'
   | 'getFlowInfo' | 'getFlowHistory' | 'getUrgencyList' | 'getFlowSubmit' | 'getFlowLastStatus'
@@ -24,6 +25,14 @@ const ROUTES: Record<EasyOperation, { path: string; call: string }> = {
   fieldColumn: { path: '/AjaxServers/PatentAction.ashx', call: 'GetFieldColumn' },
   listColumn: { path: '/AjaxServers/Common.ashx', call: 'LoadListColumn' },
   mailType: { path: '/AjaxServers/Common.ashx', call: 'LoadMailType' },
+  deptTree: { path: '/AjaxServers/Common.ashx', call: 'LoadDeptTree' },
+  treeUser: { path: '/AjaxServers/Common.ashx', call: 'GetTreeUser' },
+  treeAgent: { path: '/AjaxServers/Common.ashx', call: 'GetTreeAgent' },
+  fileTempList: { path: '/AjaxServers/BaseInfo.ashx', call: 'GetFileTempNameList' },
+  deptBranch: { path: '/AjaxServers/BaseInfo.ashx', call: 'GetDeptBranch' },
+  applyTags: { path: '/AjaxServers/CaseInfo.ashx', call: 'GetApplyTags' },
+  limitInit: { path: '/AjaxServers/Report.ashx', call: 'LimitMonitorInit' },
+  limitCtrlProc: { path: '/AjaxServers/Report.ashx', call: 'LimitMonitorGetCtrlproc' },
   mailCustomer: { path: '/AjaxServers/Notice.ashx', call: 'MailCustomer' },
   mailInfoInit: { path: '/AjaxServers/Mail.ashx', call: 'MailinfoInit' },
   getMailInfo: { path: '/AjaxServers/Mail.ashx', call: 'GetMailInfo' },
@@ -87,6 +96,13 @@ export class EasyTransport {
     return result
   }
 
+  /** 文件查询和期限监控在这套原网站上经常超过 15 秒。测试传入的短超时仍然生效。 */
+  private waitMs(operation: EasyOperation): number {
+    if (this.timeoutMs < 15_000) return this.timeoutMs
+    if (operation === 'fileSearch' || operation === 'limitMonitor') return 60_000
+    return this.timeoutMs
+  }
+
   /** Handler、Call、方法和目标 Origin 由内部白名单固定，页面消息不能提供 URL。 */
   private async postOnce(operation: EasyOperation, params: URLSearchParams, signal?: AbortSignal): Promise<ApiResult<unknown>> {
     if (!this.origin) return apiError('INVALID_ORIGIN', '当前页面不属于受信任的 EASY 站点。')
@@ -103,7 +119,7 @@ export class EasyTransport {
     const timer = setTimeout(() => {
       timedOut = true
       controller.abort()
-    }, this.timeoutMs)
+    }, this.waitMs(operation))
     try {
       const response = await this.fetcher(this.origin + route.path, {
         method: 'POST',

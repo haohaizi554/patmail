@@ -55,7 +55,7 @@ export function workspaceResult(partial: Partial<WorkspacePayload> & { connectio
 
 const FORWARDED = new Set<string>([
   MessageType.CheckSession, MessageType.CancelSessionCheck, MessageType.SearchFiles, MessageType.CancelFileSearch,
-  MessageType.ListHistoryQueries, MessageType.GetHistoryQuery, MessageType.LoadDictionary,
+  MessageType.ListHistoryQueries, MessageType.GetHistoryQuery, MessageType.LoadDictionary, MessageType.ScanFileSearchForm,
   MessageType.FindMailExecution, MessageType.InspectEasyMail, MessageType.ReadWorkflow,
   MessageType.RefreshWorkflow, MessageType.PreviewWorkflow, MessageType.DiagnoseExistingMail,
   MessageType.RunReadonlyAcceptance

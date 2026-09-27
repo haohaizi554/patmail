@@ -12,7 +12,11 @@ describe('GetSearchFiles 参数 Builder', () => {
     const result = buildGetSearchFilesParams({ caseVolume: ' PA-123 ', pageIndex: 1, pageSize: 50 }, undefined, () => 1790000000123)
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect([...result.data.keys()]).toEqual(documentedNames.filter(name => name !== '_doneCallback'))
+    const expected = documentedNames.filter(name => name !== '_doneCallback')
+    expected.splice(expected.indexOf('IsFirst'), 0, 'is_vip', 'specialtyid')
+    expect([...result.data.keys()]).toEqual(expected)
+    expect(result.data.get('is_vip')).toBe('')
+    expect(result.data.get('specialtyid')).toBe('')
     expect(result.data.get('Call')).toBe('GetSearchFiles')
     expect(result.data.get('IsFirst')).toBe('false')
     expect(result.data.get('log_pagename')).toBe('FileSearch.aspx')

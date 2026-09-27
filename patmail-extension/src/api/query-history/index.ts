@@ -1,3 +1,5 @@
 export { HistoryQueryService } from './service'
+export { historyRequest, isHistorySurface } from './surfaces'
+export type { HistorySurface } from './surfaces'
 export { normalizeHistoryDetail, normalizeHistoryOptions } from './normalizer'
 export type { HistoryQueryDetail, HistoryQueryOption } from './types'

@@ -1,12 +1,87 @@
-import { isContentRequest, MessageType, type ContentResponse, type MessageBridge } from '../shared/message'
+import { isContentRequest, MessageType, type ContentResponse, type FileSearchFormField, type MessageBridge } from '../shared/message'
 import { sendToBackground } from '../utils/runtime'
 import { injectPanel } from './injector'
 import { readPageInfo, scanPage } from './scanner'
 import { EasyRuntime } from '../api/client'
+import { scanFileSearchForm, warmFileSearchTrees } from '../query/scan-file-search-form.mjs'
 import { LiveEasyAcceptanceRunner } from '../automation/acceptance-runner'
 
 // API 请求始终由目标页面同源的 Content Script 发起，沿用浏览器已有会话。
 const easyRuntime = new EasyRuntime(location.origin)
+
+function hasSearchTable(doc: Document): boolean {
+  return Boolean(doc.querySelector('#table_element'))
+}
+
+async function waitForCaseTypes(doc: Document): Promise<void> {
+  const started = Date.now()
+  while (Date.now() - started < 8000) {
+    const select = doc.querySelector('#case_type')
+    if (select && select.querySelectorAll('option').length > 1) return
+    await new Promise(resolve => window.setTimeout(resolve, 300))
+  }
+}
+
+function scanThroughPageScript(doc: Document): Promise<FileSearchFormField[]> {
+  const view = doc.defaultView
+  if (!view) return Promise.resolve(scanFileSearchForm(doc).fields)
+  const page = view
+  const marker = `patmail-form-${Date.now()}`
+  return new Promise(resolve => {
+    const timer = page.setTimeout(() => {
+      page.removeEventListener('message', onMessage)
+      resolve(scanFileSearchForm(doc).fields)
+    }, 70000)
+    function onMessage(event: MessageEvent): void {
+      if (event.origin !== page.location.origin || !event.data || event.data.marker !== marker || !Array.isArray(event.data.fields)) return
+      page.clearTimeout(timer)
+      page.removeEventListener('message', onMessage)
+      resolve(event.data.fields as FileSearchFormField[])
+    }
+    view.addEventListener('message', onMessage)
+    const script = doc.createElement('script')
+    script.textContent = `(async function () {
+      const warm = ${warmFileSearchTrees.toString()};
+      const scan = ${scanFileSearchForm.toString()};
+      try {
+        await warm(document);
+        window.postMessage({ marker: ${JSON.stringify(marker)}, fields: scan(document).fields }, location.origin);
+      } catch (error) {
+        window.postMessage({ marker: ${JSON.stringify(marker)}, fields: [] }, location.origin);
+      }
+    })()`
+    doc.documentElement.appendChild(script)
+    script.remove()
+  })
+}
+
+async function scanDocument(doc: Document): Promise<FileSearchFormField[]> {
+  await waitForCaseTypes(doc)
+  const view = doc.defaultView as (Window & { jQuery?: unknown }) | null
+  if (view?.jQuery) {
+    await warmFileSearchTrees(doc)
+    return scanFileSearchForm(doc).fields
+  }
+  return scanThroughPageScript(doc)
+}
+
+async function readFileSearchForm(): Promise<FileSearchFormField[]> {
+  if (hasSearchTable(document)) return scanDocument(document)
+  const frame = document.querySelector('iframe#mframe')
+  if (frame instanceof HTMLIFrameElement) {
+    const current = frame.contentDocument
+    if (!current || !hasSearchTable(current)) {
+      await new Promise<void>((resolve, reject) => {
+        const timer = window.setTimeout(() => reject(new Error('文件查询页没有打开')), 20000)
+        frame.addEventListener('load', () => { window.clearTimeout(timer); resolve() }, { once: true })
+        frame.src = '/Forms/Patent/FileSearch.aspx'
+      })
+    }
+    const doc = frame.contentDocument
+    if (doc && hasSearchTable(doc)) return scanDocument(doc)
+  }
+  return scanFileSearchForm(document).fields
+}
 
 const bridge: MessageBridge = {
   async request(message, signal): Promise<ContentResponse> {
@@ -35,10 +110,12 @@ const bridge: MessageBridge = {
           payload: await easyRuntime.searchLimitMonitor(message.payload.query) }
       case MessageType.ListHistoryQueries:
         return { type: MessageType.HistoryQueriesResult,
-          payload: await easyRuntime.listHistoryQueries(message.payload.force, signal) }
+          payload: await easyRuntime.listHistoryQueries(message.payload.force, signal, message.payload.surface ?? 'file') }
       case MessageType.GetHistoryQuery:
         return { type: MessageType.HistoryQueryResult,
-          payload: await easyRuntime.getHistoryQuery(message.payload.queryId, signal) }
+          payload: await easyRuntime.getHistoryQuery(message.payload.queryId, signal, message.payload.surface ?? 'file') }
+      case MessageType.ScanFileSearchForm:
+        return { type: MessageType.FileSearchFormResult, payload: { fields: await readFileSearchForm() } }
       case MessageType.LoadDictionary:
         return { type: MessageType.DictionaryResult,
           payload: await easyRuntime.loadDictionary(message.payload, signal) }

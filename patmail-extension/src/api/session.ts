@@ -48,7 +48,8 @@ export class SessionService {
 
   async check(signal?: AbortSignal): Promise<ApiResult<SessionSummary>> {
     const current = ++this.generation
-    this.status = 'checking'
+    // 已经登录时，后台复查不能把状态改成“检测中”，否则并行的模板请求会当成未登录。
+    if (this.status !== 'authenticated') this.status = 'checking'
     const response = await this.transport.post('session', new URLSearchParams({
       Call: 'GetUserModel', log_pagename: ''
     }), signal)

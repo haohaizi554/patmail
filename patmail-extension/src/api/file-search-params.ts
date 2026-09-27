@@ -22,7 +22,7 @@ export interface FileSearchEnvironment {
 
 /**
  * API/04-文件查询.md 的 117 项顺序。_doneCallback 是旧前端回调序列化产物，
- * 不参与独立业务请求，因此实际提交 116 项。
+ * 不参与独立业务请求。本所开启 JIAQUAN 后，原网站还会提交是否大客户和专业领域。
  */
 export const FILE_SEARCH_REQUEST_FIELDS = [
   'pageIndex', 'pageSize', 'Call', 'customer', 'filetype', 'update_s', 'update_e',
@@ -51,7 +51,8 @@ export const FILE_SEARCH_REQUEST_FIELDS = [
   'update_patauditor_user_time_e', 'update_patauditor_user_time_isnull',
   'pat_allocator_user_id', 'update_allocator_user_time_s', 'update_allocator_user_time_e',
   'file_remark', 'update_allocator_user_time_isnull', 'column1', 'column2', 'column3',
-  'column4', 'column5', 'inventor_name', 'contact_name_zf', 'IsFirst', 'is_pat',
+  'column4', 'column5', 'inventor_name', 'contact_name_zf', 'is_vip', 'specialtyid',
+  'IsFirst', 'is_pat',
   'colsel', '_t', 'log_pagename'
 ] as const
 
@@ -197,8 +198,9 @@ export function buildGetSearchFilesFromFields(
     if (FILE_SEARCH_SYSTEM_FIELDS.has(field)) continue
     const specified = Object.prototype.hasOwnProperty.call(explicit, field)
     let value = specified ? explicit[field] : ''
-    if (!specified && field === 'fileclass') value = environment.fileClass
-    if (!specified && field === 'case_type') value = environment.caseTypeId
+    const blankDefault = !value.trim() && (field === 'fileclass' || field === 'case_type')
+    if ((!specified || blankDefault) && field === 'fileclass') value = environment.fileClass
+    if ((!specified || blankDefault) && field === 'case_type') value = environment.caseTypeId
     if (field === 'app_no') value = value.trim().replace(/\./g, '')
     values[field] = value
   }

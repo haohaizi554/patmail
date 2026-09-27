@@ -8,7 +8,7 @@ import { buildLimitMonitorParams, type LimitMonitorQuery } from './limit-monitor
 import { normalizeLimitMonitor } from './limit-monitor-normalizer'
 import type { LimitMonitorResult } from './limit-monitor-types'
 import { HistoryQueryService } from './query-history'
-import type { HistoryQueryDetail, HistoryQueryOption } from './query-history'
+import type { HistoryQueryDetail, HistoryQueryOption, HistorySurface } from './query-history'
 import type { FileSearchResult } from './file-search-types'
 import { normalizeFileSearch } from './file-search-normalizer'
 import { SessionService, type SessionStatus, type SessionSummary } from './session'
@@ -121,34 +121,57 @@ export class EasyRuntime {
 
   get sessionStatus(): SessionStatus { return this.session.status }
 
+  private activeSession: Promise<ApiResult<SessionSummary>> | null = null
+
   async checkSession(): Promise<ApiResult<SessionSummary>> {
-    this.cancelSessionCheck()
+    if (this.activeSession) return this.activeSession
     const controller = new AbortController()
     this.sessionController = controller
-    const result = await this.session.check(controller.signal)
-    if (this.sessionController === controller) this.sessionController = null
-    if (result.ok && result.data.status !== 'authenticated') {
-      this.cancelFileSearch()
-      this.cancelLimitMonitor()
+    const run = (async () => {
+      const result = await this.session.check(controller.signal)
+      if (result.ok && result.data.status !== 'authenticated') {
+        this.cancelFileSearch()
+        this.cancelLimitMonitor()
+      }
+      if (!result.ok && result.error.code === 'SESSION_EXPIRED') {
+        this.cancelFileSearch()
+        this.cancelLimitMonitor()
+      }
+      const nextKey = result.ok && result.data.status === 'authenticated' ? result.data.userId ?? '' : ''
+      if (nextKey !== this.historyUserKey) {
+        this.history.invalidate()
+        this.dictionaries.invalidate(this.historyUserKey)
+        this.dictionaries.invalidate(nextKey)
+        this.listColsel = null
+      }
+      this.historyUserKey = nextKey
+      return result
+    })()
+    this.activeSession = run
+    try {
+      return await run
+    } finally {
+      if (this.activeSession === run) this.activeSession = null
+      if (this.sessionController === controller) this.sessionController = null
     }
-    if (!result.ok && result.error.code === 'SESSION_EXPIRED') {
-      this.cancelFileSearch()
-      this.cancelLimitMonitor()
+  }
+
+  /** 进入页面时顺手确认会话。已经登录则直接过；检测被取消时再试一次。 */
+  private async confirmAccountRead(): Promise<boolean> {
+    if (this.session.status === 'authenticated') return true
+    const result = await this.checkSession()
+    if (result.ok && result.data.status === 'authenticated') return true
+    if (!result.ok && result.error.code === 'REQUEST_ABORTED') {
+      const retry = await this.checkSession()
+      return retry.ok && retry.data.status === 'authenticated'
     }
-    const nextKey = result.ok && result.data.status === 'authenticated' ? result.data.userId ?? '' : ''
-    if (nextKey !== this.historyUserKey) {
-      this.history.invalidate()
-      this.dictionaries.invalidate(this.historyUserKey)
-      this.dictionaries.invalidate(nextKey)
-      this.listColsel = null
-    }
-    this.historyUserKey = nextKey
-    return result
+    return false
   }
 
   cancelSessionCheck(): void {
     this.sessionController?.abort()
     this.sessionController = null
+    this.activeSession = null
   }
 
   searchFiles(query: FileSearchQuery): Promise<ApiResult<FileSearchResult>> {
@@ -197,9 +220,9 @@ export class EasyRuntime {
     return promise
   }
 
-  loadDictionary(request: DictionaryLoadRequest, signal?: AbortSignal): Promise<ApiResult<DictionarySnapshot>> {
-    if (this.session.status !== 'authenticated') {
-      return Promise.resolve(apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。'))
+  async loadDictionary(request: DictionaryLoadRequest, signal?: AbortSignal): Promise<ApiResult<DictionarySnapshot>> {
+    if (!(await this.confirmAccountRead())) {
+      return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
     }
     const caseTypeId = request.kind === 'fileType' ? request.caseTypeId : ''
     return this.dictionaries.load(request.kind, this.historyUserKey, request.force, caseTypeId, signal).then(result => {
@@ -210,18 +233,14 @@ export class EasyRuntime {
     })
   }
 
-  listHistoryQueries(force = false, signal?: AbortSignal): Promise<ApiResult<HistoryQueryOption[]>> {
-    if (this.session.status !== 'authenticated') {
-      return Promise.resolve(apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。'))
-    }
-    return this.history.list(this.historyUserKey, force, signal)
+  async listHistoryQueries(force = false, signal?: AbortSignal, surface: HistorySurface = 'file'): Promise<ApiResult<HistoryQueryOption[]>> {
+    await this.confirmAccountRead()
+    return this.history.list(this.historyUserKey, surface, force, signal)
   }
 
-  getHistoryQuery(queryId: string, signal?: AbortSignal): Promise<ApiResult<HistoryQueryDetail>> {
-    if (this.session.status !== 'authenticated') {
-      return Promise.resolve(apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。'))
-    }
-    return this.history.detail(this.historyUserKey, queryId, signal)
+  async getHistoryQuery(queryId: string, signal?: AbortSignal, surface: HistorySurface = 'file'): Promise<ApiResult<HistoryQueryDetail>> {
+    await this.confirmAccountRead()
+    return this.history.detail(this.historyUserKey, surface, queryId, signal)
   }
 
   private async mailUser(): Promise<{ ok: true; userId: string } | { ok: false; message: string }> {

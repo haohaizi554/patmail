@@ -12,6 +12,7 @@ function codeOf(result: ApiResult<unknown>): string {
 import { buildGetSearchFilesFromFields } from '../src/api/file-search-params'
 import { normalizeHistoryDetail, normalizeHistoryOptions } from '../src/api/query-history'
 import { HistoryQueryService } from '../src/api/query-history/service'
+import { historyRequest } from '../src/api/query-history/surfaces'
 import { EasyTransport } from '../src/api/transport'
 import { CustomerQueryService } from '../src/customer/service'
 import { BundleCustomerRepository } from '../src/customer/repository'
@@ -125,6 +126,25 @@ describe('模板合并', () => {
     expect(codeOf(buildGetSearchFilesFromFields({ case_type: '31D1A147-2931-43B5-94AE-B72B1525BA8A', fileclass: 'general' }, { pageIndex: 1, pageSize: 20 }))).toBe('INVALID_QUERY')
     expect(codeOf(buildGetSearchFilesFromFields({ Call: 'MailCustomer' } as Record<string, string>, { pageIndex: 1, pageSize: 20 }))).toBe('INVALID_QUERY')
   })
+
+  it('submits vip and specialty, and leaves download-name controls out of the request', () => {
+    const resolved = resolveQueryTemplate({}, {}, {
+      case_volume: 'PA-1',
+      is_vip: '1',
+      specialtyid: '机械',
+      selfilePath: 'case_name',
+      filetemp: 'd9896997-1e83-4c7d-9a49-da69ba56e7aa'
+    })
+    expect(resolved.fields.is_vip).toBe('1')
+    expect(resolved.fields.specialtyid).toBe('机械')
+    expect(resolved.fields.selfilePath).toBeUndefined()
+    expect(resolved.warnings.some(item => item.includes('selfilePath'))).toBe(false)
+    const params = dataOf(buildGetSearchFilesFromFields(resolved.fields, { pageIndex: 1, pageSize: 20 }, undefined, () => 1))
+    expect(params.get('is_vip')).toBe('1')
+    expect(params.get('specialtyid')).toBe('机械')
+    expect(params.has('selfilePath')).toBe(false)
+    expect(params.has('filetemp')).toBe(false)
+  })
 })
 
 describe('本地模板和客户配置', () => {
@@ -171,14 +191,17 @@ describe('历史模板传输', () => {
     let calls = 0
     const fetcher: typeof fetch = async () => {
       calls += 1
+      if (calls > 2) return new Response('down', { status: 500 })
       return new Response(JSON.stringify({ ...client, Options: [{ query_id: other, title: '列表' }] }), { status: 200 })
     }
     const service = new HistoryQueryService(new EasyTransport('http://183.36.43.66:88', { fetcher }), () => 1_000)
-    expect(dataOf(await service.list('user', false))).toHaveLength(1)
-    expect(dataOf(await service.list('user', false))).toHaveLength(1)
+    expect(dataOf(await service.list('user', 'file', false))).toHaveLength(1)
+    expect(dataOf(await service.list('user', 'file', false))).toHaveLength(1)
     expect(calls).toBe(1)
-    await service.list('user', true)
+    await service.list('user', 'file', true)
     expect(calls).toBe(2)
+    expect(dataOf(await service.list('user', 'file', true))).toHaveLength(1)
+    expect(calls).toBe(3)
     service.invalidate()
     const hanging = new HistoryQueryService(new EasyTransport('http://183.36.43.66:88', {
       fetcher: (_url, init) => new Promise((_resolve, reject) => {
@@ -186,7 +209,7 @@ describe('历史模板传输', () => {
       }),
       timeoutMs: 20
     }))
-    expect(codeOf(await hanging.list('user', true))).toBe('REQUEST_TIMEOUT')
+    expect(codeOf(await hanging.list('user', 'file', true))).toBe('REQUEST_TIMEOUT')
   })
 
   it('uses the cached title when the detail payload omits Options', async () => {
@@ -199,8 +222,16 @@ describe('历史模板传输', () => {
       return new Response(JSON.stringify(body), { status: 200 })
     }
     const service = new HistoryQueryService(new EasyTransport('http://183.36.43.66:88', { fetcher }))
-    await service.list('user', true)
-    expect(dataOf(await service.detail('user', guid))).toMatchObject({ name: '缓存标题', queryXml: xml })
-    expect(codeOf(await service.detail('user', 'not-a-guid'))).toBe('INVALID_QUERY')
+    await service.list('user', 'file', true)
+    expect(dataOf(await service.detail('user', 'file', guid))).toMatchObject({ name: '缓存标题', queryXml: xml })
+    expect(codeOf(await service.detail('user', 'file', 'not-a-guid'))).toBe('INVALID_QUERY')
+  })
+
+  it('asks the limit page for its own templates', () => {
+    const params = historyRequest('limit', '')
+    expect(params.get('query_type')).toBe('LimitMonitor\u2014liall')
+    expect(params.get('query_type')).not.toContain('-')
+    expect(params.get('log_pagename')).toBe('LimitMonitor.aspx')
+    expect(historyRequest('file', '').get('query_type')).toBe('FileSearch')
   })
 })

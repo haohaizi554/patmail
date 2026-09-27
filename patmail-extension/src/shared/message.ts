@@ -53,6 +53,8 @@ export const MessageType = {
   GetHistoryQuery: 'GET_HISTORY_QUERY',
   HistoryQueryResult: 'HISTORY_QUERY_RESULT',
   LoadDictionary: 'LOAD_DICTIONARY',
+  ScanFileSearchForm: 'SCAN_FILE_SEARCH_FORM',
+  FileSearchFormResult: 'FILE_SEARCH_FORM_RESULT',
   DictionaryResult: 'DICTIONARY_RESULT',
   CreateEasyMail: 'CREATE_EASY_MAIL',
   SaveEasyMail: 'SAVE_EASY_MAIL',
@@ -103,9 +105,10 @@ export type ContentRequest =
   | Request<'CHECK_SESSION'> | Request<'CANCEL_SESSION_CHECK'>
   | Request<'CANCEL_FILE_SEARCH'> | Response<'SEARCH_FILES', { query: FileSearchQuery; continuation?: { querySessionId: string } }>
   | Response<'SEARCH_LIMIT_MONITOR', { query: LimitMonitorQuery }>
-  | Response<'LIST_HISTORY_QUERIES', { force: boolean }>
-  | Response<'GET_HISTORY_QUERY', { queryId: string }>
+  | Response<'LIST_HISTORY_QUERIES', { force: boolean; surface?: 'file' | 'limit' }>
+  | Response<'GET_HISTORY_QUERY', { queryId: string; surface?: 'file' | 'limit' }>
   | Response<'LOAD_DICTIONARY', DictionaryLoadRequest>
+  | Request<'SCAN_FILE_SEARCH_FORM'>
   | Response<'CREATE_EASY_MAIL', { preview: MailDraftPreview; selection: SelectionClaim; confirmed: true }>
   | Response<'SAVE_EASY_MAIL', { executionId: string; preview: MailDraftPreview; selection: SelectionClaim; acknowledgedDigest: string; confirmed: true }>
   | Response<'FIND_MAIL_EXECUTION', { fingerprint: string }>
@@ -219,6 +222,17 @@ export interface TaskSummary {
   verifiedAt: string
   updatedAt: string
 }
+export interface FileSearchFormField {
+  id: string
+  label: string
+  section: 'case' | 'file'
+  advanced: boolean
+  control: 'text' | 'select' | 'check' | 'picker'
+  visible: boolean
+  hiddenBy: string[]
+  options: { value: string; label: string; parent?: string }[]
+}
+
 export type ContentResponse =
   | Response<'SCAN_RESULT', PageSnapshot>
   | Response<'PAGE_INFO', PageInfo>
@@ -231,6 +245,7 @@ export type ContentResponse =
   | Response<'HISTORY_QUERIES_RESULT', ApiResult<HistoryQueryOption[]>>
   | Response<'HISTORY_QUERY_RESULT', ApiResult<HistoryQueryDetail>>
   | Response<'DICTIONARY_RESULT', ApiResult<DictionarySnapshot>>
+  | Response<'FILE_SEARCH_FORM_RESULT', { fields: FileSearchFormField[] }>
   | Response<'MAIL_EXECUTION_RESULT', { view: MailExecutionView | null }>
   | Response<'WORKFLOW_RESULT', { view: WorkflowView | null }>
   | Response<'EXISTING_MAIL_DIAGNOSTIC', ExistingMailDiagnostic>
@@ -238,6 +253,20 @@ export type ContentResponse =
 export type AppMessage = ContentRequest | ContentResponse | BackgroundRequest
 
 /** 先校验未知值，再缩窄类型，避免把畸形负载当成合法扫描结果。 */
+function isFileSearchFormField(value: unknown): value is FileSearchFormField {
+  if (!isRecord(value)) return false
+  return typeof value.id === 'string' && value.id.length <= 80 &&
+    typeof value.label === 'string' && value.label.length <= 80 &&
+    (value.section === 'case' || value.section === 'file') &&
+    typeof value.advanced === 'boolean' &&
+    (value.control === 'text' || value.control === 'select' || value.control === 'check' || value.control === 'picker') &&
+    typeof value.visible === 'boolean' &&
+    Array.isArray(value.hiddenBy) && value.hiddenBy.length <= 8 && value.hiddenBy.every(item => typeof item === 'string' && item.length <= 160) &&
+    Array.isArray(value.options) && value.options.length <= 800 && value.options.every(option => isRecord(option) &&
+      typeof option.value === 'string' && option.value.length <= 80 && typeof option.label === 'string' && option.label.length <= 160 &&
+      (option.parent === undefined || (typeof option.parent === 'string' && option.parent.length <= 80)))
+}
+
 export function isMessage(value: unknown): value is AppMessage {
   if (!isRecord(value)) return false
   switch (value.type) {
@@ -251,11 +280,16 @@ export function isMessage(value: unknown): value is AppMessage {
       return value.payload === undefined
     case MessageType.ListHistoryQueries:
       return isRecord(value.payload) && (value.payload.force === true || value.payload.force === false) &&
-        Object.keys(value.payload).length === 1
+        (value.payload.surface === undefined || value.payload.surface === 'file' || value.payload.surface === 'limit') &&
+        Object.keys(value.payload).every(key => key === 'force' || key === 'surface')
     case MessageType.GetHistoryQuery:
-      return isRecord(value.payload) && typeof value.payload.queryId === 'string' && Object.keys(value.payload).length === 1
+      return isRecord(value.payload) && typeof value.payload.queryId === 'string' &&
+        (value.payload.surface === undefined || value.payload.surface === 'file' || value.payload.surface === 'limit') &&
+        Object.keys(value.payload).every(key => key === 'queryId' || key === 'surface')
     case MessageType.LoadDictionary:
       return isDictionaryRequest(value.payload)
+    case MessageType.ScanFileSearchForm:
+      return value.payload === undefined
     case MessageType.CreateEasyMail:
       return isConfirmedPreview(value.payload) && Object.keys(value.payload).length === 3
     case MessageType.SaveEasyMail:
@@ -339,6 +373,9 @@ export function isMessage(value: unknown): value is AppMessage {
       return isHistoryDetailResult(value.payload)
     case MessageType.DictionaryResult:
       return isDictionaryResult(value.payload)
+    case MessageType.FileSearchFormResult:
+      return isRecord(value.payload) && Array.isArray(value.payload.fields) && value.payload.fields.length <= 200 &&
+        value.payload.fields.every(isFileSearchFormField) && Object.keys(value.payload).length === 1
     case MessageType.MailExecutionResult:
       return isRecord(value.payload) && Object.keys(value.payload).length === 1 &&
         (value.payload.view === null || isMailExecutionView(value.payload.view))
@@ -374,7 +411,7 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.SearchFiles || value.type === MessageType.CancelFileSearch ||
     value.type === MessageType.SearchLimitMonitor ||
     value.type === MessageType.ListHistoryQueries || value.type === MessageType.GetHistoryQuery ||
-    value.type === MessageType.LoadDictionary || value.type === MessageType.CreateEasyMail ||
+    value.type === MessageType.LoadDictionary || value.type === MessageType.ScanFileSearchForm || value.type === MessageType.CreateEasyMail ||
     value.type === MessageType.SaveEasyMail || value.type === MessageType.FindMailExecution ||
     value.type === MessageType.InspectEasyMail || value.type === MessageType.ReadWorkflow ||
     value.type === MessageType.RefreshWorkflow || value.type === MessageType.PreviewWorkflow ||
@@ -383,7 +420,7 @@ export function isContentRequest(value: unknown): value is ContentRequest {
   )
 }
 
-const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'SEARCH_LIMIT_MONITOR', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
+const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'SEARCH_LIMIT_MONITOR', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
 
 function isSearchContinuation(value: unknown): boolean {
   if (value === undefined) return true

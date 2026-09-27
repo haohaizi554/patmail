@@ -5,7 +5,8 @@ import { sendToBackground } from '../../utils/runtime'
 export function createFullPageBridge(): MessageBridge {
   return {
     async request(message): Promise<ContentResponse> {
-      const response = await sendToBackground({ type: MessageType.Workspace, payload: { action: 'forward', message } }, 30_000)
+      const slow = message.type === MessageType.SearchFiles || message.type === MessageType.SearchLimitMonitor
+      const response = await sendToBackground({ type: MessageType.Workspace, payload: { action: 'forward', message } }, slow ? 70_000 : 30_000)
       if (!response || response.type !== MessageType.WorkspaceResult || !response.payload.forwarded || response.payload.forwarded.type === MessageType.Error || response.payload.forwarded.type === MessageType.WorkspaceResult) {
         const text = response?.type === MessageType.WorkspaceResult ? response.payload.message : ''
         return { type: MessageType.Error, payload: { message: text || 'EASY 通道没有返回结果。' } }
