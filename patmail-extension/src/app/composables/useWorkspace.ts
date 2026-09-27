@@ -94,7 +94,7 @@ export function useWorkspace() {
       if (next.sessionStatus === 'authenticated') void call({ action: 'load' })
       return
     }
-    if (action.action === 'listTabs' || action.action === 'bind') tabs.value = payload.tabs
+    if (action.action === 'listTabs' || action.action === 'bind' || action.action === 'load' || action.action === 'refreshSession') tabs.value = payload.tabs
     if (next.sessionStatus !== 'authenticated') clearAccount()
     else if (operatorChanged) {
       clearAccount()

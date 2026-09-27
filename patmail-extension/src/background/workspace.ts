@@ -7,11 +7,12 @@ import type { CustomerQueryProfile } from '../customer/types'
 import { readMailRules } from '../mail/repository'
 import type { MailRuleBundle } from '../mail/types'
 import type { QueryTemplate } from '../query/query-types'
-import { chooseAppTab, EasyConnectionController, emptyConnection, accountScopeMatches, freezeAccount, sameAccountContext, tabOrigin, type AccountContextSnapshot, type BrowserTabRef, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope } from '../shared/connection'
+import { chooseAppTab, EasyConnectionController, emptyConnection, accountScopeMatches, freezeAccount, sameAccountContext, tabOrigin, type AccountContextSnapshot, type BrowserTabRef, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope, type SessionObservation } from '../shared/connection'
 import { isMessage, MessageType, type AppMessage, type BackgroundResponse, type CreatedTaskResult } from '../shared/message'
 import { loadAccount, deleteCustomerAccount, deleteQueryTemplateAccount, refreshStaleTasks, saveCustomerAccount, saveQueryTemplateAccount, saveRuleAccount, type LocalArea } from './account-data'
 import { observeSearchPage, resolveSelectedFiles, toQueryObservation, type QueryObservationResult } from '../automation/file-search-snapshot'
 import { rememberFileTypeTree } from '../automation/file-description-resolver'
+import { isConfirmedOperator } from '../automation/operator'
 import { planTrustedTask } from '../automation/task-planner'
 import type { AutomationTask } from '../automation/types'
 
@@ -238,12 +239,22 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
   }
   if (action.action === 'openLogin') {
     await host.createTab(`${host.connection.context.easyOrigin}/`)
-    return workspaceResult({ ok: true, message: '已打开 EASY 登录页面。连接前仍需要选择标签页。', connection: host.connection.context })
+    return workspaceResult({ ok: true, message: '已打开 EASY 登录页面。登录后重新打开工作台即可读取该账号。', connection: host.connection.context })
   }
-  if (action.action === 'listTabs') {
-    const tabs = host.connection.list(await host.queryTabs())
-    const text = tabs.length === 0 ? '尚未连接 EASY。' : tabs.length === 1 ? '发现一个 EASY 标签页，请确认后连接。' : '发现多个 EASY 标签页，请选择要连接的页面。'
-    return workspaceResult({ ok: true, message: text, connection: host.connection.context, tabs })
+  if (action.action === 'listTabs' || action.action === 'load' || action.action === 'refreshSession') {
+    const tabs = await ensureEasySession(host)
+    const account = await readAccount(host)
+    if (!account) return staleResult(host)
+    const connected = host.connection.context.sessionStatus === 'authenticated'
+    const name = host.connection.context.displayName
+    const idle = tabs.length === 0 ? '尚未连接 EASY。' : '已找到 EASY 页面，但还没有读到登录。请刷新该 EASY 页面。'
+    return workspaceResult({
+      ok: action.action === 'refreshSession' ? connected : true,
+      message: host.connection.context.message || (connected ? (name ? `已连接 ${name}` : '已连接到当前登录账号。') : action.action === 'refreshSession' ? '已重新检测会话。' : idle),
+      connection: host.connection.context,
+      tabs,
+      ...account
+    })
   }
   if (action.action === 'bind') {
     const tabs = host.connection.list(await host.queryTabs())
@@ -257,18 +268,6 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
     const account = await readAccount(host)
     if (!account) return staleResult(host)
     return workspaceResult({ ok: host.connection.context.sessionStatus === 'authenticated', message: host.connection.context.message, connection: host.connection.context, tabs, ...account })
-  }
-  if (action.action === 'refreshSession') {
-    await readBoundSession(host)
-    const account = await readAccount(host)
-    if (!account) return staleResult(host)
-    return workspaceResult({ ok: host.connection.context.sessionStatus === 'authenticated', message: host.connection.context.message || '已重新检测会话。', connection: host.connection.context, ...account })
-  }
-  if (action.action === 'load') {
-    if (host.connection.context.easyTabId != null) await readBoundSession(host)
-    const account = await readAccount(host)
-    if (!account) return staleResult(host)
-    return workspaceResult({ ok: true, message: host.connection.context.message, connection: host.connection.context, ...account })
   }
   let frozenAccount: AccountContextSnapshot | null = null
   if (action.action === 'saveCustomer' || action.action === 'deleteCustomer' || action.action === 'saveQueryTemplate' || action.action === 'deleteQueryTemplate' || action.action === 'saveRules' || action.action === 'createTaskPlan') {
@@ -510,14 +509,110 @@ function remember(host: WorkspaceHost): void {
   host.persist?.(host.connection.context)
 }
 
-async function readBoundSession(host: WorkspaceHost): Promise<void> {
+function stillUnbound(host: WorkspaceHost, version: number): boolean {
+  return host.connection.context.easyTabId == null && host.connection.context.connectionVersion === version
+}
+
+async function observeTab(host: WorkspaceHost, tabId: number): Promise<SessionObservation | null> {
+  try {
+    const response = await host.sendToTab(tabId, { type: MessageType.CheckSession })
+    if (!isMessage(response) || response.type !== MessageType.SessionResult) {
+      return { ok: false, message: '无法读取该标签页的登录状态。' }
+    }
+    if (!response.payload.ok) {
+      if (response.payload.error.code === 'REQUEST_ABORTED') return null
+      return {
+        ok: false,
+        status: response.payload.error.code === 'SESSION_EXPIRED' ? 'expired' : 'error',
+        message: response.payload.error.message
+      }
+    }
+    return {
+      ok: true,
+      status: response.payload.data.status,
+      userId: response.payload.data.userId,
+      displayName: response.payload.data.displayName,
+      checkedAt: response.payload.data.checkedAt,
+      message: response.payload.data.message
+    }
+  } catch {
+    return null
+  }
+}
+
+/** 工作台打开时跟随已经登录的 EASY 标签页。多个不同账号时不代为选择。 */
+async function ensureEasySession(host: WorkspaceHost): Promise<EasyTabCandidate[]> {
+  const tabs = host.connection.list(await host.queryTabs())
+  const boundId = host.connection.context.easyTabId
+  if (boundId != null) {
+    if (tabs.some(tab => tab.id === boundId)) {
+      await readBoundSession(host)
+      return tabs
+    }
+    host.connection.detach(boundId)
+    remember(host)
+  }
+  const version = host.connection.context.connectionVersion
+  const seen: { tab: EasyTabCandidate; observation: SessionObservation }[] = []
+  for (const tab of tabs) {
+    if (!stillUnbound(host, version)) return host.connection.list(await host.queryTabs())
+    const observation = await observeTab(host, tab.id)
+    if (!stillUnbound(host, version)) return host.connection.list(await host.queryTabs())
+    if (observation) seen.push({ tab, observation })
+  }
+  const loggedIn = seen.filter(item => item.observation.ok && item.observation.status === 'authenticated' && item.observation.userId && isConfirmedOperator(item.observation.userId))
+  const operators = new Set(loggedIn.map(item => item.observation.userId))
+  if (operators.size === 1 && loggedIn[0]) {
+    const begun = host.connection.beginBind(loggedIn[0].tab)
+    if (begun.ok) {
+      host.connection.applySession(loggedIn[0].observation, host.connection.context.connectionVersion)
+      if (loggedIn.length > 1) host.connection.context = { ...host.connection.context, message: '已连接到当前登录账号。' }
+      remember(host)
+    }
+    return tabs
+  }
+  if (operators.size > 1) {
+    host.connection.context = { ...host.connection.context, message: '发现多个已登录账号，请选择要连接的标签页。' }
+    remember(host)
+    return tabs
+  }
+  if (tabs.length === 1 && seen[0]) {
+    const begun = host.connection.beginBind(seen[0].tab)
+    if (begun.ok) {
+      host.connection.applySession(seen[0].observation, host.connection.context.connectionVersion)
+      remember(host)
+    }
+    return tabs
+  }
+  if (tabs.length > 0) {
+    host.connection.context = {
+      ...host.connection.context,
+      message: seen.length === 0 ? '找到 EASY 页面，但还读不到登录状态。请刷新该页面后再检测。' : '这些 EASY 页面都没有已登录账号。'
+    }
+    remember(host)
+  }
+  return tabs
+}
+
+async function readBoundSession(host: WorkspaceHost, attempt = 0): Promise<void> {
   const target = await boundTab(host)
   if (!target.ok) return
   const version = host.connection.context.connectionVersion
+  const tabId = target.tabId
   const previous = host.connection.context.operatorId || host.connection.context.lastOperatorId
+  const retry = async (): Promise<void> => {
+    if (attempt >= 2 || host.connection.context.easyTabId !== tabId) return
+    await new Promise(resolve => setTimeout(resolve, 250))
+    if (host.connection.context.easyTabId !== tabId) return
+    await readBoundSession(host, attempt + 1)
+  }
   try {
-    const response = await host.sendToTab(target.tabId, { type: MessageType.CheckSession })
-    if (host.connection.context.connectionVersion !== version) return
+    const response = await host.sendToTab(tabId, { type: MessageType.CheckSession })
+    if (host.connection.context.easyTabId !== tabId) return
+    if (host.connection.context.connectionVersion !== version) {
+      await retry()
+      return
+    }
     if (!isMessage(response) || response.type !== MessageType.SessionResult) {
       host.connection.applySession({ ok: false, message: '无法读取该标签页的登录状态。' }, version)
       remember(host)
@@ -546,13 +641,18 @@ async function readBoundSession(host: WorkspaceHost): Promise<void> {
     }
     remember(host)
   } catch {
+    if (host.connection.context.easyTabId !== tabId) return
+    if (attempt < 2) {
+      await retry()
+      return
+    }
     if (host.connection.context.connectionVersion !== version) return
     host.connection.context = {
       ...host.connection.context,
       operatorId: '',
       displayName: '',
       sessionStatus: 'pending',
-      message: '标签页已刷新，请重新检测会话。'
+      message: '已找到 EASY 页面，但还没有读到登录。请刷新该页面。'
     }
     remember(host)
   }

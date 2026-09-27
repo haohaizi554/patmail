@@ -39,7 +39,6 @@ function readRoute(): string {
 
 const route = ref(readRoute())
 const workspace = useWorkspace()
-const selectedTab = ref<number | null>(null)
 const search = ref('')
 const pageName = computed(() => nav.find(item => item.hash === route.value)?.name ?? '首页')
 const page = computed(() => pages[route.value as keyof typeof pages] ?? HomePage)
@@ -53,13 +52,8 @@ function go(name: string): void {
 provide('bridge', createFullPageBridge())
 
 function onHash(): void { route.value = readRoute() }
-async function refreshTabs(): Promise<void> {
-  const payload = await workspace.call({ action: 'listTabs' })
-  if (payload && payload.tabs.length === 1) selectedTab.value = payload.tabs[0].id
-}
 onMounted(() => {
   window.addEventListener('hashchange', onHash)
-  void refreshTabs()
   void workspace.call({ action: 'load' })
 })
 onUnmounted(() => window.removeEventListener('hashchange', onHash))
@@ -67,25 +61,6 @@ onUnmounted(() => window.removeEventListener('hashchange', onHash))
 
 <template>
   <Shell :page="pageName" :search="search" placeholder="搜索我方文号、客户或申请号..." :items="nav" :profile-name="profileName" :profile-dept="profileDept" :show-demo="false" @navigate="go" @update:search="search = $event" @settings="go('系统设置')">
-    <section class="card" aria-label="EASY 连接">
-      <div class="card-head">
-        <h2>{{ workspace.connection.value.sessionStatus === 'authenticated' ? '已连接 EASY' : '尚未连接 EASY' }}</h2>
-        <span v-if="workspace.demo" class="demo-flag">DEMO</span>
-      </div>
-      <p class="hint" v-if="workspace.connection.value.displayName">{{ workspace.connection.value.displayName }} · {{ workspace.connection.value.operatorId }}</p>
-      <p class="hint">{{ workspace.notice.value }}</p>
-      <div class="filters">
-        <button type="button" class="ghost" @click="refreshTabs">刷新标签页</button>
-        <button type="button" class="solid" @click="workspace.call({ action: 'openLogin' })">打开 EASY 登录页面</button>
-        <button type="button" class="ghost" :disabled="selectedTab == null" @click="workspace.call({ action: 'bind', tabId: selectedTab! })">连接所选标签页</button>
-        <button type="button" class="ghost" @click="workspace.call({ action: 'refreshSession' })">重新检测会话</button>
-      </div>
-      <div v-if="workspace.tabs.value.length" class="pm-form">
-        <label v-for="tab in workspace.tabs.value" :key="tab.id">
-          <span><input type="radio" name="easy-tab" :value="tab.id" v-model="selectedTab" /> {{ tab.title || tab.url }}</span>
-        </label>
-      </div>
-    </section>
     <component :is="page" />
   </Shell>
 </template>

@@ -57,10 +57,24 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   connection.detach(tabId)
   persistConnection()
 })
+let sessionReadTimer: ReturnType<typeof setTimeout> | undefined
+
+function scheduleSessionRead(tabId: number): void {
+  if (sessionReadTimer != null) clearTimeout(sessionReadTimer)
+  sessionReadTimer = setTimeout(() => {
+    sessionReadTimer = undefined
+    if (connection.context.easyTabId !== tabId || connection.context.sessionStatus === 'authenticated') return
+    void recheckBoundSession(host).finally(() => persistConnection())
+  }, 400)
+}
+
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (info.url || info.status === 'loading') {
     connection.observeNavigation(tabId, info.url ?? tab.url)
     persistConnection()
+  }
+  if (connection.context.easyTabId === tabId && connection.context.sessionStatus === 'pending') {
+    scheduleSessionRead(tabId)
   }
 })
 chrome.action.onClicked.addListener(() => { void host.openApp() })

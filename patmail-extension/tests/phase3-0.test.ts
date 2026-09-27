@@ -93,7 +93,7 @@ describe('完整页面入口与连接', () => {
     expect(chooseAppTab(tabs, 'chrome-extension://abc/app.html')).toEqual({ action: 'focus', id: 4 })
   })
 
-  it('does not pick an EASY tab until the user chooses one', async () => {
+  it('connects one logged-in tab and leaves several accounts for a manual choice', async () => {
     const none = host([])
     const listed = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'listTabs' } }, none)
     expect(listed.type).toBe(MessageType.WorkspaceResult)
@@ -102,14 +102,21 @@ describe('完整页面入口与连接', () => {
     expect(listed.payload.connection.easyTabId).toBeNull()
     expect(listed.payload.message).toContain('尚未连接')
 
+    const alone = host([{ id: 8, url: `${origin}/inbox`, title: 'EASY' }], [session(userA)])
+    const connected = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'listTabs' } }, alone)
+    if (connected.type !== MessageType.WorkspaceResult) throw new Error('alone')
+    expect(connected.payload.connection.easyTabId).toBe(8)
+    expect(connected.payload.connection.displayName).toBe('测试员')
+
     const many = host([
       { id: 1, url: `${origin}/a`, title: '甲' },
       { id: 2, url: `${origin}/b`, title: '乙' }
-    ], [session(userB)])
+    ], [session(userA), session(userB), session(userB)])
     const choices = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'listTabs' } }, many)
     if (choices.type !== MessageType.WorkspaceResult) throw new Error('tabs')
     expect(choices.payload.tabs.map(item => item.id)).toEqual([1, 2])
     expect(many.connection.context.easyTabId).toBeNull()
+    expect(choices.payload.message).toContain('多个已登录账号')
     const bound = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'bind', tabId: 2 } }, many)
     if (bound.type !== MessageType.WorkspaceResult) throw new Error('bind')
     expect(bound.payload.connection.easyTabId).toBe(2)
@@ -117,6 +124,52 @@ describe('完整页面入口与连接', () => {
     const wrong = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'bind', tabId: 9 } }, many)
     if (wrong.type !== MessageType.WorkspaceResult) throw new Error('wrong')
     expect(wrong.payload.ok).toBe(false)
+  })
+
+  it('follows one logged-in account when the workspace opens', async () => {
+    const alone = host([{ id: 8, url: `${origin}/inbox`, title: 'EASY' }], [session(userA)])
+    const loaded = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'load' } }, alone)
+    if (loaded.type !== MessageType.WorkspaceResult) throw new Error('load')
+    expect(loaded.payload.connection.easyTabId).toBe(8)
+    expect(loaded.payload.connection.operatorId).toBe(userA)
+    expect(loaded.payload.connection.displayName).toBe('测试员')
+
+    const sameUser = host([
+      { id: 1, url: `${origin}/a`, title: '甲' },
+      { id: 2, url: `${origin}/b`, title: '乙' }
+    ], [session(userA), session(userA)])
+    const followed = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'load' } }, sameUser)
+    if (followed.type !== MessageType.WorkspaceResult) throw new Error('same')
+    expect(followed.payload.connection.operatorId).toBe(userA)
+    expect(followed.payload.connection.easyTabId).toBe(1)
+
+    const split = host([
+      { id: 1, url: `${origin}/a`, title: '甲' },
+      { id: 2, url: `${origin}/b`, title: '乙' }
+    ], [session(userA), session(userB)])
+    const choices = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'load' } }, split)
+    if (choices.type !== MessageType.WorkspaceResult) throw new Error('split')
+    expect(choices.payload.connection.easyTabId).toBeNull()
+    expect(choices.payload.message).toContain('多个已登录账号')
+  })
+
+  it('reads the login again after the detected tab refreshes', async () => {
+    let calls = 0
+    const runtime = host([{ id: 3, url: `${origin}/inbox`, title: 'EASY' }], [])
+    runtime.connection.beginBind({ id: 3, url: `${origin}/inbox` })
+    runtime.sendToTab = async () => {
+      calls += 1
+      if (calls === 1) {
+        runtime.connection.observeNavigation(3, `${origin}/inbox`)
+        return session(userA)
+      }
+      return session(userA)
+    }
+    const loaded = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'load' } }, runtime)
+    if (loaded.type !== MessageType.WorkspaceResult) throw new Error('load')
+    expect(loaded.payload.connection.sessionStatus).toBe('authenticated')
+    expect(loaded.payload.connection.operatorId).toBe(userA)
+    expect(loaded.payload.connection.easyTabId).toBe(3)
   })
 
   it('drops the binding when the tab closes, refreshes, leaves EASY, or the user changes', async () => {
