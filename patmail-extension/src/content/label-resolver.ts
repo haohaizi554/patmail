@@ -15,8 +15,9 @@ function candidateText(element: Element | null): string | undefined {
 
 /** 原生 labels 覆盖 for 和嵌套 label；也读取 aria-labelledby。 */
 export function explicitLabel(element: HTMLElement): string | undefined {
-  if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement ||
-      element instanceof HTMLTextAreaElement || element instanceof HTMLButtonElement) {
+  const view = element.ownerDocument.defaultView ?? window
+  if (element instanceof view.HTMLInputElement || element instanceof view.HTMLSelectElement ||
+      element instanceof view.HTMLTextAreaElement || element instanceof view.HTMLButtonElement) {
     const labels = Array.from(element.labels ?? []).map(label => normalized(label.textContent)).filter(Boolean)
     if (labels.length) return labels.join(' / ').slice(0, MAX_LABEL_LENGTH)
   }

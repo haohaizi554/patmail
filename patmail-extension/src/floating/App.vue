@@ -7,6 +7,7 @@ import FileSearchPanel from './FileSearchPanel.vue'
 import { copySnapshot } from './copySnapshot'
 import { usePanelDrag } from './usePanelDrag'
 import { EASY_ORIGIN, trustedOrigin } from '../api/config'
+import { sendToBackground } from '../utils/runtime'
 
 const bridge = inject<MessageBridge>('bridge')
 const closePanel = inject<() => void>('closePanel')
@@ -26,6 +27,8 @@ const errorText = ref('')
 const copyText = ref('')
 const backgroundStatus = ref<'checking' | 'ready' | 'unavailable'>('checking')
 const backgroundError = ref('')
+const openingWorkspace = ref(false)
+const workspaceNote = ref('')
 const fileSearchAvailable = computed(() => trustedOrigin(url.value) !== null)
 watch(activeTab, async () => {
   await nextTick()
@@ -100,6 +103,22 @@ async function copyJson(): Promise<void> {
   }
 }
 
+async function openWorkspace(): Promise<void> {
+  if (openingWorkspace.value) return
+  openingWorkspace.value = true
+  workspaceNote.value = ''
+  try {
+    const response = await sendToBackground({ type: MessageType.Workspace, payload: { action: 'focus' } })
+    workspaceNote.value = response?.type === MessageType.WorkspaceResult
+      ? response.payload.message
+      : '没有打开工作台，请在扩展管理里重新加载 PatMail。'
+  } catch {
+    workspaceNote.value = '没有打开工作台。'
+  } finally {
+    openingWorkspace.value = false
+  }
+}
+
 async function scan(): Promise<void> {
   if (scanning.value) return
   if (!bridge) {
@@ -162,6 +181,8 @@ onMounted(() => {
         <button type="button" :class="{ active: activeTab === 'files' }" :disabled="!fileSearchAvailable" @click="activeTab = 'files'">文件查询</button>
         <button type="button" :class="{ active: activeTab === 'scan' }" @click="activeTab = 'scan'">页面扫描</button>
       </nav>
+      <button type="button" class="secondary workspace-entry" :disabled="openingWorkspace" @click="openWorkspace">{{ openingWorkspace ? '正在打开…' : '打开工作台' }}</button>
+      <p v-if="workspaceNote" class="copy-status" role="status">{{ workspaceNote }}</p>
 
       <FileSearchPanel v-if="activeTab === 'files' && fileSearchAvailable" />
       <template v-if="activeTab === 'scan'">

@@ -123,6 +123,18 @@ describe('PageSnapshot V2', () => {
     expect(JSON.stringify(controls[4])).not.toContain('six')
   })
 
+  it('scans the same-origin business frame instead of only the outer shell', () => {
+    document.body.innerHTML = '<input id="shell"><iframe id="biz"></iframe>'
+    const frame = document.querySelector<HTMLIFrameElement>('#biz')
+    const child = frame?.contentDocument
+    expect(child).toBeTruthy()
+    child!.body.innerHTML = '<label>我方文号<input id="case_volume"></label><select id="case_type"><option>专利</option></select><button id="search">查询</button>'
+    const snapshot = scanPage()
+    expect(snapshot.stats).toMatchObject({ inputs: 2, selects: 1, buttons: 1 })
+    expect(snapshot.controls.map(control => control.id)).toEqual(['shell', 'case_volume', 'case_type', 'search'])
+    expect(snapshot.controls.some(control => control.id === 'case_volume' && control.semanticName === '我方文号')).toBe(true)
+  })
+
   it('excludes the plugin ShadowRoot and resamples changed controls', () => {
     document.body.innerHTML = '<input id="first"><patmail-root id="patmail-extension-root"></patmail-root>'
     document.querySelector('patmail-root')!.attachShadow({ mode: 'open' }).innerHTML = '<input id="plugin"><button>扫描</button>'

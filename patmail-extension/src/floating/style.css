@@ -71,6 +71,8 @@
 .copy-status, .preview-note { margin: 9px 0 0; color: #8a7292; font-size: 11px; }
 .dom pre { max-height: 270px; margin: 10px 0 0; padding: 11px; overflow: auto; border-radius: 9px; background: #f9f6fb; color: #5e526b; font: 11px/1.5 Consolas, Monaco, monospace; white-space: pre; }
 .empty { margin: 10px 0 0; color: #9a8a9d; font-size: 12px; }
+.workspace-entry { width: 100%; margin: -4px 0 12px; min-height: 32px; border: 1px solid #e7c3df; border-radius: 9px; background: #fff; color: #b75c93; font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.workspace-entry:disabled { opacity: .6; cursor: wait; }
 .panel-tabs { display: flex; gap: 6px; margin: 0 0 12px; padding: 3px; border-radius: 10px; background: #f7eff9; }
 .panel-tabs button { flex: 1; min-height: 31px; border: 0; border-radius: 8px; background: transparent; color: #8f7698; font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
 .panel-tabs button.active { background: #fff; color: #b75c93; box-shadow: 0 1px 5px rgba(90, 54, 99, .09); }

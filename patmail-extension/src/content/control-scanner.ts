@@ -5,15 +5,35 @@ import { resolveSemantic } from './semantic-resolver'
 
 type NativeControl = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement
 
+function realm(element: Element): Window {
+  return element.ownerDocument.defaultView ?? window
+}
+
+export function isInputElement(element: Element): element is HTMLInputElement {
+  return element instanceof realm(element).HTMLInputElement
+}
+
+function isTextAreaElement(element: Element): element is HTMLTextAreaElement {
+  return element instanceof realm(element).HTMLTextAreaElement
+}
+
+function isSelectElement(element: Element): element is HTMLSelectElement {
+  return element instanceof realm(element).HTMLSelectElement
+}
+
+function isButtonElement(element: Element): element is HTMLButtonElement {
+  return element instanceof realm(element).HTMLButtonElement
+}
+
 function controlKind(element: NativeControl): FormControlKind {
-  if (element instanceof HTMLTextAreaElement) return 'textarea'
-  if (element instanceof HTMLSelectElement) return 'select'
-  if (element instanceof HTMLButtonElement) return 'button'
+  if (isTextAreaElement(element)) return 'textarea'
+  if (isSelectElement(element)) return 'select'
+  if (isButtonElement(element)) return 'button'
   return 'input'
 }
 
 function sensitiveControl(element: NativeControl): boolean {
-  return (element instanceof HTMLInputElement && ['password', 'file', 'hidden'].includes(element.type)) ||
+  return (isInputElement(element) && ['password', 'file', 'hidden'].includes(element.type)) ||
     [element.id, element.getAttribute('name') ?? '', element.getAttribute('autocomplete') ?? ''].some(isSensitiveName)
 }
 
@@ -34,17 +54,17 @@ export function scanControl(element: NativeControl, index: number, visible: bool
   const nearby = label ? undefined : nearbyLabel(element)
   const id = element.id || undefined
   const name = element.getAttribute('name') || undefined
-  const placeholder = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+  const placeholder = isInputElement(element) || isTextAreaElement(element)
     ? element.placeholder || undefined : undefined
   const ariaLabel = element.getAttribute('aria-label') || undefined
   const title = element.title || undefined
-  const options = element instanceof HTMLSelectElement ? optionsOf(element, redact) : undefined
-  const rawValue = redact ? REDACTED : element instanceof HTMLButtonElement
+  const options = isSelectElement(element) ? optionsOf(element, redact) : undefined
+  const rawValue = redact ? REDACTED : isButtonElement(element)
     ? element.value || element.textContent?.trim() || '' : element.value
-  const displayValue = redact ? REDACTED : element instanceof HTMLSelectElement
+  const displayValue = redact ? REDACTED : isSelectElement(element)
     ? Array.from(element.selectedOptions).map(option => option.text.trim()).join(', ') :
-      element instanceof HTMLButtonElement ? element.textContent?.trim() || element.value :
-        element instanceof HTMLInputElement && element.type === 'image' ? element.alt || element.value : rawValue
+      isButtonElement(element) ? element.textContent?.trim() || element.value :
+        isInputElement(element) && element.type === 'image' ? element.alt || element.value : rawValue
   const { attributes, dataset } = readAttributes(element)
   const semantic = resolveSemantic([
     { value: label, source: 'label', confidence: 1 },
@@ -58,20 +78,19 @@ export function scanControl(element: NativeControl, index: number, visible: bool
   return {
     key: `${kind}:${id ?? name ?? 'anonymous'}:${index}`,
     tagName: element.tagName.toLowerCase(), kind,
-    ...(element instanceof HTMLInputElement ? { inputType: element.type } : {}),
+    ...(isInputElement(element) ? { inputType: element.type } : {}),
     id, name, value: rawValue, displayValue, placeholder, title, label: label ?? nearby, ariaLabel,
     role: element.getAttribute('role') || undefined,
     classNames: Array.from(element.classList), visible,
     disabled: element.disabled || element.matches(':disabled'),
-    readonly: (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) && element.readOnly,
-    required: !(element instanceof HTMLButtonElement) && element.required,
-    ...(element instanceof HTMLInputElement && ['checkbox', 'radio'].includes(element.type) ? { checked: element.checked } : {}),
-    ...(element instanceof HTMLSelectElement ? { selected: element.selectedOptions.length > 0, multiple: element.multiple, options } : {}),
+    readonly: (isInputElement(element) || isTextAreaElement(element)) && element.readOnly,
+    required: !isButtonElement(element) && element.required,
+    ...(isInputElement(element) && ['checkbox', 'radio'].includes(element.type) ? { checked: element.checked } : {}),
+    ...(isSelectElement(element) ? { selected: element.selectedOptions.length > 0, multiple: element.multiple, options } : {}),
     attributes, dataset, ...semantic
   }
 }
 
 export function isNativeControl(element: Element): element is NativeControl {
-  return element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement ||
-    element instanceof HTMLSelectElement || element instanceof HTMLButtonElement
+  return isInputElement(element) || isTextAreaElement(element) || isSelectElement(element) || isButtonElement(element)
 }
