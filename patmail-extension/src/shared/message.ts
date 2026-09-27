@@ -422,6 +422,11 @@ export function isContentRequest(value: unknown): value is ContentRequest {
 
 const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'SEARCH_LIMIT_MONITOR', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
 
+/** 消息校验和后台派发共用同一份许可，避免新查询只通过前一层、却被后一层截断。 */
+export function isWorkspaceForwardRequest(value: unknown): value is ContentRequest {
+  return isContentRequest(value) && PAGE_FORWARD.has(value.type)
+}
+
 function isSearchContinuation(value: unknown): boolean {
   if (value === undefined) return true
   return isRecord(value) && Object.keys(value).length === 1 && typeof value.querySessionId === 'string' &&
@@ -468,7 +473,7 @@ function isWorkspaceAction(value: unknown): value is WorkspaceAction {
       isExpectedScope(value.expectedScope) && Object.keys(value).length === 4 && JSON.stringify(value).length <= 200_000
   }
   if (value.action === 'runAcceptance') return isAcceptanceAction(value)
-  if (value.action === 'forward') return Object.keys(value).length === 2 && isMessage(value.message) && PAGE_FORWARD.has(String(value.message.type))
+  if (value.action === 'forward') return Object.keys(value).length === 2 && isWorkspaceForwardRequest(value.message)
   return false
 }
 
@@ -614,11 +619,19 @@ function isWorkflowPreview(value: unknown): value is { executionId: string; node
     typeof value.urgencyId === 'string' && value.nodeId.length <= 80 && value.reviewerId.length <= 80 && value.urgencyId.length <= 80
 }
 
-const DICTIONARY_KINDS = new Set(['basic', 'flow', 'fieldColumn', 'listColumn', 'fileType', 'mailType'])
+const DICTIONARY_KINDS = new Set(['basic', 'flow', 'fieldColumn', 'listColumn', 'fileType', 'mailType', 'picker'])
 
 function isDictionaryRequest(value: unknown): value is DictionaryLoadRequest {
   if (!isRecord(value) || (value.force !== true && value.force !== false) || typeof value.kind !== 'string' || !DICTIONARY_KINDS.has(value.kind)) {
     return false
+  }
+  if (value.kind === 'picker') {
+    const allowed = new Set(['kind', 'force', 'caseTypeId', 'country', 'procType'])
+    if (!Object.keys(value).every(key => allowed.has(key))) return false
+    if (value.caseTypeId !== undefined && !isFlowId(value.caseTypeId)) return false
+    if (value.procType !== undefined && value.procType !== '' && !isFlowId(value.procType)) return false
+    if (value.country !== undefined && (typeof value.country !== 'string' || value.country.length > 400 || !/^[A-Za-z0-9_,-]*$/.test(value.country))) return false
+    return true
   }
   if (value.kind === 'fileType') {
     return typeof value.caseTypeId === 'string' &&

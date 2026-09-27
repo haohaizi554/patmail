@@ -1,8 +1,8 @@
 .demo-flag { background: #fff4d6; color: #946200; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; }
-.workspace > .page-head { margin-bottom: 8px; }
-.workspace > .card,
-.workspace > .metric-row,
-.workspace > form.card { margin-bottom: 14px; }
+.workspace-body > .page-head { margin-bottom: 8px; }
+.workspace-body > .card,
+.workspace-body > .metric-row,
+.workspace-body > form.card { margin-bottom: 14px; }
 .workspace .card > h2 { margin: 0 0 10px; font-size: 16px; }
 .workspace .empty { padding: 28px 8px; color: var(--sub); }
 .stack-form { display: grid; gap: 10px; max-width: 720px; }

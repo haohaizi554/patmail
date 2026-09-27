@@ -13,14 +13,14 @@ Content-Type：`application/x-www-form-urlencoded; charset=UTF-8`
 |---|---|
 | [00-通用约定.md](00-通用约定.md) | 鉴权、公共请求头、公共响应、调用规则 |
 | [01-案件信息.md](01-案件信息.md) | GetCaseInfo / GetCaseSales / GetFlowUser / GetSalesAssistant / GetFeeListByCase |
-| [02-公共数据.md](02-公共数据.md) | IPGetBasicData / GetFlowdirection / LoadFileTypeByCaseType / GetFileType |
+| [02-公共数据.md](02-公共数据.md) | IPGetBasicData / GetFlowdirection / 部门与人员树 / 所属分部 / 专利标签 |
 | [03-历史查询条件.md](03-历史查询条件.md) | SearchQueryHisList / SearchQueryHisSave / SearchQueryHisDelete |
 | [04-文件查询.md](04-文件查询.md) | GetSearchFiles |
 | [05-文件查询字段映射.md](05-文件查询字段映射.md) | FileSearch DOM / QueryXml ↔ GetSearchFiles |
-| [06-文件操作.md](06-文件操作.md) | GetFileName / 收文 / 删除 / 上传 / 下载（含未完成项） |
+| [06-文件操作.md](06-文件操作.md) | GetFileName / 下载名称模板 / 收文 / 删除 / 上传 / 下载 |
 | [07-发文与邮件.md](07-发文与邮件.md) | MailCustomer / SaveMailInfo / 邮件页读取 |
 | [08-流程审批.md](08-流程审批.md) | GetFlowInfo / GetFlowHistory / GetUrgencyList / GetFlowSubmit / FlowSubmit |
-| [09-期限监控.md](09-期限监控.md) | GetLimitMonitorCaseList / LimitMailCustomer |
+| [09-期限监控.md](09-期限监控.md) | LimitMonitorInit / GetLimitMonitorCaseList / LimitMailCustomer |
 
 ## 接口清单
 
@@ -35,6 +35,14 @@ Content-Type：`application/x-www-form-urlencoded; charset=UTF-8`
 | 文件类型 | Common.ashx | GetFileType | 只读响应已核对 |
 | 基础枚举 | CaseInfo.ashx | IPGetBasicData | 只读响应已核对 |
 | 流向与下载列名 | CaseInfo.ashx | GetFlowdirection | 只读响应已核对 |
+| 部门树 | Common.ashx | LoadDeptTree | 只读响应已核对 |
+| 人员树 | Common.ashx | GetTreeUser | 只读响应已核对 |
+| 代理机构树 | Common.ashx | GetTreeAgent | 请求已核对，响应正文未单独保存 |
+| 所属分部 | BaseInfo.ashx | GetDeptBranch | 只读响应已核对 |
+| 专利标签 | CaseInfo.ashx | GetApplyTags | 只读响应已核对，当前账号为空 |
+| 下载名称模板 | BaseInfo.ashx | GetFileTempNameList | 只读响应已核对 |
+| 期限监控初始化 | Report.ashx | LimitMonitorInit | 只读响应已核对 |
+| 期限处理事项 | Report.ashx | LimitMonitorGetCtrlproc | 只读响应已核对 |
 | 历史查询列表/加载 | CaseInfo.ashx | SearchQueryHisList | 已落盘 |
 | 历史查询保存 | CaseInfo.ashx | SearchQueryHisSave | 已落盘 |
 | 历史查询删除 | CaseInfo.ashx | SearchQueryHisDelete | 已落盘 |

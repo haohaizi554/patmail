@@ -1,3 +1,4 @@
+import { CURRENT_ENVIRONMENT } from '../config'
 import { isQueryGuid } from '../../query/query-validator'
 import { buildFileTypeTree } from '../../schema/file-type-tree'
 import { apiError, type ApiResult } from '../types'
@@ -10,8 +11,9 @@ import {
 import { DictionaryCache } from './cache'
 import { readDictionaryBody, responseKeyNames } from './guards'
 import type {
-  BasicDataSnapshot, DictionarySnapshot, FieldColumnSnapshot, FileTypeTreeSnapshot, FlowDataSnapshot, ListColumnSnapshot, MailTypeSnapshot
+  BasicDataSnapshot, DictionarySnapshot, FieldColumnSnapshot, FileTypeTreeSnapshot, FlowDataSnapshot, ListColumnSnapshot,   MailTypeSnapshot, PickerSnapshot
 } from './types'
+import { buildPickerCatalog } from './picker-catalog'
 
 const PAGE = 'FileSearch.aspx'
 const FILE_SEARCH_COLUMNS = 'CaseInfo.ashx_GetSearchFiles'
@@ -157,12 +159,67 @@ export class DictionaryService {
     })
   }
 
-  load(kind: DictionarySnapshot['kind'], userKey: string, force: boolean, caseTypeId = '', signal?: AbortSignal): Promise<ApiResult<DictionarySnapshot>> {
+  loadPicker(
+    userKey: string,
+    force: boolean,
+    caseTypeId = '',
+    signal?: AbortSignal,
+    filter: { country?: string; procType?: string } = {}
+  ): Promise<ApiResult<PickerSnapshot>> {
+    const country = typeof filter.country === 'string' && /^[A-Za-z0-9_,-]{0,400}$/.test(filter.country) ? filter.country : ''
+    const procType = isQueryGuid(filter.procType ?? '') ? filter.procType ?? '' : ''
+    const caseType = isQueryGuid(caseTypeId) ? caseTypeId : CURRENT_ENVIRONMENT.caseTypeId
+    return this.cache.load(this.cache.pickerKey(userKey, `${caseType}|${country}|${procType}`), force, async () => {
+      const jobs = [
+        ['dept', 'deptTree', { Call: 'LoadDeptTree', log_pagename: 'FileSearch.aspx' }],
+        ['user', 'treeUser', { Call: 'GetTreeUser', log_pagename: 'FileSearch.aspx' }],
+        ['agent', 'treeAgent', { Call: 'GetTreeAgent', log_pagename: 'FileSearch.aspx' }],
+        ['fileTemp', 'fileTempList', { Call: 'GetFileTempNameList', log_pagename: 'FileSearch.aspx' }],
+        ['branch', 'deptBranch', { Call: 'GetDeptBranch', log_pagename: 'LimitMonitor.aspx' }],
+        ['applyTags', 'applyTags', { Call: 'GetApplyTags', log_pagename: 'LimitMonitor.aspx' }],
+        ['limitInit', 'limitInit', { Call: 'LimitMonitorInit', log_pagename: 'LimitMonitor.aspx' }],
+        ['limitCtrl', 'limitCtrlProc', {
+          Call: 'LimitMonitorGetCtrlproc', case_type: caseType, country, proc_type: procType, log_pagename: 'LimitMonitor.aspx'
+        }]
+      ] as const
+      const settled = await Promise.all(jobs.map(async ([name, operation, fields]) => {
+        const response = await this.transport.post(operation, params(fields), signal)
+        if (!response.ok) return [name, response] as const
+        return [name, readDictionaryBody(response.data)] as const
+      }))
+      if (settled.every(([, result]) => !result.ok && result.error.code === 'SESSION_EXPIRED')) {
+        const failed = settled[0][1]
+        if (!failed.ok) return failed
+      }
+      const sources: Record<string, unknown> = {}
+      const warnings: string[] = []
+      for (const [name, result] of settled) {
+        if (!result.ok) {
+          warnings.push(`${name} 没有读到：${result.error.message}`)
+          sources[name] = null
+          continue
+        }
+        sources[name] = result.data
+      }
+      const built = buildPickerCatalog(sources)
+      return { ok: true, data: { kind: 'picker', dictionaries: built.dictionaries, warnings: [...warnings, ...built.warnings] } }
+    })
+  }
+
+  load(
+    kind: DictionarySnapshot['kind'],
+    userKey: string,
+    force: boolean,
+    caseTypeId = '',
+    signal?: AbortSignal,
+    picker: { country?: string; procType?: string } = {}
+  ): Promise<ApiResult<DictionarySnapshot>> {
     if (kind === 'basic') return this.loadBasic(userKey, force, signal)
     if (kind === 'flow') return this.loadFlow(userKey, force, signal)
     if (kind === 'fileType') return this.loadFileTypes(userKey, caseTypeId, force, signal)
     if (kind === 'fieldColumn') return this.loadFieldColumns(userKey, force, signal)
     if (kind === 'mailType') return this.loadMailTypes(userKey, force, signal)
+    if (kind === 'picker') return this.loadPicker(userKey, force, caseTypeId, signal, picker)
     return this.loadListColumns(userKey, force, signal)
   }
 }

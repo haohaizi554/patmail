@@ -1,8 +1,23 @@
 import snapshot from './file-search-form.snapshot.json'
 import { xmlNodeToApiField } from './field-registry'
+import { activeOptionUser, savedChoices } from './option-fallback'
 import type { FileSearchFormField } from '../shared/message'
 
 const saved = snapshot.fields as FileSearchFormField[]
+
+/** 打包时的扫描结果，叠上这个账号上次读到的非空选项。 */
+export function fallbackFields(): FileSearchFormField[] {
+  const userId = activeOptionUser()
+  if (!userId) return saved
+  return saved.map(field => {
+    const next = savedChoices(userId, formFieldKey(field.id))
+    if (!next?.length || (field.control !== 'select' && field.control !== 'picker')) return field
+    return {
+      ...field,
+      options: next.map(item => ({ value: item.value, label: item.label, ...(item.parent ? { parent: item.parent } : {}) }))
+    }
+  })
+}
 
 export function formFieldKey(id: string): string {
   return xmlNodeToApiField(id) ?? id
@@ -12,17 +27,17 @@ export function hiddenFormFields(fields: FileSearchFormField[] = saved): Set<str
   return new Set(fields.filter(item => !item.visible).map(item => formFieldKey(item.id)))
 }
 
-export function pageSelectOptions(key: string, fields: FileSearchFormField[] = saved): { value: string; label: string; parent?: string }[] | null {
+export function pageSelectOptions(key: string, fields: FileSearchFormField[] = fallbackFields()): { value: string; label: string; parent?: string }[] | null {
   const found = fields.find(item => item.visible && (item.control === 'select' || item.control === 'picker') && formFieldKey(item.id) === key && item.options.length)
   if (!found) return null
   return found.options.flatMap(option => {
-    if (!option.label || option.label === '请选择') return []
+    if (!option.label || option.label.replace(/[\s\-—_]/g, '') === '请选择') return []
     const row = { value: option.value || option.label, label: option.label }
     return option.parent ? [{ ...row, parent: option.parent }] : [row]
   })
 }
 
-export function mergeFormFields(live: FileSearchFormField[], previous: FileSearchFormField[] = saved): FileSearchFormField[] {
+export function mergeFormFields(live: FileSearchFormField[], previous: FileSearchFormField[] = fallbackFields()): FileSearchFormField[] {
   return live.map(field => {
     if (field.options.length) return field
     const older = previous.find(item => item.id === field.id)
@@ -30,7 +45,7 @@ export function mergeFormFields(live: FileSearchFormField[], previous: FileSearc
   })
 }
 
-export function describeFormCheck(live: FileSearchFormField[], previous: FileSearchFormField[] = saved): string[] {
+export function describeFormCheck(live: FileSearchFormField[], previous: FileSearchFormField[] = fallbackFields()): string[] {
   const before = new Map(previous.map(item => [item.id, item]))
   const hiddenNow: string[] = []
   const shownNow: string[] = []

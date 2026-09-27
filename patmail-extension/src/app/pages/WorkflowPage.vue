@@ -39,7 +39,7 @@ async function readFlow(): Promise<void> {
 </script>
 
 <template>
-  <PageHead title="工作流" desc="查看已有发文的流程位置，写操作保持关闭。" :art="bg('专业与信任.png')" />
+  <PageHead title="工作流" desc="查看已有发文的流程位置，写操作保持关闭。" :art="bg('悄悄地，我们与您同行.png')" />
   <section class="card">
     <h2>工作流</h2>
     <p class="hint">只读 GetFlowInfo、GetFlowHistory、GetFlowSubmit、GetFlowLastStatus。默认不提交。写开关：{{ WORKFLOW_WRITES_ENABLED ? '异常开启' : '关闭' }}</p>

@@ -134,7 +134,9 @@ export function useWorkspace() {
       const response = await sendToBackground({ type: MessageType.Workspace, payload: action }, 30_000)
       const stillCurrent = kind === 'mutation' ? requestId === mutationSerial : requestId === requestSerial
       if (!response || response.type !== MessageType.WorkspaceResult) {
-        if (stillCurrent && epoch === connectionEpoch) notice.value = '后台没有响应。'
+        if (stillCurrent && epoch === connectionEpoch) {
+          notice.value = response?.type === MessageType.Error ? response.payload.message : '后台没有响应。'
+        }
         return null
       }
       const next = response.payload.connection

@@ -128,7 +128,7 @@ async function importRules(): Promise<void> {
 </script>
 
 <template>
-  <PageHead title="发文规则与映射配置" desc="配置企业个性化发文规则，让自动化更贴合您的业务场景。" :art="bg('专业细节，守护创新.png')" />
+  <PageHead title="发文规则与映射配置" desc="配置企业个性化发文规则，让自动化更贴合您的业务场景。" :art="bg('好的规则，是高效友好的开始.png')" />
   <section v-if="!ready || !draft" class="card"><p class="empty">尚未确认 EASY 用户，不能读取发文规则。</p></section>
   <template v-else>
     <section class="card">

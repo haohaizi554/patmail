@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, inject, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import PageHead from '../../../../src/components/PageHead.vue'
 import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
 import { bg } from '../../../../src/assets'
 import type { HistoryQueryOption } from '../../api/query-history'
 import { PAGE_OPTIONS, queryBlocks, type QueryCell, type QuerySection } from '../../query/form-layout'
 import { hiddenFormFields, pageSelectOptions } from '../../query/form-page'
+import { activateOptionFallback, hydrateOptionFallback, optionFallbackEpoch, subscribeOptionFallback } from '../../query/option-fallback'
 import { fieldLabel } from '../../query/field-registry'
 import { isQueryGuid } from '../../query/query-validator'
 import { scopeFromConnection, type ExpectedAccountScope } from '../../shared/connection'
@@ -29,6 +30,8 @@ const formRevision = ref(1)
 const history = ref<HistoryQueryOption[]>([])
 const loadingTemplates = ref(false)
 const templateMessage = ref('')
+const fallbackTick = ref(0)
+const stopFallbackWatch = subscribeOptionFallback(() => { fallbackTick.value = optionFallbackEpoch() })
 
 const templateChoices = computed(() => {
   const local = templates.value.map(item => ({ value: item.id, label: item.name, group: '本机保存的查询' }))
@@ -121,6 +124,7 @@ function checked(key: string): boolean {
 }
 
 function optionsFor(key: string): { value: string; label: string }[] {
+  fallbackTick.value
   const known = pageSelectOptions(key) ?? PAGE_OPTIONS[key] ?? []
   const current = formValue(key)
   const extra = current && !known.some(item => item.value === current)
@@ -200,6 +204,12 @@ watch(accountEpoch, () => {
 })
 watch(ready, (ok) => { if (ok) void loadTemplates() })
 onMounted(() => { if (ready.value) void loadTemplates() })
+watch(() => connection.value.operatorId, userId => {
+  if (!userId) return
+  activateOptionFallback(userId)
+  void hydrateOptionFallback(userId)
+}, { immediate: true })
+onBeforeUnmount(stopFallbackWatch)
 </script>
 
 <template>

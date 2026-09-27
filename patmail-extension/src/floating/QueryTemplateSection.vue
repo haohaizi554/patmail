@@ -6,7 +6,8 @@ import type { HistoryQueryOption } from '../api/query-history'
 import type { CustomerQueryProfile } from '../customer/types'
 import { fieldGroup, fieldLabel, parseQueryXml, resolveQueryTemplate } from '../query'
 import { PAGE_OPTIONS, queryBlocks, type QueryCell, type QuerySection } from '../query/form-layout'
-import { describeFormCheck, hiddenFormFields, mergeFormFields, pageSelectOptions } from '../query/form-page'
+import { describeFormCheck, fallbackFields, formFieldKey, hiddenFormFields, mergeFormFields, pageSelectOptions } from '../query/form-page'
+import { activateOptionFallback, FILE_BASIC_OPTION_FIELDS, FILE_FLOW_OPTION_FIELDS, hydrateOptionFallback, optionFallbackEpoch, rememberDictionaries, rememberFormFields, savedChoices, subscribeOptionFallback } from '../query/option-fallback'
 import FileTypePicker from './FileTypePicker.vue'
 import { peekHistoryList, readHistoryList, saveHistoryList } from '../query/history-list-cache'
 import { TemplateLoadCoordinator } from '../query/load-coordinator'
@@ -18,6 +19,7 @@ import { scopeFromConnection, type ExpectedAccountScope } from '../shared/connec
 import { MessageType, type FileSearchFormField, type MessageBridge } from '../shared/message'
 import { useWorkspace } from '../app/composables/useWorkspace'
 import { hasOptionTree } from '../query/option-tree'
+import { describePickerReceipt, FILE_PICKER_FIELDS } from '../api/dictionaries/picker-catalog'
 import ThemeSelect from '../../../src/components/ThemeSelect.vue'
 import TreeOptionSelect from '../../../src/components/TreeOptionSelect.vue'
 
@@ -50,8 +52,11 @@ const temporary = ref<Record<string, string>>({})
 const temporaryActive = ref<Record<string, boolean>>({})
 const openExtra = ref<Record<string, boolean>>({})
 const pageFields = ref<FileSearchFormField[] | undefined>(undefined)
+const fallbackTick = ref(0)
+const stopFallbackWatch = subscribeOptionFallback(() => { fallbackTick.value = optionFallbackEpoch() })
 const pageHidden = computed(() => hiddenFormFields(pageFields.value))
 const checkMessage = ref('')
+const dictionaryNote = ref('')
 const downloadHint = ref('')
 const checkingForm = ref(false)
 const showFileTree = ref(false)
@@ -72,9 +77,14 @@ const loadingHistory = ref(false)
 const fileTypeNodes = ref<FileTypeNode[]>([])
 const basicDictionaries = ref<Record<string, NormalizedDictionary>>({})
 const flowDictionaries = ref<Record<string, NormalizedDictionary>>({})
+const pickers = ref<Record<string, NormalizedDictionary>>({})
+const pickerWarnings = ref<string[]>([])
 const loads = new TemplateLoadCoordinator()
 const workspace = useWorkspace()
-onBeforeUnmount(() => loads.dispose())
+onBeforeUnmount(() => {
+  loads.dispose()
+  stopFallbackWatch()
+})
 
 const businessFields = FILE_SEARCH_REQUEST_FIELDS.filter(field => !FILE_SEARCH_SYSTEM_FIELDS.has(field))
 const formSections = computed(() => queryBlocks(pageHidden.value))
@@ -176,14 +186,23 @@ function namedShown(key: string): string {
   const value = formValue(key)
   return value ? storedLabel(key, value) : ''
 }
+function liveChoices(dictionary: { name: string; dictionary: NormalizedDictionary }): { value: string; label: string; parent?: string }[] {
+  const rows = dictionary.dictionary.options.filter(item => !item.disabled)
+  const caseType = formValue('case_type')
+  const scoped = rows.some(item => item.metadata?.caseTypeId)
+  const picked = scoped && caseType ? optionsForCaseType(dictionary.name, dictionary.dictionary.options, caseType) : rows
+  return picked.map(item => ({
+    value: item.value,
+    label: item.label,
+    ...(item.parentValue ? { parent: item.parentValue } : {})
+  }))
+}
 function optionsFor(key: string): { value: string; label: string; parent?: string }[] {
+  fallbackTick.value
   const dictionary = dictionaryFor(key)
-  const loaded = dictionary
-    ? (dictionary.dictionary.options[0]?.metadata?.caseTypeId
-      ? optionsForCaseType(dictionary.name, dictionary.dictionary.options, formValue('case_type'))
-      : dictionary.dictionary.options).filter(item => !item.disabled).map(item => ({ value: item.value, label: item.label }))
-    : []
-  let options = loaded.length ? loaded : [...(pageSelectOptions(key, pageFields.value) ?? PAGE_OPTIONS[key] ?? [])]
+  const live = dictionary && dictionary.dictionary.options.length > 0 ? liveChoices(dictionary) : null
+  const stored = props.userId ? savedChoices(props.userId, key) : null
+  let options = live ?? [...(stored ?? pageSelectOptions(key, pageFields.value) ?? PAGE_OPTIONS[key] ?? [])]
   const current = formValue(key)
   if (current && !options.some(item => item.value === current)) {
     options = [{ value: current, label: storedLabel(key, current) }, ...options]
@@ -210,11 +229,15 @@ function restoreTemplate(): void {
   showFileTree.value = false
 }
 function dictionaryFor(key: string): { name: string; dictionary: NormalizedDictionary } | undefined {
-  const flowKey = key === 'file_status' ? 'fileStatus' : key === 'flow_direction' ? 'caseDirection' : key === 'proc_status' ? 'procStatus' : ''
+  const flowKey = key === 'file_status' ? 'fileStatus' : key === 'flow_direction' ? 'caseDirection' : key === 'proc_status' ? 'procStatus'
+    : key === 'selfilename1' ? 'downloadFileName' : ''
   if (flowKey && flowDictionaries.value[flowKey]) return { name: flowKey, dictionary: flowDictionaries.value[flowKey] }
   const basicKey = key === 'case_type' ? 'caseType' : key === 'apply_type' ? 'applyType' : key === 'case_status' ? 'caseStatus'
-    : key === 'business_type_id' ? 'bussType' : key === 'country' ? 'country' : ''
+    : key === 'business_type_id' ? 'bussType' : key === 'country' || key === 'customer_country' ? 'country'
+      : key === 'customer_status_id' ? 'customerStatus' : key === 'i_ctrl_proc' ? 'ctrlProc' : key === 'branch_dept_id' ? 'caseBranchDept' : ''
   if (basicKey && basicDictionaries.value[basicKey]) return { name: basicKey, dictionary: basicDictionaries.value[basicKey] }
+  const pickerName = FILE_PICKER_FIELDS[key]
+  if (pickerName && pickers.value[pickerName]) return { name: pickerName, dictionary: pickers.value[pickerName] }
   return undefined
 }
 async function reloadLocal(): Promise<void> {
@@ -266,17 +289,43 @@ async function loadFileTypes(caseTypeId: string): Promise<void> {
   fileTypeRoots.value = response.payload.data.rootIds
   if (response.payload.data.rootIds.length === 0) fileTypeMessage.value = '这个案件类型下面没有文件描述。'
 }
-async function loadDictionaries(ticketId: number, signal: AbortSignal): Promise<void> {
+async function loadDictionaries(ticketId: number, signal: AbortSignal, force = false): Promise<void> {
   if (!props.bridge) return
-  const responses = await Promise.all((['basic', 'flow'] as const).map(kind => props.bridge!.request({
-    type: MessageType.LoadDictionary, payload: { kind, force: false }
+  const settled = await Promise.allSettled((['basic', 'flow', 'picker'] as const).map(kind => props.bridge!.request({
+    type: MessageType.LoadDictionary, payload: { kind, force }
   }, signal)))
   if (!loads.isCurrent(ticketId)) return
-  for (const response of responses) {
-    if (response.type !== MessageType.DictionaryResult || !response.payload.ok) continue
+  dictionaryNote.value = ''
+  const problems: string[] = []
+  for (const item of settled) {
+    if (item.status !== 'fulfilled') {
+      problems.push('有一组下拉没有回传到页面。')
+      continue
+    }
+    const response = item.value
+    if (response.type === MessageType.Error) {
+      problems.push(response.payload.message || '下拉没有回传到页面。')
+      continue
+    }
+    if (response.type !== MessageType.DictionaryResult || !response.payload.ok) {
+      problems.push(response.type === MessageType.DictionaryResult && !response.payload.ok ? response.payload.error.message : '下拉没有回传到页面。')
+      continue
+    }
     if (response.payload.data.kind === 'basic') basicDictionaries.value = response.payload.data.dictionaries
     if (response.payload.data.kind === 'flow') flowDictionaries.value = response.payload.data.dictionaries
+    if (response.payload.data.kind === 'picker') {
+      pickers.value = response.payload.data.dictionaries
+      pickerWarnings.value = response.payload.data.warnings
+      dictionaryNote.value = describePickerReceipt(response.payload.data.dictionaries, response.payload.data.warnings)
+    }
   }
+  if (props.userId) {
+    rememberDictionaries(props.userId, FILE_FLOW_OPTION_FIELDS, flowDictionaries.value)
+    rememberDictionaries(props.userId, FILE_BASIC_OPTION_FIELDS, basicDictionaries.value)
+    rememberDictionaries(props.userId, FILE_PICKER_FIELDS, pickers.value)
+  }
+  if (!dictionaryNote.value && problems.length) dictionaryNote.value = problems[0]
+  else if (problems.length) dictionaryNote.value = `${dictionaryNote.value}。${problems[0]}`
 }
 function pickTemplate(id: string): void {
   selectedBaseId.value = id
@@ -596,16 +645,29 @@ async function checkAgainstPage(): Promise<void> {
     return
   }
   checkingForm.value = true
-  checkMessage.value = '正在打开原网站的文件查询页并读取字段…'
+  checkMessage.value = '正在向原网站读取下拉，并打开文件查询页核对字段…'
   try {
-    const response = await props.bridge.request({ type: MessageType.ScanFileSearchForm })
+    const ticket = loads.begin()
+    const [response] = await Promise.all([
+      props.bridge.request({ type: MessageType.ScanFileSearchForm }, ticket.signal),
+      loadDictionaries(ticket.id, ticket.signal, true)
+    ])
     if (response.type !== MessageType.FileSearchFormResult) {
       checkMessage.value = response.type === MessageType.Error ? response.payload.message : '没有读到原网站的查询表。'
       return
     }
-    const fields = response.payload.fields.length ? mergeFormFields(response.payload.fields) : undefined
+    const previous = fallbackFields()
+    const fields = response.payload.fields.length ? mergeFormFields(response.payload.fields, previous) : undefined
     if (fields) pageFields.value = fields
-    checkMessage.value = describeFormCheck(fields ?? response.payload.fields).join('')
+    if (props.userId) {
+      rememberFormFields(props.userId, response.payload.fields.map(field => ({ ...field, id: formFieldKey(field.id) })))
+      rememberDictionaries(props.userId, FILE_FLOW_OPTION_FIELDS, flowDictionaries.value)
+      rememberDictionaries(props.userId, FILE_BASIC_OPTION_FIELDS, basicDictionaries.value)
+      rememberDictionaries(props.userId, FILE_PICKER_FIELDS, pickers.value)
+    }
+    const lines = describeFormCheck(fields ?? response.payload.fields, previous)
+    if (pickerWarnings.value.length) lines.push(pickerWarnings.value[0])
+    checkMessage.value = lines.join('')
   } catch {
     checkMessage.value = '对照原网站查询页失败。'
   } finally {
@@ -622,6 +684,9 @@ watch(() => [props.userId, props.mode] as const, () => {
   historyMessage.value = ''
   basicDictionaries.value = {}
   flowDictionaries.value = {}
+  pickers.value = {}
+  pickerWarnings.value = []
+  dictionaryNote.value = ''
   fileTypeNodes.value = []
   fileTypeRoots.value = []
   editingCustomer.value = false
@@ -632,6 +697,8 @@ watch(() => [props.userId, props.mode] as const, () => {
   openExtra.value = {}
   void reloadLocal()
   if (!props.userId) return
+  activateOptionFallback(props.userId)
+  void hydrateOptionFallback(props.userId)
   void readHistoryList(props.userId, 'file').then(stored => {
     if (historyOptions.value.length === 0 && stored.length > 0) historyOptions.value = stored
   })
@@ -745,6 +812,7 @@ watch(selectedCustomerId, () => {
           <button type="button" class="text-button" @click="restoreTemplate">恢复模板</button>
         </span>
       </div>
+      <p v-if="dictionaryNote" class="hint">{{ dictionaryNote }}</p>
       <p v-if="mode === 'customer' && selectedCustomer" class="hint">当前客户：{{ selectedCustomer.name }}</p>
       <section v-for="block in formSections" :key="block.title" class="query-block">
         <div class="section-heading">

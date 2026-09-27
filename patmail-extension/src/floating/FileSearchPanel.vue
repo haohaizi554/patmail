@@ -139,7 +139,7 @@ async function executeSearch(query: FileSearchQuery, run: 'start' | 'continue' =
     if (current !== generation) return
     if (response.type !== MessageType.SearchFilesResult) {
       searchState.value = 'error'
-      searchMessage.value = '文件查询返回了意外结果。'
+      searchMessage.value = response.type === MessageType.Error ? response.payload.message : '文件查询返回了意外结果。'
       void showResults()
       return
     }

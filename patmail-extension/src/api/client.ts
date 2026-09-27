@@ -224,8 +224,9 @@ export class EasyRuntime {
     if (!(await this.confirmAccountRead())) {
       return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
     }
-    const caseTypeId = request.kind === 'fileType' ? request.caseTypeId : ''
-    return this.dictionaries.load(request.kind, this.historyUserKey, request.force, caseTypeId, signal).then(result => {
+    const caseTypeId = request.kind === 'fileType' || request.kind === 'picker' ? request.caseTypeId ?? '' : ''
+    const picker = request.kind === 'picker' ? { country: request.country ?? '', procType: request.procType ?? '' } : {}
+    return this.dictionaries.load(request.kind, this.historyUserKey, request.force, caseTypeId, signal, picker).then(result => {
       if (request.kind === 'listColumn' && result.ok && result.data.kind === 'listColumn' && result.data.colsel) {
         this.listColsel = result.data.colsel
       }
@@ -330,19 +331,16 @@ export class EasyRuntime {
   }
 
   searchLimitMonitor(query: LimitMonitorQuery): Promise<ApiResult<LimitMonitorResult>> {
-    if (this.session.status !== 'authenticated') {
-      return Promise.resolve(apiError(
-        this.session.status === 'expired' || this.session.status === 'unauthenticated' ? 'SESSION_EXPIRED' : 'AUTH_UNKNOWN',
-        '请先在 EASY 原网站登录并检测登录状态。'
-      ))
-    }
-    const params = buildLimitMonitorParams(query)
-    if (!params.ok) return Promise.resolve(params)
     this.cancelLimitMonitor()
     const controller = new AbortController()
     this.limitController = controller
     const requestNumber = ++this.limitSequence
     return (async (): Promise<ApiResult<LimitMonitorResult>> => {
+      if (!(await this.confirmAccountRead())) {
+        return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
+      }
+      const params = buildLimitMonitorParams(query)
+      if (!params.ok) return params
       const response = await this.transport.post('limitMonitor', params.data, controller.signal)
       if (requestNumber !== this.limitSequence) return apiError('REQUEST_ABORTED', '旧查询已取消。')
       const result = response.ok ? normalizeLimitMonitor(response.data, query) : response

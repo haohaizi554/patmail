@@ -11,9 +11,11 @@ const props = defineProps({
   loading: Boolean,
   message: { type: String, default: '' },
   connected: { type: Boolean, default: true },
-  hideForm: Boolean
+  hideForm: Boolean,
+  pageIndex: { type: Number, default: 1 },
+  pageSize: { type: Number, default: 10 }
 })
-const emit = defineEmits(['search'])
+const emit = defineEmits(['search', 'page'])
 const ui = inject('ui', null)
 const type = ref('all')
 const caseVolume = ref('')
@@ -31,6 +33,12 @@ const types = [
 ]
 const shown = computed(() => props.live ? props.rows : demoRows.value)
 const totalText = computed(() => props.live ? props.total : shown.value.length)
+const totalPages = computed(() => Math.max(1, Math.ceil(totalText.value / props.pageSize)))
+
+function goPage(page) {
+  if (page < 1 || page > totalPages.value || props.loading) return
+  emit('page', page)
+}
 
 function search() {
   if (props.live) {
@@ -78,6 +86,11 @@ function reset() {
   <section class="card" style="margin-top: 14px">
     <div class="toolbar">
       <span>共 {{ totalText }} 条</span>
+      <div v-if="live && totalPages > 1" class="pagination">
+        <button class="ghost tiny" type="button" :disabled="pageIndex <= 1 || loading" @click="goPage(pageIndex - 1)">上一页</button>
+        <span>{{ pageIndex }} / {{ totalPages }}</span>
+        <button class="ghost tiny" type="button" :disabled="pageIndex >= totalPages || loading" @click="goPage(pageIndex + 1)">下一页</button>
+      </div>
       <button class="ghost" type="button" disabled title="LimitMailCustomer 的写开关关闭，不会创建发文">创建发文</button>
     </div>
     <p v-if="message" class="hint">{{ message }}</p>
@@ -91,7 +104,7 @@ function reset() {
       </thead>
       <tbody>
         <tr v-if="!shown.length">
-          <td colspan="8">{{ loading ? '正在读取期限列表…' : '没有可显示的期限记录' }}</td>
+          <td colspan="8">{{ loading ? '正在读取期限列表…' : (message ? '查询没有完成，上面有原因。' : '没有可显示的期限记录') }}</td>
         </tr>
         <tr v-for="row in shown" :key="row.procId">
           <td>{{ row.caseVolume }}</td>

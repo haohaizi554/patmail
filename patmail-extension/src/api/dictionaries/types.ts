@@ -72,8 +72,14 @@ export interface ListColumnSnapshot {
   warnings: string[]
 }
 
+export interface PickerSnapshot {
+  kind: 'picker'
+  dictionaries: Record<string, NormalizedDictionary>
+  warnings: string[]
+}
+
 export type DictionarySnapshot =
-  | BasicDataSnapshot | FlowDataSnapshot | FileTypeTreeSnapshot | FieldColumnSnapshot | ListColumnSnapshot | MailTypeSnapshot
+  | BasicDataSnapshot | FlowDataSnapshot | FileTypeTreeSnapshot | FieldColumnSnapshot | ListColumnSnapshot | MailTypeSnapshot | PickerSnapshot
 
 export interface MailTypeSnapshot {
   kind: 'mailType'
@@ -81,8 +87,9 @@ export interface MailTypeSnapshot {
   diagnostics: string[]
 }
 
-export type DictionaryKind = 'basic' | 'flow' | 'fileType' | 'fieldColumn' | 'listColumn' | 'mailType'
+export type DictionaryKind = 'basic' | 'flow' | 'fileType' | 'fieldColumn' | 'listColumn' | 'mailType' | 'picker'
 
 export type DictionaryLoadRequest =
   | { kind: 'basic' | 'flow' | 'fieldColumn' | 'listColumn' | 'mailType'; force: boolean }
+  | { kind: 'picker'; force: boolean; caseTypeId?: string; country?: string; procType?: string }
   | { kind: 'fileType'; force: boolean; caseTypeId: string }

@@ -36,32 +36,7 @@ export const LIMIT_XML_TO_FIELD: Record<string, string> = {
   case_volume_customer_all: 'case_volume_customer'
 }
 
-export const LIMIT_SELECTS: Record<string, { value: string; label: string }[]> = {
-  case_type: [
-    { value: '31D1A147-2931-43B5-94AE-B72B1525BA8A', label: '专利' },
-    { value: '0E8A4B7F-E407-4EFF-9562-3809BF484207', label: '商标' },
-    { value: 'ABD40742-04F9-455F-BC41-080E9D896F80', label: '版权/综合' },
-    { value: '122136EA-F3E3-46C5-A529-EFC358AC764B', label: '其他' },
-    { value: '882D9F78-7656-468E-BE98-68FE5E334A9B', label: '科技服务' },
-    { value: '7A74BEB6-13DE-444B-892F-6E339D4067A2', label: '法律案件' },
-    { value: '849F2D30-DDAA-4718-AD1E-1951DE67913D', label: '调查案' }
-  ],
-  flow_direction: [
-    { value: 'II', label: '内-内' },
-    { value: 'IO', label: '内-外' },
-    { value: 'OI', label: '外-内' },
-    { value: 'OO', label: '外-外' }
-  ],
-  proc_type: [
-    { value: 'OM', label: '官方事项' },
-    { value: 'IM', label: '内部事项' }
-  ]
-}
-
-/**
- * 期限页控件名对应文件查询页已经扫到的选项。
- * 原网站这些格子是可搜索的树或下拉，不是手填文本。
- */
+/** 期限控件对应文件查询页已经扫下来的选项。接口还没返回时用这份，避免下拉被清空。 */
 export const LIMIT_OPTION_KEYS: Record<string, string> = {
   country: 'country',
   business_type_other: 'business_type_id',
@@ -83,6 +58,28 @@ export const LIMIT_OPTION_KEYS: Record<string, string> = {
   apply_tags_id: 'apply_tags_id',
   pic_dept_id: 'dept_id',
   user_assistant: 'user_assistant'
+}
+
+export const LIMIT_SELECTS: Record<string, { value: string; label: string }[]> = {
+  case_type: [
+    { value: '31D1A147-2931-43B5-94AE-B72B1525BA8A', label: '专利' },
+    { value: '0E8A4B7F-E407-4EFF-9562-3809BF484207', label: '商标' },
+    { value: 'ABD40742-04F9-455F-BC41-080E9D896F80', label: '版权/综合' },
+    { value: '122136EA-F3E3-46C5-A529-EFC358AC764B', label: '其他' },
+    { value: '882D9F78-7656-468E-BE98-68FE5E334A9B', label: '科技服务' },
+    { value: '7A74BEB6-13DE-444B-892F-6E339D4067A2', label: '法律案件' },
+    { value: '849F2D30-DDAA-4718-AD1E-1951DE67913D', label: '调查案' }
+  ],
+  flow_direction: [
+    { value: 'II', label: '内-内' },
+    { value: 'IO', label: '内-外' },
+    { value: 'OI', label: '外-内' },
+    { value: 'OO', label: '外-外' }
+  ],
+  proc_type: [
+    { value: 'A72068F7-6520-4AAF-A026-DADEB792ED4E', label: '官方事项' },
+    { value: '5FCD8B49-7BA8-4F42-AB1B-A0E7E75CB7FB', label: '内部事项' }
+  ]
 }
 
 const dates = (label: string, start: string, end: string, empty?: string): LimitDateCell => ({ kind: 'dates', label, start, end, empty })

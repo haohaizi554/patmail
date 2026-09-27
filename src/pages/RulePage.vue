@@ -27,7 +27,7 @@ const titleRules = reactive([
 </script>
 
 <template>
-  <PageHead title="发文规则与映射配置" desc="配置企业个性化发文规则，让自动化更贴合您的业务场景。" :art="bg('专业细节，守护创新.png')" />
+  <PageHead title="发文规则与映射配置" desc="配置企业个性化发文规则，让自动化更贴合您的业务场景。" :art="bg('好的规则，是高效友好的开始.png')" />
   <div class="quick-grid">
     <button v-for="j in jumps" :key="j[0]" class="quick" :class="[j[3], { picked: focus === j[0] }]" @click="focus = j[0]; ui.notify('已定位到' + j[0])">
       <img :src="icon(j[1])" alt="" /><span><b>{{ j[0] }}</b><small>{{ j[2] }}</small></span>

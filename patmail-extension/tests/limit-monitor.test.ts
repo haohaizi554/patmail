@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { LIMIT_OPTION_KEYS } from '../src/api/limit-form'
 import { buildLimitMailCustomerParams, buildLimitMonitorParams, LIMIT_MONITOR_FIELDS, LIMIT_MONITOR_TYPES } from '../src/api/limit-monitor-params'
-import { pageSelectOptions } from '../src/query/form-page'
 import { normalizeLimitMonitor } from '../src/api/limit-monitor-normalizer'
+import { isMessage, MessageType } from '../src/shared/message'
 
 const query = { type: 'all' as const, caseVolume: 'PA2622582', pageIndex: 1, pageSize: 10 }
 
@@ -12,6 +11,26 @@ function paramsOf(result: ReturnType<typeof buildLimitMonitorParams>): URLSearch
 }
 
 describe('期限监控', () => {
+  it('lets a customer-name search through the page channel', () => {
+    const query = {
+      type: 'all',
+      caseVolume: '',
+      applicationNo: '',
+      customerName: '广汽丰田',
+      fields: { customer_name: '广汽丰田' },
+      pageIndex: 1,
+      pageSize: 10
+    }
+    expect(isMessage({
+      type: MessageType.Workspace,
+      payload: { action: 'forward', message: { type: MessageType.SearchLimitMonitor, payload: { query } } }
+    })).toBe(true)
+    expect(isMessage({
+      type: MessageType.Workspace,
+      payload: { action: 'forward', message: { type: MessageType.LoadDictionary, payload: { kind: 'picker', force: true } } }
+    })).toBe(true)
+  })
+
   it('submits the 115 fields in order and keeps the other business tabs on the same call', () => {
     const params = paramsOf(buildLimitMonitorParams(query, () => 1000))
     expect([...params.keys()]).toEqual([...LIMIT_MONITOR_FIELDS])
@@ -24,17 +43,16 @@ describe('期限监控', () => {
     for (const type of LIMIT_MONITOR_TYPES) {
       expect(paramsOf(buildLimitMonitorParams({ ...query, type }, () => 1000)).get('Call')).toBe('GetLimitMonitorCaseList')
     }
-    expect(buildLimitMonitorParams({ ...query, caseVolume: '  ' }).ok).toBe(false)
+    expect(paramsOf(buildLimitMonitorParams({ ...query, caseVolume: '  ' }, () => 1000)).get('case_volume')).toBe('')
     const withFields = paramsOf(buildLimitMonitorParams({ ...query, caseVolume: '', fields: { applicant: '张三', is_fuzzy_query_app_no_other: 'true' } }, () => 1000))
     expect([...withFields.keys()]).toEqual([...LIMIT_MONITOR_FIELDS])
     expect(withFields.get('applicant')).toBe('张三')
     expect(withFields.get('business_type_other')).toBe('')
     const withBusiness = paramsOf(buildLimitMonitorParams({ ...query, fields: { business_type_other: '05E75F37-60F5-44E1-8B57-456AC8B4CFF7' } }, () => 1000))
     expect(withBusiness.get('business_type_other')).toBe('05E75F37-60F5-44E1-8B57-456AC8B4CFF7')
-    for (const key of ['country', 'business_type_other', 'dept_id', 'ctrl_proc', 'proc_pic_user', 'case_pic_user', 'proc_status', 'revise_user_id', 'sales', 'flow_user_id', 'user_assistant']) {
-      const options = pageSelectOptions(LIMIT_OPTION_KEYS[key])
-      expect(options && options.length > 0, key).toBe(true)
-    }
+    const procs = '945c4477-80b5-4423-bdec-b2391351c681,31D1A147-2931-43B5-94AE-B72B1525BA8A'
+    expect(paramsOf(buildLimitMonitorParams({ ...query, fields: { ctrl_proc: procs } }, () => 1000)).get('ctrl_proc')).toBe(procs)
+    expect(buildLimitMonitorParams({ ...query, fields: { ctrl_proc: '新申请' } }).ok).toBe(false)
     expect(withFields.get('is_fuzzy_query_app_no_other')).toBe('true')
     expect(withFields.get('case_volume')).toBe('')
   })

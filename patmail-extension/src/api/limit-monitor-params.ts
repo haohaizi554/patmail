@@ -64,6 +64,11 @@ export const LIMIT_MONITOR_COLSEL = ';undefined;undefined;case_id;case_volume;ca
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+function guidList(value: string): boolean {
+  const parts = value.split(',').map(item => item.trim()).filter(Boolean)
+  return parts.length > 0 && parts.every(item => GUID.test(item))
+}
+
 export function isLimitMonitorType(value: string): value is LimitMonitorType {
   return (LIMIT_MONITOR_TYPES as readonly string[]).includes(value)
 }
@@ -87,9 +92,7 @@ export function buildLimitMonitorParams(
       return apiError('INVALID_QUERY', '期限条件里有不能提交的项目。')
     }
   }
-  const filled = [caseVolume, applicationNo, customerName, ctrlProcId, ...Object.values(fields)].some(value => value.trim())
-  if (!filled) return apiError('INVALID_QUERY', '请输入我方文号、申请号、客户或处理事项。')
-  if ((ctrlProcId && !GUID.test(ctrlProcId)) || (fields.ctrl_proc?.trim() && !GUID.test(fields.ctrl_proc.trim()))) {
+  if ((ctrlProcId && !guidList(ctrlProcId)) || (fields.ctrl_proc?.trim() && !guidList(fields.ctrl_proc.trim()))) {
     return apiError('INVALID_QUERY', '处理事项必须使用内部 ID。')
   }
   const values: Record<string, string> = {}

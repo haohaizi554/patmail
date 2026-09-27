@@ -61,4 +61,5 @@ export class DictionaryCache {
   fieldColumnKey(userKey: string): string { return `${userKey}|fieldColumn` }
   listColumnKey(userKey: string): string { return `${userKey}|listColumn` }
   mailTypeKey(userKey: string): string { return `${userKey}|mailType` }
+  pickerKey(userKey: string, scope = ''): string { return scope ? `${userKey}|picker|${scope}` : `${userKey}|picker` }
 }

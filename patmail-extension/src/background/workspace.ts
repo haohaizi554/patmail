@@ -8,7 +8,7 @@ import { readMailRules } from '../mail/repository'
 import type { MailRuleBundle } from '../mail/types'
 import type { QueryTemplate } from '../query/query-types'
 import { chooseAppTab, EasyConnectionController, emptyConnection, accountScopeMatches, freezeAccount, sameAccountContext, tabOrigin, type AccountContextSnapshot, type BrowserTabRef, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope, type SessionObservation } from '../shared/connection'
-import { isMessage, MessageType, type AppMessage, type BackgroundResponse, type CreatedTaskResult } from '../shared/message'
+import { isMessage, isWorkspaceForwardRequest, MessageType, type AppMessage, type BackgroundResponse, type CreatedTaskResult } from '../shared/message'
 import { loadAccount, deleteCustomerAccount, deleteQueryTemplateAccount, refreshStaleTasks, saveCustomerAccount, saveQueryTemplateAccount, saveRuleAccount, type LocalArea } from './account-data'
 import { observeSearchPage, resolveSelectedFiles, toQueryObservation, type QueryObservationResult } from '../automation/file-search-snapshot'
 import { rememberFileTypeTree } from '../automation/file-description-resolver'
@@ -52,14 +52,6 @@ export function workspaceResult(partial: Partial<WorkspacePayload> & { connectio
   }
   return { type: MessageType.WorkspaceResult, payload }
 }
-
-const FORWARDED = new Set<string>([
-  MessageType.CheckSession, MessageType.CancelSessionCheck, MessageType.SearchFiles, MessageType.CancelFileSearch,
-  MessageType.ListHistoryQueries, MessageType.GetHistoryQuery, MessageType.LoadDictionary, MessageType.ScanFileSearchForm,
-  MessageType.FindMailExecution, MessageType.InspectEasyMail, MessageType.ReadWorkflow,
-  MessageType.RefreshWorkflow, MessageType.PreviewWorkflow, MessageType.DiagnoseExistingMail,
-  MessageType.RunReadonlyAcceptance
-])
 
 export interface WorkspaceHost {
   connection: EasyConnectionController
@@ -416,7 +408,7 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
     }
     const target = await boundTab(host)
     if (!target.ok) return workspaceResult({ ok: false, message: target.message, connection: host.connection.context })
-    if (!FORWARDED.has(action.message.type)) {
+    if (!isWorkspaceForwardRequest(action.message)) {
       return workspaceResult({ ok: false, message: '完整页面不能转发这个请求。', connection: host.connection.context })
     }
     const frozen = freezeAccount(host.connection.context)
@@ -430,7 +422,7 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
         return workspaceResult({ ok: false, message: '连接已经变化，这次结果已丢弃。', connection: host.connection.context })
       }
       if (!isMessage(response) || response.type === MessageType.Workspace || response.type === MessageType.WorkspaceResult) {
-        return workspaceResult({ ok: false, message: 'EASY 页面没有返回可识别的结果。', connection: host.connection.context })
+        return workspaceResult({ ok: false, message: 'EASY 页面没有返回可识别的结果。请刷新这个 EASY 标签页后再试。', connection: host.connection.context })
       }
       let forwarded = response
       if (frozen && action.message.type === MessageType.SearchFiles) {
@@ -444,10 +436,15 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
         rememberFileTypeTree(frozen, response.payload.data.caseTypeId, response.payload.data.nodes)
       }
       return workspaceResult({ ok: true, message: '', connection: host.connection.context, forwarded })
-    } catch {
-      host.connection.detach(target.tabId)
-      remember(host)
-      return workspaceResult({ ok: false, message: '绑定的 EASY 标签页已失效。', connection: host.connection.context })
+    } catch (error) {
+      const text = error instanceof Error ? error.message : ''
+      const gone = /no tab with id|tab was closed|receiving end does not exist|could not establish connection/i.test(text)
+      if (gone) {
+        host.connection.detach(target.tabId)
+        remember(host)
+        return workspaceResult({ ok: false, message: '绑定的 EASY 标签页已失效。', connection: host.connection.context })
+      }
+      return workspaceResult({ ok: false, message: text || 'EASY 页面没有执行这次查询。', connection: host.connection.context })
     }
   }
   if (action.action === 'runAcceptance') {
@@ -516,6 +513,7 @@ function stillUnbound(host: WorkspaceHost, version: number): boolean {
 async function observeTab(host: WorkspaceHost, tabId: number): Promise<SessionObservation | null> {
   try {
     const response = await host.sendToTab(tabId, { type: MessageType.CheckSession })
+    console.log('[patmail-bg] observeTab response', tabId, response)
     if (!isMessage(response) || response.type !== MessageType.SessionResult) {
       return { ok: false, message: '无法读取该标签页的登录状态。' }
     }
@@ -535,7 +533,8 @@ async function observeTab(host: WorkspaceHost, tabId: number): Promise<SessionOb
       checkedAt: response.payload.data.checkedAt,
       message: response.payload.data.message
     }
-  } catch {
+  } catch (error) {
+    console.log('[patmail-bg] observeTab error', tabId, error)
     return null
   }
 }
@@ -543,12 +542,16 @@ async function observeTab(host: WorkspaceHost, tabId: number): Promise<SessionOb
 /** 工作台打开时跟随已经登录的 EASY 标签页。多个不同账号时不代为选择。 */
 async function ensureEasySession(host: WorkspaceHost): Promise<EasyTabCandidate[]> {
   const tabs = host.connection.list(await host.queryTabs())
+  console.log('[patmail-bg] ensureEasySession tabs', tabs.length, tabs.map(t => ({ id: t.id, url: t.url })))
   const boundId = host.connection.context.easyTabId
   if (boundId != null) {
     if (tabs.some(tab => tab.id === boundId)) {
+      console.log('[patmail-bg] bound tab found, reading session', boundId)
       await readBoundSession(host)
+      console.log('[patmail-bg] after readBoundSession', host.connection.context.sessionStatus, host.connection.context.operatorId)
       return tabs
     }
+    console.log('[patmail-bg] bound tab missing, detach', boundId)
     host.connection.detach(boundId)
     remember(host)
   }
@@ -557,10 +560,12 @@ async function ensureEasySession(host: WorkspaceHost): Promise<EasyTabCandidate[
   for (const tab of tabs) {
     if (!stillUnbound(host, version)) return host.connection.list(await host.queryTabs())
     const observation = await observeTab(host, tab.id)
+    console.log('[patmail-bg] observeTab', tab.id, observation)
     if (!stillUnbound(host, version)) return host.connection.list(await host.queryTabs())
     if (observation) seen.push({ tab, observation })
   }
   const loggedIn = seen.filter(item => item.observation.ok && item.observation.status === 'authenticated' && item.observation.userId && isConfirmedOperator(item.observation.userId))
+  console.log('[patmail-bg] loggedIn count', loggedIn.length)
   const operators = new Set(loggedIn.map(item => item.observation.userId))
   if (operators.size === 1 && loggedIn[0]) {
     const begun = host.connection.beginBind(loggedIn[0].tab)
@@ -608,6 +613,7 @@ async function readBoundSession(host: WorkspaceHost, attempt = 0): Promise<void>
   }
   try {
     const response = await host.sendToTab(tabId, { type: MessageType.CheckSession })
+    console.log('[patmail-bg] readBoundSession response', tabId, response)
     if (host.connection.context.easyTabId !== tabId) return
     if (host.connection.context.connectionVersion !== version) {
       await retry()
@@ -640,7 +646,8 @@ async function readBoundSession(host: WorkspaceHost, attempt = 0): Promise<void>
       host.connection.context = { ...host.connection.context, message: '已切换到当前标签页的登录用户。' }
     }
     remember(host)
-  } catch {
+  } catch (error) {
+    console.log('[patmail-bg] readBoundSession error', tabId, error)
     if (host.connection.context.easyTabId !== tabId) return
     if (attempt < 2) {
       await retry()

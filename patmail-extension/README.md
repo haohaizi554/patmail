@@ -17,6 +17,14 @@ pnpm test:e2e
 
 打开 `chrome://extensions`，启用开发者模式，选择「加载已解压的扩展程序」，加载本目录的 `dist/`。修改源码后重新构建，在扩展管理页刷新扩展，并刷新目标网页。EASY 现场验收清单见 [docs/phase2-1-acceptance.md](docs/phase2-1-acceptance.md)；原扫描器验收见 [docs/phase1-acceptance.md](docs/phase1-acceptance.md)。
 
+### 查询没有发出时
+
+完整工作台的请求路径是 `app.html → Service Worker → 已绑定的 EASY 标签页 → EASY 接口`。HTTP 请求由 EASY 页面里的 Content Script 发起，因此应在**已绑定的 EASY 标签页**打开 Network，期限查询筛选 `Report.ashx`，检查 POST 表单里的 `Call=GetLimitMonitorCaseList`、`is_first=false` 和实际条件。仅查看 `app.html` 的 Network 不能判断 EASY 请求是否已发出。
+
+更新本地构建后，依次重新加载 PatMail 扩展、刷新已登录的 EASY 标签页，再重新打开 PatMail 工作台。仅运行构建不会更新浏览器中已加载的扩展后台。若页面提示后台无法识别消息、消息通道关闭或页面脚本不认识请求，按上述顺序更新三个运行上下文后重试。查询条件区的下拉选项读取提示与结果区的查询错误分开显示；下拉加载失败不等于查询结果为空。
+
+`pnpm test:e2e:limits` 单独验证期限查询：真实 Chromium 加载 `dist/`，填写客户名称并点击查询，检查请求参数、结果渲染、会话失效及 HTTP 错误。测试拦截整个 EASY Origin，不会调用线上服务；它也包含在 `pnpm test:e2e` 中。
+
 Manifest 目前仅对 `http://183.36.43.66:88/*`、`http://127.0.0.1/*` 和 `http://localhost/*` 自动注入；后两者只供本地页面扫描开发和验收，业务 API Runtime 仅信任固定 EASY Origin。浏览器内部页、其他网站及 `file://` 不在授权范围内。Popup 使用 `tabs` 读取活动标签页并发送消息；`storage` 只保存 PatMail 本地查询模板、客户配置和发文规则。没有 `scripting`、`activeTab` 或 `<all_urls>` 权限。EASY 主机显式限定 88 端口，本地地址允许所有端口。Chrome 的 host permission 忽略路径段，因此它是主机/端口级授权；content script 再按匹配规则自动注入。参见 [Chrome 匹配模式文档](https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns)。
 
 ## 使用方式

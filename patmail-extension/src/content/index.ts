@@ -165,7 +165,12 @@ const bridge: MessageBridge = {
 
 // Popup 发给当前顶层页面；返回 true 保持异步响应通道存活。
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
-  if (sender.id !== chrome.runtime.id || !isContentRequest(message)) return
+  if (sender.id !== chrome.runtime.id) return
+  if (!isContentRequest(message)) {
+    const type = message && typeof message === 'object' && 'type' in message ? String((message as { type?: unknown }).type) : '未知'
+    sendResponse({ type: MessageType.Error, payload: { message: `当前 EASY 页面脚本不认识 ${type}。请刷新这个 EASY 标签页。` } } satisfies ContentResponse)
+    return
+  }
   void bridge.request(message).then(sendResponse).catch(() => {
     sendResponse({ type: MessageType.Error, payload: { message: '页面读取失败，请刷新后重试。' } } satisfies ContentResponse)
   })

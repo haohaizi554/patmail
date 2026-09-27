@@ -5,6 +5,9 @@ import TreeOptionSelect from '../../../src/components/TreeOptionSelect.vue'
 import type { HistoryQueryOption } from '../api/query-history'
 import { LIMIT_BLOCKS, LIMIT_OPTION_KEYS, LIMIT_SELECTS, readLimitQueryXml } from '../api/limit-form'
 import { pageSelectOptions } from '../query/form-page'
+import { activateOptionFallback, hydrateOptionFallback, optionFallbackEpoch, rememberDictionaries, savedChoices, subscribeOptionFallback } from '../query/option-fallback'
+import type { NormalizedDictionary } from '../api/dictionaries'
+import { choicesFromDictionary, describePickerReceipt, LIMIT_PICKER_FIELDS } from '../api/dictionaries/picker-catalog'
 import { hasOptionTree } from '../query/option-tree'
 import { isLimitMonitorInputField, LIMIT_MONITOR_TYPES, type LimitMonitorQuery, type LimitMonitorType } from '../api/limit-monitor-params'
 import { isQueryGuid } from '../query/query-validator'
@@ -30,11 +33,22 @@ const selectedId = ref('')
 const showMore = ref(false)
 const loading = ref(false)
 const message = ref('')
+const checking = ref(false)
+const checkMessage = ref('')
+const pickers = ref<Record<string, NormalizedDictionary>>({})
+const pickersReady = ref(false)
+const fallbackTick = ref(0)
+const stopFallbackWatch = subscribeOptionFallback(() => { fallbackTick.value = optionFallbackEpoch() })
 const loads = new TemplateLoadCoordinator()
+let filterTimer = 0
 const blocks = computed(() => LIMIT_BLOCKS.filter(block => showMore.value || !block.more))
 const canRead = computed(() => Boolean(props.bridge) && Boolean(props.userId))
 
-onBeforeUnmount(() => loads.dispose())
+onBeforeUnmount(() => {
+  loads.dispose()
+  window.clearTimeout(filterTimer)
+  stopFallbackWatch()
+})
 
 function valueOf(key: string): string {
   return values.value[key] ?? ''
@@ -54,8 +68,15 @@ function onCheck(key: string, event: Event): void {
   setValue(key, on ? (key.endsWith('isnull') ? 'on' : 'true') : '')
 }
 function choices(key: string): { value: string; label: string; parent?: string }[] {
-  const source = LIMIT_OPTION_KEYS[key] ?? key
-  const options = [...(pageSelectOptions(source) ?? LIMIT_SELECTS[key] ?? [])]
+  fallbackTick.value
+  const source = LIMIT_PICKER_FIELDS[key]
+  const dictionary = source ? pickers.value[source] : undefined
+  const live = dictionary && dictionary.options.length > 0
+    ? choicesFromDictionary(dictionary, valueOf('case_type'), valueOf('country'))
+    : null
+  const stored = props.userId ? savedChoices(props.userId, key) : null
+  const saved = stored ?? pageSelectOptions(LIMIT_OPTION_KEYS[key] ?? key) ?? LIMIT_SELECTS[key] ?? []
+  const options = live ?? [...saved]
   const current = valueOf(key)
   if (current && !options.some(item => item.value === current)) options.unshift({ value: current, label: isQueryGuid(current) ? '已选择' : current })
   return options.filter(item => item.value)
@@ -85,7 +106,11 @@ async function loadTemplates(force: boolean): Promise<void> {
     if (!loads.isCurrent(ticket.id)) return
     if (response.type !== MessageType.HistoryQueriesResult || !response.payload.ok) {
       templates.value = []
-      message.value = response.type === MessageType.HistoryQueriesResult && !response.payload.ok ? response.payload.error.message : '期限模板没有读到。'
+      message.value = response.type === MessageType.Error
+        ? response.payload.message
+        : response.type === MessageType.HistoryQueriesResult && !response.payload.ok
+          ? response.payload.error.message
+          : '期限模板没有读到。'
       return
     }
     templates.value = response.payload.data
@@ -126,13 +151,15 @@ function search(): void {
     if (isLimitMonitorInputField(key)) fields[key] = value
   }
   const ctrl = fields.ctrl_proc?.trim() ?? ''
+  const ctrlIds = ctrl.split(',').map(item => item.trim()).filter(Boolean)
+  const ctrlReady = ctrlIds.length > 0 && ctrlIds.every(item => isQueryGuid(item))
   emit('search', {
     type: type.value,
     caseVolume: fields.case_volume ?? '',
     applicationNo: fields.app_no ?? '',
     customerName: fields.customer_name ?? '',
-    ...(isQueryGuid(ctrl) ? { ctrlProcId: ctrl } : {}),
-    fields: isQueryGuid(ctrl) || !ctrl ? fields : { ...fields, ctrl_proc: '' }
+    ...(ctrlReady ? { ctrlProcId: ctrlIds.join(',') } : {}),
+    fields: !ctrl || ctrlReady ? fields : { ...fields, ctrl_proc: '' }
   })
 }
 
@@ -143,12 +170,66 @@ function reset(): void {
   emit('search', { type: 'all', caseVolume: '', applicationNo: '', customerName: '', reset: true })
 }
 
+async function loadPickers(force: boolean): Promise<void> {
+  if (!props.bridge || !props.userId) {
+    checkMessage.value = '请先确认 EASY 已登录。'
+    return
+  }
+  checking.value = true
+  if (force || !pickersReady.value) checkMessage.value = '正在向原网站读取期限下拉…'
+  const caseType = valueOf('case_type')
+  const country = valueOf('country').split(',').map(item => item.trim()).filter(item => /^[A-Za-z0-9_-]{1,40}$/.test(item)).join(',')
+  const procType = valueOf('proc_type')
+  try {
+    const response = await props.bridge.request({
+      type: MessageType.LoadDictionary,
+      payload: {
+        kind: 'picker',
+        force,
+        ...(isQueryGuid(caseType) ? { caseTypeId: caseType } : {}),
+        ...(country ? { country } : {}),
+        ...(isQueryGuid(procType) ? { procType } : {})
+      }
+    })
+    if (response.type !== MessageType.DictionaryResult || !response.payload.ok || response.payload.data.kind !== 'picker') {
+      checkMessage.value = response.type === MessageType.Error
+        ? response.payload.message
+        : response.type === MessageType.DictionaryResult && !response.payload.ok
+          ? response.payload.error.message
+          : '期限下拉没有读到。'
+      return
+    }
+    pickers.value = response.payload.data.dictionaries
+    pickersReady.value = true
+    if (props.userId) rememberDictionaries(props.userId, LIMIT_PICKER_FIELDS, response.payload.data.dictionaries)
+    checkMessage.value = describePickerReceipt(response.payload.data.dictionaries, response.payload.data.warnings)
+  } catch {
+    checkMessage.value = '读取期限下拉失败。'
+  } finally {
+    checking.value = false
+  }
+}
+
 watch(() => props.userId, () => {
   templates.value = []
   values.value = {}
   selectedId.value = ''
-  if (props.userId) void loadTemplates(false)
+  pickers.value = {}
+  pickersReady.value = false
+  checkMessage.value = ''
+  if (props.userId) {
+    activateOptionFallback(props.userId)
+    void hydrateOptionFallback(props.userId)
+    void loadTemplates(false)
+    void loadPickers(false)
+  }
 }, { immediate: true })
+watch(() => [valueOf('case_type'), valueOf('proc_type'), valueOf('country')].join('|'), (next, previous) => {
+  if (!pickersReady.value || next === previous) return
+  if (valueOf('ctrl_proc')) setValue('ctrl_proc', '')
+  window.clearTimeout(filterTimer)
+  filterTimer = window.setTimeout(() => { void loadPickers(true) }, 400)
+})
 </script>
 
 <template>
@@ -169,8 +250,13 @@ watch(() => props.userId, () => {
     <div class="query-conditions">
       <div class="section-heading">
         <strong>查询条件</strong>
-        <button type="button" class="text-button" @click="showMore = !showMore">{{ showMore ? '收起更多条件' : '更多条件' }}</button>
+        <span class="inline-actions">
+          <button type="button" class="text-button" :disabled="!canRead || checking" @click="loadPickers(true)">校对最新字段</button>
+          <button type="button" class="text-button" @click="showMore = !showMore">{{ showMore ? '收起更多条件' : '更多条件' }}</button>
+        </span>
       </div>
+      <p v-if="checking && !pickersReady" class="hint">正在读取下拉选项…</p>
+      <p v-if="checkMessage" class="hint">{{ checkMessage }}</p>
       <section v-for="block in blocks" :key="block.title" class="query-block">
         <strong>{{ block.title }}</strong>
         <div class="query-grid">

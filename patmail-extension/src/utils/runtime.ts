@@ -1,32 +1,60 @@
+import { isRecord } from '../shared/guards'
 import { isMessage, MessageType, type BackgroundRequest, type BackgroundResponse } from '../shared/message'
 
-/** 扩展重新加载或后台不可用时返回 null，读取 lastError 避免浏览器产生未处理错误。 */
-export function sendToBackground(message: BackgroundRequest, timeoutMs = 5_000): Promise<BackgroundResponse | null> {
+function failure(message: string): BackgroundResponse {
+  return { type: MessageType.Error, payload: { message } }
+}
+
+const CALL_CHANNEL = 'patmail-call'
+const RESULT_CHANNEL = 'patmail-result'
+
+function acceptedBackground(response: unknown): response is BackgroundResponse {
+  return isMessage(response) && (
+    response.type === MessageType.Pong || response.type === MessageType.Error ||
+    response.type === MessageType.ExecutionLease || response.type === MessageType.ExecutionRecovered ||
+    response.type === MessageType.TaskResult || response.type === MessageType.AcceptanceResult ||
+    response.type === MessageType.EvidenceResult || response.type === MessageType.WorkspaceResult
+  )
+}
+
+function describeBackground(response: unknown, reason: string): BackgroundResponse {
+  const nested = isRecord(response) && isRecord(response.payload) && typeof response.payload.message === 'string'
+    ? response.payload.message : ''
+  const type = isRecord(response) && typeof response.type === 'string' ? response.type : ''
+  return failure(nested || (reason ? `扩展后台没有答上：${reason}` : '') || (type ? `扩展后台返回了无法识别的结果（${type}）。` : '扩展后台没有返回结果。'))
+}
+
+function sendThroughMessage(message: BackgroundRequest, timeoutMs: number): Promise<BackgroundResponse | null> {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(null), timeoutMs)
+    let settled = false
+    const requestId = globalThis.crypto.randomUUID()
     const finish = (result: BackgroundResponse | null) => {
+      if (settled) return
+      settled = true
       clearTimeout(timer)
+      chrome.runtime.onMessage.removeListener(onResult)
       resolve(result)
     }
+    const timer = setTimeout(() => finish(failure('扩展后台没有在时限内返回。')), timeoutMs)
+    const onResult = (pushed: unknown, sender: chrome.runtime.MessageSender) => {
+      if (sender.id !== chrome.runtime.id || !isRecord(pushed) || pushed.channel !== RESULT_CHANNEL || pushed.id !== requestId) return
+      if (acceptedBackground(pushed.body)) finish(pushed.body)
+      else finish(describeBackground(pushed.body, ''))
+    }
+    chrome.runtime.onMessage.addListener(onResult)
     try {
-      chrome.runtime.sendMessage(message, (response: unknown) => {
-        if (chrome.runtime.lastError || !isMessage(response)) {
-          finish(null)
-          return
-        }
-        const accepted = response.type === MessageType.Pong || response.type === MessageType.Error ||
-          response.type === MessageType.ExecutionLease || response.type === MessageType.ExecutionRecovered ||
-          response.type === MessageType.TaskResult || response.type === MessageType.AcceptanceResult ||
-          response.type === MessageType.EvidenceResult || response.type === MessageType.WorkspaceResult
-        if (!accepted) {
-          finish(null)
-          return
-        }
-        finish(response)
+      chrome.runtime.sendMessage({ channel: CALL_CHANNEL, id: requestId, message }, (response: unknown) => {
+        void chrome.runtime.lastError
+        if (acceptedBackground(response)) finish(response)
       })
-    } catch {
-      finish(null)
+    } catch (error) {
+      finish(failure(error instanceof Error ? error.message : '扩展后台无法接收消息。'))
     }
   })
+}
+
+/** 扩展重新加载或后台不可用时带回具体原因。消息口被嵌套调用关掉时，仍接收后台另送的结果。 */
+export function sendToBackground(message: BackgroundRequest, timeoutMs = 5_000): Promise<BackgroundResponse | null> {
+  return sendThroughMessage(message, timeoutMs)
 }
 

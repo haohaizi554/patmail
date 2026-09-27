@@ -132,6 +132,20 @@ export function adaptDictionaryValue(key: string, raw: unknown): NormalizedDicti
   })
 }
 
+/** 部门树、人员树、代理机构树、下载名称模板都是 id/name，父级在 pid 或 parent_id。 */
+export function adaptNodeTree(key: string, raw: unknown): NormalizedDictionary {
+  return adaptRows(key, raw, row => {
+    const value = text(row.id) || text(row.dept_id) || text(row.business_type_id) || text(row.value)
+    const label = text(row.name) || text(row.temp_name) || text(row.dept_name) || text(row.bussType) || text(row.text_zh_cn)
+    if (!value || !label || value.length > 80) return null
+    const parent = text(row.pid) || text(row.pId) || text(row.parent_id)
+    return option(value, label, {
+      parentValue: parent && parent !== value ? parent : undefined,
+      metadata: meta({ caseTypeId: text(row.case_type_id) })
+    })
+  })
+}
+
 export function adaptBranchDept(raw: unknown): NormalizedDictionary {
   return adaptRows('caseBranchDept', raw, row => {
     const value = text(row.dept_id)

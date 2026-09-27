@@ -1,17 +1,46 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import PageHead from '../../../../src/components/PageHead.vue'
 import { bg, icon } from '../../../../src/assets'
 import { useWorkspace } from '../composables/useWorkspace'
+import wechatQr from '../assets/wechat-qr.png'
 
 const { connection, customers, tasks, rules } = useWorkspace()
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
 const unknownCount = computed(() => tasks.value.filter(item => item.status === 'UNKNOWN').length)
 const title = computed(() => connection.value.displayName ? `下午好，${connection.value.displayName}！` : '首页')
+const qrOpen = ref(false)
+const wechatButton = ref<HTMLButtonElement | null>(null)
+const qrClose = ref<HTMLButtonElement | null>(null)
+
+function closeQr(): void {
+  qrOpen.value = false
+  void nextTick(() => wechatButton.value?.focus())
+}
+
+watch(qrOpen, (open) => {
+  if (open) void nextTick(() => qrClose.value?.focus())
+})
 </script>
 
 <template>
-  <PageHead :title="title" desc="今日已为您准备好了最新的发文任务，一起继续加油吧！" :art="bg('专注每一次发文，让知识更有力量.png')" />
+  <PageHead :title="title" desc="今日已为您准备好了最新的发文任务，一起继续加油吧！" :art="bg('专注每一次发文，让知识更有力量.png')">
+    <address class="page-contact">
+      <button ref="wechatButton" type="button" class="contact-hit" :aria-expanded="qrOpen" aria-haspopup="dialog" @click="qrOpen = true">
+        <span>WeChat</span><b>MemoryLeak2023</b>
+      </button>
+      <p><span>GitHub</span><a href="https://github.com/haohaizi554/patmail" target="_blank" rel="noreferrer">haohaizi554</a></p>
+      <p><span>phone</span><a href="tel:15603838733">15603838733</a></p>
+    </address>
+  </PageHead>
+  <Teleport to="body">
+    <div v-if="qrOpen" class="qr-layer" @click.self="closeQr" @keydown.esc="closeQr">
+      <div class="qr-card" role="dialog" aria-modal="true" aria-label="微信二维码">
+        <button ref="qrClose" type="button" class="qr-close" aria-label="关闭" @click="closeQr">×</button>
+        <img :src="wechatQr" alt="微信二维码，MemoryLeak2023" />
+      </div>
+    </div>
+  </Teleport>
   <div v-if="!ready" class="card"><p class="empty">尚未连接 EASY。确认登录用户之前，这里不显示客户、任务或发送统计。</p></div>
   <template v-else>
     <div class="metric-row">
