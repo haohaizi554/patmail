@@ -27,6 +27,7 @@ const customerName = ref('')
 const fileName = ref('')
 const pageSize = ref(20)
 const querySessionId = ref('')
+const sourceNotice = ref('')
 const searchState = ref<'idle' | 'loading' | 'success' | 'empty' | 'error'>('idle')
 const searchMessage = ref('')
 const result = ref<FileSearchResult | null>(null)
@@ -160,7 +161,9 @@ async function executeSearch(query: FileSearchQuery, run: 'start' | 'continue' =
       return
     }
     result.value = response.payload.data
-    if (response.payload.data.querySessionId) querySessionId.value = response.payload.data.querySessionId
+    sourceNotice.value = response.payload.data.sourceMessage ?? ''
+    if (response.payload.data.sourceCode === 'QUERY_SESSION_INVALID' || response.payload.data.sourceCode === 'QUERY_LAYOUT_CHANGED') querySessionId.value = ''
+    else if (response.payload.data.querySessionId) querySessionId.value = response.payload.data.querySessionId
     if (run === 'start') selected.value = {}
     searchState.value = result.value.total === 0 ? 'empty' : 'success'
     void showResults()
@@ -214,6 +217,7 @@ watch(() => workspace.connection.value.operatorId, (next, previous) => {
   result.value = null
   lastQuery.value = null
   querySessionId.value = ''
+  sourceNotice.value = ''
   bindProfileId.value = ''
   bindCustomers.value = []
   showMail.value = false
@@ -269,6 +273,7 @@ onBeforeUnmount(() => {
       <p v-else-if="searchState === 'error'" class="error" role="alert">{{ searchMessage }}</p>
       <p v-else-if="searchState === 'empty'" class="hint" role="status">没有符合条件的文件。</p>
       <template v-else-if="result">
+        <p v-if="sourceNotice" class="hint" role="status">{{ sourceNotice }}</p>
         <div class="result-toolbar">
           <span>已选 {{ Object.keys(selected).length }} 个文件</span>
           <button type="button" class="text-button" @click="selected = selectPage(selected, result.items.map(file => toSelectedFile(file, undefined, querySessionId)), true)">当前页全选</button>

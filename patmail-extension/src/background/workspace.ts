@@ -10,7 +10,7 @@ import type { QueryTemplate } from '../query/query-types'
 import { chooseAppTab, EasyConnectionController, emptyConnection, accountScopeMatches, freezeAccount, sameAccountContext, tabOrigin, type AccountContextSnapshot, type BrowserTabRef, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope } from '../shared/connection'
 import { isMessage, MessageType, type AppMessage, type BackgroundResponse, type CreatedTaskResult } from '../shared/message'
 import { loadAccount, deleteCustomerAccount, deleteQueryTemplateAccount, refreshStaleTasks, saveCustomerAccount, saveQueryTemplateAccount, saveRuleAccount, type LocalArea } from './account-data'
-import { observeSearchPage, resolveSelectedFiles } from '../automation/file-search-snapshot'
+import { observeSearchPage, resolveSelectedFiles, toQueryObservation, type QueryObservationResult } from '../automation/file-search-snapshot'
 import { rememberFileTypeTree } from '../automation/file-description-resolver'
 import { planTrustedTask } from '../automation/task-planner'
 import type { AutomationTask } from '../automation/types'
@@ -115,7 +115,7 @@ function staleResult(host: WorkspaceHost): BackgroundResponse {
   })
 }
 
-function rememberObservedSearch(frozen: AccountContextSnapshot, request: AppMessage, response: AppMessage): Promise<{ querySessionId: string } | null> {
+function rememberObservedSearch(frozen: AccountContextSnapshot, request: AppMessage, response: AppMessage): Promise<QueryObservationResult | null> {
   if (request.type !== MessageType.SearchFiles || response.type !== MessageType.SearchFilesResult || !response.payload.ok || !response.payload.data) return Promise.resolve(null)
   const continuation = request.payload.continuation
   return observeSearchPage({
@@ -123,7 +123,31 @@ function rememberObservedSearch(frozen: AccountContextSnapshot, request: AppMess
     query: request.payload.query,
     result: response.payload.data,
     ...(continuation ? { run: { mode: 'continue' as const, querySessionId: continuation.querySessionId } } : { run: { mode: 'start' as const } })
-  }).then(result => result.ok ? { querySessionId: result.session.querySessionId } : null)
+  }).then(toQueryObservation)
+}
+
+function sourceMessageFor(recorded: QueryObservationResult): string {
+  if (!recorded.ok) return recorded.code === 'QUERY_SESSION_INVALID' ? '这次翻页的查询运行已失效，请重新查询。' : recorded.message
+  if (recorded.status === 'CONFLICT') return '查询运行冲突。'
+  if (recorded.persistence === 'PERSISTED') return '已保存查询来源。'
+  if (recorded.persistence === 'MEMORY_ONLY') return '仅内存保存。'
+  return '查询来源保存失败。'
+}
+
+function annotateSearch<T extends AppMessage>(response: T, recorded: QueryObservationResult): T {
+  if (response.type !== MessageType.SearchFilesResult || !response.payload.ok || !response.payload.data) return response
+  const data = { ...response.payload.data }
+  delete data.querySessionId
+  if (recorded.ok) {
+    data.querySessionId = recorded.querySessionId
+    data.sourcePersistence = recorded.persistence
+    data.sourceCode = recorded.status === 'CONFLICT' ? 'FILE_DATA_CONFLICT' : recorded.persistence
+    data.sourceMessage = sourceMessageFor(recorded)
+  } else {
+    data.sourceCode = recorded.code
+    data.sourceMessage = sourceMessageFor(recorded)
+  }
+  return { ...response, payload: { ...response.payload, data } }
 }
 
 function stripSearchContinuation(message: AppMessage): AppMessage {
@@ -359,6 +383,10 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
         task.issues.push({ code: 'MIXED_QUERY_SESSION', message: '所选文件不属于同一次查询运行。', itemId: '' })
         if (task.status !== 'UNKNOWN') task.status = 'BLOCKED'
       }
+      if (resolved.issue === 'FILE_DATA_CONFLICT') {
+        task.issues.push({ code: 'FILE_DATA_CONFLICT', message: '同一文件在查询响应中的业务字段不一致，不能进入可信计划。', itemId: '' })
+        if (task.status !== 'UNKNOWN') task.status = 'BLOCKED'
+      }
       if (resolved.mismatches.length > 0) {
         task.issues.push({ code: 'FILE_FIELD_MISMATCH', message: '页面提交的文件字段与查询响应不一致，已按查询快照重建。', itemId: '' })
         if (task.status !== 'UNKNOWN') task.status = 'BLOCKED'
@@ -406,9 +434,7 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
         if (!sameAccountContext(host.connection.context, frozen)) {
           return workspaceResult({ ok: false, message: '账号已经变化，这次查询结果已丢弃。', connection: host.connection.context })
         }
-        if (recorded && response.type === MessageType.SearchFilesResult && response.payload.ok && response.payload.data) {
-          forwarded = { ...response, payload: { ...response.payload, data: { ...response.payload.data, querySessionId: recorded.querySessionId } } }
-        }
+        if (recorded) forwarded = annotateSearch(response, recorded)
       }
       if (frozen && action.message.type === MessageType.LoadDictionary && response.type === MessageType.DictionaryResult && response.payload.ok && response.payload.data.kind === 'fileType') {
         rememberFileTypeTree(frozen, response.payload.data.caseTypeId, response.payload.data.nodes)

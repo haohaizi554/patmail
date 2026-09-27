@@ -82,7 +82,10 @@ await context.route('http://183.36.43.66:88/**', async route => {
         : {
             ClientInfo: { IsLogin: true, Status: true, Result: true },
             TableRowsCount: empty ? '0' : '21',
-            TableRows: empty ? null : [{
+            TableRows: empty ? null : params.get('file_name') === 'dup-id' ? [
+              { file_id: 'file-dup', file_name: '重复.pdf', file_desc: '专利证书', case_volume: params.get('case_volume'), app_no: 'CN123', customer_name: '测试客户', post_date: '2026-09-24', file_status: '已发文' },
+              { file_id: 'file-dup', file_name: '重复.pdf', file_desc: '审查意见通知书', case_volume: params.get('case_volume'), app_no: 'CN123', customer_name: '测试客户', post_date: '2026-09-24', file_status: '已发文' }
+            ] : [{
               file_id: `file-${pageIndex}`, file_name: `通知书-${pageIndex}.pdf`,
               file_desc: '审查意见通知书', case_volume: params.get('case_volume'),
               app_no: 'CN123', customer_name: '测试客户', post_date: '2026-09-24', file_status: '已发文'
@@ -758,7 +761,12 @@ try {
         sessions: got && got.payload.task ? [...new Set((got.payload.task.verifiedSelection || []).map((item) => item.querySessionId))] : [],
         caseIds: stored.map((item) => item.caseId || ''),
         descriptionIds: stored.map((item) => item.fileDescriptionId || ''),
-        customerIds: stored.map((item) => item.customerId || '')
+        customerIds: stored.map((item) => item.customerId || ''),
+        sourcePersistence: first.payload.forwarded && first.payload.forwarded.payload.data.sourcePersistence,
+        sourceMessage: first.payload.forwarded && first.payload.forwarded.payload.data.sourceMessage,
+        evidenceRestorable: got && got.payload.task && got.payload.task.identityGate && got.payload.task.identityGate.evidenceRestorable,
+        descriptionVerified: got && got.payload.task && got.payload.task.identityGate && got.payload.task.identityGate.descriptionIdsVerified,
+        customerVerified: got && got.payload.task && got.payload.task.identityGate && got.payload.task.identityGate.customerIdsVerified
       }
     })
     assert.equal(crossPage.firstOk, true)
@@ -771,6 +779,64 @@ try {
     assert.deepEqual(crossPage.caseIds, ['', ''])
     assert.deepEqual(crossPage.descriptionIds, ['', ''])
     assert.deepEqual(crossPage.customerIds, ['', ''])
+    assert.equal(crossPage.sourcePersistence, 'PERSISTED')
+    assert.equal(crossPage.sourceMessage, '已保存查询来源。')
+    assert.equal(crossPage.evidenceRestorable, true)
+    assert.equal(crossPage.descriptionVerified, false)
+    assert.equal(crossPage.customerVerified, false)
+    const conflict = await app.evaluate(async () => {
+      const loaded = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'load' } })
+      const connection = loaded.payload.connection
+      const scope = {
+        easyOrigin: connection.easyOrigin,
+        operatorId: connection.operatorId,
+        easyTabId: connection.easyTabId,
+        connectionVersion: connection.connectionVersion
+      }
+      const query = { caseVolume: 'E2E-CONFLICT', fileName: 'dup-id', pageIndex: 1, pageSize: 20 }
+      const found = await chrome.runtime.sendMessage({ type: 'WORKSPACE', payload: { action: 'forward', message: { type: 'SEARCH_FILES', payload: { query } } } })
+      const data = found.payload.forwarded && found.payload.forwarded.payload.data
+      const sessionId = data && data.querySessionId
+      const invalid = await chrome.runtime.sendMessage({
+        type: 'WORKSPACE',
+        payload: { action: 'forward', message: { type: 'SEARCH_FILES', payload: { query: { ...query, pageIndex: 2 }, continuation: { querySessionId: '00000000-0000-4000-8000-000000000099' } } } }
+      })
+      const invalidData = invalid.payload.forwarded && invalid.payload.forwarded.payload.data
+      const planned = await chrome.runtime.sendMessage({
+        type: 'WORKSPACE',
+        payload: {
+          action: 'createTaskPlan',
+          queryTemplateVersion: 0,
+          expectedScope: scope,
+          files: [{
+            fileId: 'file-dup',
+            fileName: '重复.pdf',
+            fileDescription: '专利证书',
+            customerName: '测试客户',
+            caseVolume: 'E2E-CONFLICT',
+            querySessionId: sessionId
+          }]
+        }
+      })
+      return {
+        searchOk: found.payload.ok,
+        itemCount: data && data.items ? data.items.length : 0,
+        sourceCode: data && data.sourceCode,
+        sourceMessage: data && data.sourceMessage,
+        invalidCode: invalidData && invalidData.sourceCode,
+        invalidSession: invalidData && invalidData.querySessionId || '',
+        planStatus: planned.payload.createdTask && planned.payload.createdTask.status,
+        planSource: planned.payload.createdTask && planned.payload.createdTask.fileSource
+      }
+    })
+    assert.equal(conflict.searchOk, true)
+    assert.equal(conflict.itemCount, 2)
+    assert.equal(conflict.sourceCode, 'FILE_DATA_CONFLICT')
+    assert.equal(conflict.sourceMessage, '查询运行冲突。')
+    assert.equal(conflict.invalidCode, 'QUERY_SESSION_INVALID')
+    assert.equal(conflict.invalidSession, '')
+    assert.equal(conflict.planStatus, 'BLOCKED')
+    assert.equal(conflict.planSource, 'FILE_SOURCE_UNVERIFIED')
     const mailCalls = () => apiCalls.filter(item => item.path === '/AjaxServers/Mail.ashx').length
     const beforeMail = mailCalls()
     await app.getByRole('link', { name: '接口验收' }).click()

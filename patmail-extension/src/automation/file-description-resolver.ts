@@ -28,14 +28,21 @@ export function clearFileTypeTrees(): void {
   trees.clear()
 }
 
+export type DescriptionSelectability = 'confirmed' | 'pending' | 'rejected'
+
 /**
- * 只接受名称完全一致、案件类型明确、且唯一的合法节点。
+ * 名称完全一致、案件类型明确、且唯一的合法节点，只说明文本对上了字典。
+ * TreeType 的取值含义契约没有写明，不能用来判断节点能否发文。
+ * 没有明确可选标记，或节点仍有子节点时，保持已解析、业务可选性待确认。
  * 多条匹配时不取第一项。
  */
-export function resolveFileDescriptionIdentity(text: string, nodes: FileTypeNode[], caseTypeId: string): { fileDescriptionId?: string; verified: boolean } {
+export function resolveFileDescriptionIdentity(text: string, nodes: FileTypeNode[], caseTypeId: string): { fileDescriptionId?: string; verified: boolean; selectable: DescriptionSelectability } {
   const name = text.trim()
-  if (!name || !isQueryGuid(caseTypeId)) return { verified: false }
+  if (!name || !isQueryGuid(caseTypeId)) return { verified: false, selectable: 'rejected' }
   const matches = nodes.filter(node => node.name === name && isQueryGuid(node.id))
-  if (matches.length !== 1) return { verified: false }
-  return { fileDescriptionId: matches[0]!.id, verified: true }
+  if (matches.length !== 1) return { verified: false, selectable: 'rejected' }
+  const node = matches[0]!
+  if (node.selectable === false) return { verified: false, selectable: 'rejected' }
+  if (node.selectable === true && node.childIds.length === 0) return { fileDescriptionId: node.id, verified: true, selectable: 'confirmed' }
+  return { fileDescriptionId: node.id, verified: false, selectable: 'pending' }
 }

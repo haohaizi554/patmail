@@ -7,4 +7,6 @@ Desktop.ini
 .env
 .env.*
 *.key
+*.pem
+dist.pem
 credentials.json

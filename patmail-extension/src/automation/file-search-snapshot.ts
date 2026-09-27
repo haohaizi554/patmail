@@ -33,6 +33,8 @@ export interface FileSearchPageSnapshot {
   total: number
   queryFingerprint: string
   observedAt: string
+  /** 这一页自己的证据失效时间。后一页不能延长它。 */
+  evidenceExpiresAt: string
   fileIds: string[]
   files: ObservedPatentFile[]
 }
@@ -77,7 +79,19 @@ export interface ResolveContext {
   profiles?: CustomerQueryProfile[]
   descriptionNodes?: FileTypeNode[]
   caseTypeId?: string
+  /** 测试用的观察时钟。缺省为当前时间。 */
+  now?: string
 }
+
+export type QueryObservationResult =
+  | {
+      ok: true
+      querySessionId: string
+      observation: 'SEARCH_RESPONSE_OBSERVED'
+      persistence: PersistenceResult
+      status: QuerySessionStatus
+    }
+  | { ok: false; code: string; message: string }
 
 const hot = new Map<string, FileQuerySession>()
 const durable = new Map<string, FileQuerySession>()
@@ -184,7 +198,7 @@ function indexFromPages(pages: FileSearchPageSnapshot[]): { files: ObservedPaten
   for (const page of pages) {
     for (const file of page.files) {
       const copies = grouped.get(file.fileId) ?? []
-      copies.push({ ...file, pageIndex: page.pageIndex, conflict: false })
+      copies.push({ ...file, pageIndex: page.pageIndex })
       grouped.set(file.fileId, copies)
     }
   }
@@ -211,6 +225,7 @@ function normalize(value: FileQuerySession | null | undefined): FileQuerySession
   if (!value?.querySessionId || !value.queryFingerprint) return null
   const pages = (value.pages ?? []).map(page => ({
     ...page,
+    evidenceExpiresAt: page.evidenceExpiresAt || evidenceExpiry(page.observedAt),
     fileIds: page.fileIds ?? [],
     files: page.files ?? []
   }))
@@ -328,10 +343,10 @@ async function persist(session: FileQuerySession): Promise<FileQuerySession> {
   return kept
 }
 
-async function readSession(id: string): Promise<FileQuerySession | null> {
+async function readSession(id: string, now = Date.now()): Promise<FileQuerySession | null> {
   const stored = normalize(hot.get(id) ?? durable.get(id) ?? await defaultGet(id))
   if (!stored) return null
-  const alive = fresh(stored)
+  const alive = fresh(stored, now)
   if (!alive) {
     hot.delete(id)
     durable.delete(id)
@@ -367,6 +382,10 @@ function caseTypeOf(query: FileSearchQuery): string {
   return isQueryGuid(value) ? value : ''
 }
 
+function evidenceExpiry(observedAt: string): string {
+  return new Date(Date.parse(observedAt) + SESSION_TTL_MS).toISOString()
+}
+
 function buildPage(result: FileSearchResult, fingerprint: string, observedAt: string): FileSearchPageSnapshot {
   const files = filesFromResult(result.items, result.pageIndex, observedAt)
   return {
@@ -375,6 +394,7 @@ function buildPage(result: FileSearchResult, fingerprint: string, observedAt: st
     total: result.total,
     queryFingerprint: fingerprint,
     observedAt,
+    evidenceExpiresAt: evidenceExpiry(observedAt),
     fileIds: files.map(item => item.fileId),
     files
   }
@@ -384,10 +404,11 @@ function compose(current: FileQuerySession, page: FileSearchPageSnapshot, observ
   const pages = [...current.pages.filter(item => item.pageIndex !== page.pageIndex), page]
     .sort((left, right) => left.pageIndex - right.pageIndex)
   const indexed = indexFromPages(pages)
+  const expiresAt = pages.reduce((latest, item) => item.evidenceExpiresAt > latest ? item.evidenceExpiresAt : latest, page.evidenceExpiresAt)
   return {
     ...current,
     updatedAt: observedAt,
-    expiresAt: new Date(Date.parse(observedAt) + SESSION_TTL_MS).toISOString(),
+    expiresAt,
     pages,
     files: indexed.files,
     status: indexed.conflict ? 'CONFLICT' : 'ACTIVE'
@@ -415,9 +436,9 @@ export async function observeSearchPage(input: {
   result: FileSearchResult
   observedAt?: string
   run?: { mode: 'start' } | { mode: 'continue'; querySessionId: string }
-}): Promise<{ ok: true; session: FileQuerySession; persistence: PersistenceResult } | { ok: false; reason: string }> {
+}): Promise<{ ok: true; session: FileQuerySession; persistence: PersistenceResult } | { ok: false; reason: string; code: string }> {
   if (input.result.pageIndex !== input.query.pageIndex || input.result.pageSize !== input.query.pageSize) {
-    return { ok: false, reason: '响应页码与请求页码不一致。' }
+    return { ok: false, reason: '响应页码与请求页码不一致。', code: 'PAGE_MISMATCH' }
   }
   const fingerprint = queryFingerprintOf(input.query)
   const sortFingerprint = sortFingerprintOf(input.query)
@@ -428,12 +449,12 @@ export async function observeSearchPage(input: {
     const observedAt = input.observedAt ?? new Date().toISOString()
     const page = buildPage(input.result, fingerprint, observedAt)
     if (run.mode === 'continue') {
-      const current = await readSession(run.querySessionId)
+      const current = await readSession(run.querySessionId, Date.parse(observedAt))
       if (!current || current.status === 'STALE' || current.status === 'EXPIRED' || !sameScope(current, input.scope)) {
-        return { ok: false as const, reason: '查询运行已失效，需要重新查询。' }
+        return { ok: false as const, reason: '查询运行已失效，需要重新查询。', code: 'QUERY_SESSION_INVALID' }
       }
       if (current.queryFingerprint !== fingerprint || current.pageSize !== pageSize || current.sortFingerprint !== sortFingerprint) {
-        return { ok: false as const, reason: '分页布局或查询条件已变化，需要重新查询。' }
+        return { ok: false as const, reason: '分页布局或查询条件已变化，需要重新查询。', code: 'QUERY_LAYOUT_CHANGED' }
       }
       const next = await persist(compose(current, page, observedAt))
       if (next.status === 'ACTIVE') activeRuns.set(key, next.querySessionId)
@@ -541,33 +562,56 @@ function localBinding(request: SelectedPatentFile, source: ObservedPatentFile, p
   }
 }
 
-function fieldEvidence(source: ObservedPatentFile, descriptionVerified: boolean, profileVerified: boolean): FileFieldEvidence[] {
+function fieldEvidence(source: ObservedPatentFile, descriptionMatched: boolean, descriptionVerified: boolean, profileVerified: boolean): FileFieldEvidence[] {
   return [
     { field: 'fileId', source: 'EASY_SEARCH_RESPONSE', verified: true },
-    { field: 'fileDescriptionId', source: descriptionVerified ? 'EASY_DICTIONARY' : 'UNKNOWN', verified: descriptionVerified },
+    { field: 'fileDescriptionId', source: descriptionMatched ? 'EASY_DICTIONARY' : 'UNKNOWN', verified: descriptionVerified },
     { field: 'customerId', source: 'UNKNOWN', verified: false },
     { field: 'caseId', source: source.caseId ? 'EASY_SEARCH_RESPONSE' : 'UNKNOWN', verified: Boolean(source.caseId) },
     { field: 'customerProfileId', source: profileVerified ? 'LOCAL_PROFILE' : 'UNKNOWN', verified: profileVerified }
   ]
 }
 
+function pageStillValid(page: FileSearchPageSnapshot, now: number): boolean {
+  return Date.parse(page.evidenceExpiresAt || evidenceExpiry(page.observedAt)) > now
+}
+
+function liveCopies(session: FileQuerySession, fileId: string, now: number): ObservedPatentFile[] {
+  return session.pages
+    .filter(page => pageStillValid(page, now))
+    .flatMap(page => page.files.filter(file => file.fileId === fileId))
+}
+
+function evidenceExpiresFor(session: FileQuerySession, fileId: string, now: number): string {
+  const times = session.pages
+    .filter(page => pageStillValid(page, now) && page.files.some(file => file.fileId === fileId && !file.conflict))
+    .map(page => page.evidenceExpiresAt)
+    .sort()
+  return times[0] ?? ''
+}
+
 export async function resolveSelectedFiles(requested: SelectedPatentFile[], scope: QueryScope, context: ResolveContext = {}): Promise<{
   files: SelectedPatentFile[]
   selections: VerifiedSelectionSnapshot[]
   mismatches: string[]
-  issue?: 'MIXED_QUERY_SESSION'
+  issue?: 'MIXED_QUERY_SESSION' | 'FILE_DATA_CONFLICT'
 }> {
+  const now = context.now ? Date.parse(context.now) : Date.now()
   const ids = [...new Set(requested.map(item => item.querySessionId?.trim() ?? ''))]
-  const issue = ids.filter(Boolean).length > 1 ? 'MIXED_QUERY_SESSION' as const : undefined
+  const mixed = ids.filter(Boolean).length > 1
+  let conflict = false
   const mismatches: string[] = []
   const files: SelectedPatentFile[] = []
   const selections: VerifiedSelectionSnapshot[] = []
   for (const request of requested) {
     const sessionId = request.querySessionId?.trim() ?? ''
-    const session = sessionId ? await readSession(sessionId) : null
-    const source = session && session.status !== 'STALE' && session.status !== 'EXPIRED' && sameScope(session, scope)
-      ? session.files.find(item => item.fileId === request.fileId && !item.conflict)
-      : undefined
+    const session = sessionId ? await readSession(sessionId, now) : null
+    const copies = session && session.status !== 'STALE' && session.status !== 'EXPIRED' && sameScope(session, scope)
+      ? liveCopies(session, request.fileId, now)
+      : []
+    const disagreed = copies.some(item => item.conflict) || copies.some(item => !sameBusiness(item, copies[0]!))
+    if (disagreed) conflict = true
+    const source = !disagreed ? copies[0] : undefined
     if (!session || !source) {
       files.push(unverifiedFile(request))
       selections.push(unverifiedSelection(request, scope))
@@ -607,11 +651,26 @@ export async function resolveSelectedFiles(requested: SelectedPatentFile[], scop
       ...(source.caseId ? { caseId: source.caseId } : {}),
       querySessionId: session.querySessionId,
       fetchedAt: source.observedAt,
+      evidenceExpiresAt: evidenceExpiresFor(session, source.fileId, now),
+      persistence: session.persistence,
+      descriptionSelectability: description.selectable,
       easyOrigin: session.easyOrigin,
       operatorId: session.operatorId,
       verification: 'SEARCH_RESPONSE_OBSERVED',
-      fieldEvidence: fieldEvidence(source, description.verified, Boolean(binding.customerProfileId))
+      fieldEvidence: fieldEvidence(source, Boolean(description.fileDescriptionId), description.verified, Boolean(binding.customerProfileId))
     })
   }
+  const issue = mixed ? 'MIXED_QUERY_SESSION' as const : conflict ? 'FILE_DATA_CONFLICT' as const : undefined
   return { files, selections, mismatches, ...(issue ? { issue } : {}) }
+}
+
+export function toQueryObservation(result: Awaited<ReturnType<typeof observeSearchPage>>): QueryObservationResult {
+  if (!result.ok) return { ok: false, code: result.code, message: result.reason }
+  return {
+    ok: true,
+    querySessionId: result.session.querySessionId,
+    observation: 'SEARCH_RESPONSE_OBSERVED',
+    persistence: result.persistence,
+    status: result.session.status
+  }
 }

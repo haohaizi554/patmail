@@ -34,6 +34,10 @@ export interface FileTypeNode {
   parentId: string
   order: number
   childIds: string[]
+  /** 原样保留。契约没有说明取值含义，不能据此判断能否发文。 */
+  treeType?: string
+  /** 只有调用方明确给出时才使用。树构建不会从 TreeType 推断。 */
+  selectable?: boolean
 }
 
 export interface FileTypeTreeSnapshot {

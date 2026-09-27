@@ -42,7 +42,8 @@ export function buildFileTypeTree(rows: unknown[]): BuiltFileTypeTree {
     }
     seen.add(id)
     const order = typeof source.seq === 'number' && Number.isFinite(source.seq) ? source.seq : nodes.length
-    nodes.push({ id, name, parentId: text(source.pid), order, childIds: [] })
+    const treeType = text((source as { TreeType?: unknown }).TreeType)
+    nodes.push({ id, name, parentId: text(source.pid), order, childIds: [], ...(treeType ? { treeType } : {}) })
   }
   const byId = new Map(nodes.map(node => [node.id, node]))
   const roots: FileTypeNode[] = []

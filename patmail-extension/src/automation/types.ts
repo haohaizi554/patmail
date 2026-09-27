@@ -56,11 +56,15 @@ export interface FileFieldEvidence {
   verified: boolean
 }
 
+export type EvidencePersistence = 'PERSISTED' | 'MEMORY_ONLY' | 'FAILED'
+
 export interface TaskIdentityGate {
   fileSource: 'FILE_SOURCE_UNVERIFIED' | 'SEARCH_RESPONSE_OBSERVED'
   descriptionIdsVerified: boolean
   customerIdsVerified: boolean
   mixedQuerySession: boolean
+  persistence: EvidencePersistence | 'UNKNOWN'
+  evidenceRestorable: boolean
 }
 
 /** 每一份文件自己的查询来源。任务总等级不能高于其中最低的一份。 */
@@ -75,6 +79,9 @@ export interface VerifiedSelectionSnapshot {
   caseId?: string
   querySessionId?: string
   fetchedAt: string
+  evidenceExpiresAt?: string
+  persistence?: EvidencePersistence
+  descriptionSelectability?: 'confirmed' | 'pending' | 'rejected' | 'unknown'
   easyOrigin: string
   operatorId: string
   verification: 'FILE_SOURCE_UNVERIFIED' | 'SEARCH_RESPONSE_OBSERVED'

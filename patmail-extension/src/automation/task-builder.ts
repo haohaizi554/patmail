@@ -6,7 +6,7 @@ import type { MailRuleBundle, SelectedPatentFile } from '../mail/types'
 import { buildQueryDependencies, referencedProfileIds } from './query-dependency'
 import { sha256Hex } from './sha256'
 import { customerIdentities, createTaskSnapshot, emptyIdentity } from './snapshot'
-import type { AutomationIssue, AutomationTask, AutomationTaskItem, CustomerIdentitySnapshot, TaskCustomer, TaskIdentityGate, VerifiedSelectionSnapshot } from './types'
+import type { AutomationIssue, AutomationTask, AutomationTaskItem, CustomerIdentitySnapshot, EvidencePersistence, TaskCustomer, TaskIdentityGate, VerifiedSelectionSnapshot } from './types'
 import type { QueryTemplate } from '../query/query-types'
 
 export interface TaskBuildInput {
@@ -20,6 +20,14 @@ export interface TaskBuildInput {
   fileSource?: 'FILE_SOURCE_UNVERIFIED' | 'SEARCH_RESPONSE_OBSERVED'
   verifiedSelection?: VerifiedSelectionSnapshot[]
   now?: string
+}
+
+function evidencePersistence(items: VerifiedSelectionSnapshot[]): EvidencePersistence | 'UNKNOWN' {
+  const values = items.map(item => item.persistence).filter((value): value is EvidencePersistence => value === 'PERSISTED' || value === 'MEMORY_ONLY' || value === 'FAILED')
+  if (values.includes('FAILED')) return 'FAILED'
+  if (values.includes('MEMORY_ONLY')) return 'MEMORY_ONLY'
+  if (values.length > 0 && values.every(value => value === 'PERSISTED')) return 'PERSISTED'
+  return 'UNKNOWN'
 }
 
 function identityForItem(profileId: string, easyCustomerId: string, identities: CustomerIdentitySnapshot[]): CustomerIdentitySnapshot {
@@ -141,11 +149,14 @@ export function buildTask(input: TaskBuildInput): AutomationTask {
   const sessions = new Set(verifiedSelection.map(item => item.querySessionId ?? ''))
   const observed = verifiedSelection.length > 0 && verifiedSelection.every(item => item.verification === 'SEARCH_RESPONSE_OBSERVED') && sessions.size === 1 && !sessions.has('')
   const verifiedField = (field: string) => verifiedSelection.length > 0 && verifiedSelection.every(item => item.fieldEvidence?.some(entry => entry.field === field && entry.verified))
+  const persistence = evidencePersistence(verifiedSelection)
   const identityGate: TaskIdentityGate = {
     fileSource: observed ? 'SEARCH_RESPONSE_OBSERVED' : 'FILE_SOURCE_UNVERIFIED',
     descriptionIdsVerified: verifiedField('fileDescriptionId'),
     customerIdsVerified: verifiedField('customerId'),
-    mixedQuerySession: sessions.size > 1
+    mixedQuerySession: sessions.size > 1,
+    persistence,
+    evidenceRestorable: observed && persistence === 'PERSISTED'
   }
   return {
     taskId, name: `${customers.length > 1 ? '多个客户' : sole?.name || '未绑定客户'} · ${input.files.length} 个文件`,

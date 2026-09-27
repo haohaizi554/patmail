@@ -166,7 +166,7 @@ describe('Phase 3.6 查询快照与内部标识', () => {
       { id: descriptionId, name: '专利证书', parentId: '', order: 1, childIds: [] },
       { id: forgedDescription, name: '审查意见通知书', parentId: '', order: 2, childIds: [] }
     ]
-    expect(resolveFileDescriptionIdentity('专利证书', nodes, caseType)).toEqual({ fileDescriptionId: descriptionId, verified: true })
+    expect(resolveFileDescriptionIdentity('专利证书', nodes, caseType)).toEqual({ fileDescriptionId: descriptionId, verified: false, selectable: 'pending' })
     expect(resolveFileDescriptionIdentity('专利证书', [...nodes, { id: forgedCustomer, name: '专利证书', parentId: '', order: 3, childIds: [] }], caseType).verified).toBe(false)
     expect(resolveFileDescriptionIdentity('专利', nodes, caseType).fileDescriptionId).toBeUndefined()
   })
@@ -187,8 +187,9 @@ describe('Phase 3.6 查询快照与内部标识', () => {
     clearFileTypeTrees()
     rememberFileTypeTree(scopeA, caseType, [{ id: descriptionId, name: '专利证书', parentId: '', order: 1, childIds: [] }])
     const unique = await resolveSelectedFiles([file('A', observed.session.querySessionId)], scopeA, { profiles: [profile()] })
-    expect(unique.files[0]?.fileDescriptionId).toBe(descriptionId)
-    expect(unique.selections[0]?.fieldEvidence?.find(item => item.field === 'fileDescriptionId')).toEqual({ field: 'fileDescriptionId', source: 'EASY_DICTIONARY', verified: true })
+    expect(unique.files[0]?.fileDescriptionId).toBeUndefined()
+    expect(unique.selections[0]?.descriptionSelectability).toBe('pending')
+    expect(unique.selections[0]?.fieldEvidence?.find(item => item.field === 'fileDescriptionId')).toEqual({ field: 'fileDescriptionId', source: 'EASY_DICTIONARY', verified: false })
   })
 
   it('discards a late search result after the account changes', async () => {

@@ -27,4 +27,7 @@ export interface FileSearchResult {
   totalPages: number
   /** Background 在记录查询运行后写回。不是 EASY 响应字段。 */
   querySessionId?: string
+  sourcePersistence?: 'PERSISTED' | 'MEMORY_ONLY' | 'FAILED'
+  sourceCode?: string
+  sourceMessage?: string
 }
