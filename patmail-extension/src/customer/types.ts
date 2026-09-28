@@ -17,6 +17,10 @@ export interface PctTaskRow {
   mailTypeId?: string
   /** 1 是贵方案号且深圳市，3 是我方案号且深圳市。这是树上的位置，不是提交值。 */
   mailTypeRadioIndex?: 1 | 3
+  /** 这一行任务的收件人。加载这封发文时的预填在前，联系人追加在后。 */
+  mailTo?: string
+  /** 这一行任务的抄送。规则与收件人相同。 */
+  mailCc?: string
 }
 
 /** 勾选 PCT 提醒后，用表格记下的任务。发文类型只记名称和顺序。 */
@@ -28,6 +32,10 @@ export interface PctTaskDraft {
   /** 创建任务时选中的发件邮箱。没选则沿用客户配置。 */
   mailsetId?: string
   mailsetLabel?: string
+  /** 旧数据可能把整张表收成一份。新的收件人、抄送记在每一行上。 */
+  mailTo?: string
+  /** 抄送。规则与收件人相同。 */
+  mailCc?: string
   createdAt: string
 }
 /** 已封装的工作流。PCT提醒是第一条。 */

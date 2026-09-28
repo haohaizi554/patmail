@@ -165,6 +165,8 @@ export function applyBoundQuery(profile: CustomerQueryProfile, input: {
       createdAt: profile.pctTask.createdAt,
       confirmedProcIds: [...profile.pctTask.confirmedProcIds],
       ...(profile.pctTask.mailsetId && profile.pctTask.mailsetLabel ? { mailsetId: profile.pctTask.mailsetId, mailsetLabel: profile.pctTask.mailsetLabel } : {}),
+      ...(profile.pctTask.mailTo ? { mailTo: profile.pctTask.mailTo } : {}),
+      ...(profile.pctTask.mailCc ? { mailCc: profile.pctTask.mailCc } : {}),
       rows: profile.pctTask.rows.map(row => ({ ...row }))
     }
   }

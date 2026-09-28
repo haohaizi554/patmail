@@ -5,6 +5,31 @@
 .workspace-body > form.card { margin-bottom: 14px; }
 .workspace .card > h2 { margin: 0 0 10px; font-size: 16px; }
 .workspace .empty { padding: 28px 8px; color: var(--sub); }
+.pct-sheet {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px 28px;
+  align-items: start;
+  margin-top: 12px;
+}
+.pct-sheet-side { display: grid; gap: 10px; min-width: 0; align-content: start; align-items: start; justify-items: stretch; }
+.pct-sheet-side > .text-button { justify-self: start; height: auto; }
+.pct-sheet-side label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; color: #66758f; }
+.pct-sheet-side textarea {
+  width: 100%;
+  min-height: 96px;
+  border: 1px solid #eadff0;
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px 10px;
+  resize: vertical;
+  font: inherit;
+}
+.pct-sheet .sheet-pick { margin: 0; }
+.pct-sheet-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 900px) {
+  .pct-sheet { grid-template-columns: 1fr; }
+}
 .stack-form { display: grid; gap: 10px; max-width: 720px; }
 .stack-form label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; color: #66758f; }
 .stack-form input:not([type="checkbox"]):not([type="radio"]),
@@ -39,6 +64,27 @@
   .rule-fields { grid-template-columns: 1fr; }
 }
 .rules-page > form.stack-form { max-width: none; }
+.mapping-board { margin-bottom: 14px; }
+.mapping-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mapping-head h2 { margin: 0; }
+.mapping-head .text-button { border: 1px solid #eadff0; border-radius: 999px; background: #fff; color: #e45b92; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.mapping-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.mapping-table th { text-align: left; color: #8b95ad; font-weight: 650; height: 36px; background: #fafbfe; }
+.mapping-table th, .mapping-table td { padding: 8px 10px; border-top: 1px solid #f6e5ee; vertical-align: middle; }
+.mapping-table th:first-child, .mapping-table td:first-child { width: 42%; }
+.mapping-table.policy-map th:first-child,
+.mapping-table.policy-map td:first-child,
+.mapping-table.policy-map th:nth-child(2),
+.mapping-table.policy-map td:nth-child(2) { width: 28%; }
+.mapping-table.policy-map .theme-select { width: 100%; display: block; }
+.mapping-table input { width: 100%; height: 36px; box-sizing: border-box; }
+.type-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.type-cell > span { flex: 1; min-width: 0; }
+.type-cell .theme-select { flex: 1; min-width: 0; display: block; }
+.mapping-add td { background: #fff7fb; }
+.mapping-empty { color: var(--sub, #8d97b0); text-align: center; }
+.mapping-remove { flex: none; border: 0; background: transparent; color: #e45b92; font: inherit; font-size: 12px; cursor: pointer; }
+.mapping-table .solid { flex: none; height: 36px; padding: 0 16px; }
 .form-footer {
   display: flex;
   flex-wrap: wrap;

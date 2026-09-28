@@ -69,6 +69,8 @@ export function clonePctTask(task: PctTaskDraft): PctTaskDraft {
     createdAt: task.createdAt,
     confirmedProcIds: [...task.confirmedProcIds],
     ...(task.mailsetId && task.mailsetLabel ? { mailsetId: task.mailsetId, mailsetLabel: task.mailsetLabel } : {}),
+    ...(task.mailTo ? { mailTo: task.mailTo } : {}),
+    ...(task.mailCc ? { mailCc: task.mailCc } : {}),
     rows: task.rows.map(row => ({ ...row }))
   }
 }
@@ -78,10 +80,19 @@ export function volumesOf(rows: PctTaskRow[]): string[] {
 }
 
 export function applyPctMailTypes(rows: PctTaskRow[], mailTypes: Array<{ id: string; name: string }>): PctTaskRow[] {
-  return pctRowsFromTable([
+  const next = pctRowsFromTable([
     ['我方文号', '客户文号', '客户名称', '第一客户联系人', '客户联系人(IPR)', '处理事项'],
     ...rows.map(row => [row.ourVolume, row.customerVolume, row.customerName, row.contactName, row.iprName, row.procLabel])
   ], mailTypes).rows
+  return next.map(row => {
+    const prev = rows.find(item => item.ourVolume.replace(/\s/g, '') === row.ourVolume.replace(/\s/g, ''))
+    if (!prev) return row
+    return {
+      ...row,
+      ...(prev.mailTo ? { mailTo: prev.mailTo } : {}),
+      ...(prev.mailCc ? { mailCc: prev.mailCc } : {})
+    }
+  })
 }
 
 /** 表格里的处理事项名称，对原站处理事项列表里的具体项。分类节点和重名都不选用。 */

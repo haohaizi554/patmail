@@ -11,6 +11,7 @@ import { fetchMailTypeNodes } from '../../customer/mail-type-load'
 import { fetchMailSenders } from '../../customer/mailset-load'
 import type { MailSender } from '../../customer/mailset'
 import { applyPctMailTypes, clonePctTask, matchSheetCtrlProcs, pctRowsFromTable, summarizePctTask, volumesOf } from '../../customer/pct-sheet'
+import { planPctRecipients, currentMailId, sheetRowsOnMail } from '../../customer/pct-recipients'
 import { isPctTask } from '../../customer/guards'
 import type { PctTaskDraft, PctTaskRow } from '../../customer/types'
 import { joinCaseVolumes, splitCaseVolumes } from '../../customer/volume-list'
@@ -47,6 +48,8 @@ const mailTypeMessage = ref('正在从原网站读取发文类型…')
 const mailsets = ref<MailSender[]>([])
 const mailsetId = ref('')
 const senderTouched = ref(false)
+const activeVolume = ref('')
+const appendingContacts = ref(false)
 const mailsetMessage = ref('正在从原网站读取发件邮箱…')
 const ctrlOptions = ref<Array<{ id: string; label: string; parentId?: string }>>([])
 const ctrlListMessage = ref('')
@@ -83,6 +86,7 @@ const sheetSummary = computed(() => {
   return `发文类型：${labels.map(label => `${label} ${named.filter(row => row.mailTypeLabel === label).length} 件`).join('，')}。`
 })
 const shownPageSize = computed(() => sheetMerged.value ? Math.max(rows.value.length, 1) : pageSize.value)
+const activeRow = computed(() => sheetRows.value.find(row => row.ourVolume === activeVolume.value) ?? null)
 
 function textFor(code: string, fallback: string): string {
   if (code === 'SESSION_EXPIRED') return 'EASY 登录已失效，请在原网站重新登录后检测。'
@@ -314,6 +318,7 @@ function preferredSenderId(): string {
 watch(() => pctCustomer.value?.id, () => {
   senderTouched.value = false
   mailsetId.value = preferredSenderId()
+  activeVolume.value = ''
 }, { immediate: true })
 
 watch(() => rules.value?.defaultSender?.mailsetId, () => {
@@ -324,6 +329,12 @@ watch(() => rules.value?.defaultSender?.mailsetId, () => {
 function chooseSender(value: string): void {
   senderTouched.value = true
   mailsetId.value = value
+}
+
+function writeActive(field: 'mailTo' | 'mailCc', value: string): void {
+  const volume = activeVolume.value
+  if (!volume) return
+  sheetRows.value = sheetRows.value.map(row => row.ourVolume === volume ? { ...row, [field]: value } : row)
 }
 
 function showSheetHelp(): void {
@@ -419,6 +430,68 @@ async function queryEach(volumes: string[], ctrl: string): Promise<void> {
   }
 }
 
+async function appendSheetContacts(): Promise<void> {
+  if (!bridge || !pctCustomer.value) {
+    message.value = '先在客户管理把查询入口选成期限监控，并选择 PCT提醒。'
+    return
+  }
+  if (!sheetRows.value.length) {
+    message.value = '先传入 PCT 表格。'
+    return
+  }
+  appendingContacts.value = true
+  message.value = '正在读取当前发文和联系人…'
+  try {
+    const page = await bridge.request({ type: MessageType.GetPageInfo })
+    const mailId = page.type === MessageType.PageInfo ? currentMailId(page.payload.url) : null
+    if (!mailId) {
+      message.value = '请先打开这一行的发文页。联系人跟这封信走，不按客户去找别的发文。'
+      return
+    }
+    const addresses = await bridge.request({ type: MessageType.ReadMailAddresses, payload: { mailId } })
+    if (addresses.type !== MessageType.MailAddressResult) {
+      message.value = '当前发文没有读到，收件人和抄送没有改。'
+      return
+    }
+    if (!addresses.payload.ok) {
+      message.value = addresses.payload.error.message
+      return
+    }
+    const matched = sheetRowsOnMail(sheetRows.value, addresses.payload.data.caseVolumes)
+    if (matched.length !== 1) {
+      message.value = matched.length === 0
+        ? '当前发文上的文号不在这张表格里，收件人和抄送没有改。'
+        : '这封发文对上了表格里的多行。一行是一个发文任务，没有改。'
+      return
+    }
+    const row = matched[0]
+    if (!row) return
+    const contacts = await bridge.request({
+      type: MessageType.ReadMailContacts,
+      payload: { mailId, customerId: addresses.payload.data.customerId }
+    })
+    if (contacts.type !== MessageType.MailContactResult) {
+      message.value = '发文联系人没有读到，收件人和抄送没有改。'
+      return
+    }
+    if (!contacts.payload.ok) {
+      message.value = contacts.payload.error.message
+      return
+    }
+    let baseTo = row.mailTo ?? ''
+    let baseCc = row.mailCc ?? ''
+    const notes = contacts.payload.data.message ? [contacts.payload.data.message] : []
+    if (!baseTo.trim()) baseTo = addresses.payload.data.to
+    if (!baseCc.trim()) baseCc = addresses.payload.data.cc
+    const plan = planPctRecipients([row], contacts.payload.data.rows, { to: baseTo, cc: baseCc })
+    sheetRows.value = sheetRows.value.map(item => item.ourVolume === row.ourVolume ? { ...item, mailTo: plan.to, mailCc: plan.cc } : item)
+    activeVolume.value = row.ourVolume
+    message.value = [...notes, ...plan.notes, `已追加到文号 ${row.ourVolume} 这一行。加载这封发文时原网站填上的地址还在前面。`].filter(Boolean).join('')
+  } finally {
+    appendingContacts.value = false
+  }
+}
+
 async function createTask(): Promise<void> {
   const customer = pctCustomer.value
   if (!customer) {
@@ -466,7 +539,9 @@ async function createTask(): Promise<void> {
     createdAt: new Date().toISOString()
   }
   if (!isPctTask(task)) {
-    message.value = '这张表格组不成任务。'
+    message.value = sheetRows.value.some(row => (row.mailTo?.length ?? 0) > 4000 || (row.mailCc?.length ?? 0) > 4000)
+      ? '某一行的收件人或抄送太长，任务没有保存。'
+      : '这张表格组不成任务。'
     return
   }
   savingTask.value = true
@@ -519,26 +594,38 @@ async function createTask(): Promise<void> {
         <p v-if="mailTypeMessage" class="hint">{{ mailTypeMessage }}</p>
         <p v-if="pctCustomer" class="hint">当前客户：{{ pctCustomer.name }}<template v-if="pctCustomer.pctTask">。已有任务：{{ summarizePctTask(pctCustomer.pctTask) }}</template></p>
         <p v-else class="hint">还没有选择 PCT提醒 的客户。</p>
-        <div class="stack-form">
-          <label>发件人
-            <ThemeSelect :model-value="mailsetId" placeholder="选择发件邮箱" :options="mailsetOptions" @update:model-value="chooseSender(String($event))" />
-          </label>
-          <p class="hint">没改的话用发文规则里保存的默认发件人。这里改一次，会记在这次任务上，并记住到这个客户。</p>
-          <p v-if="!senderTouched && !pctCustomer?.mailsetId && rules?.defaultSender && mailsetId === rules.defaultSender.mailsetId" class="hint">当前沿用默认：{{ rules.defaultSender.label }}</p>
-          <p v-if="mailsetMessage" class="hint">{{ mailsetMessage }}</p>
-          <button type="button" class="text-button" @click="loadMailSets(true)">重新读取发件邮箱</button>
-        </div>
-        <div class="sheet-pick">
-          <button class="ghost" type="button" :disabled="loading || savingTask" @click="sheetInput?.click()">选择表格</button>
-          <span class="name">{{ sheetFileName || '尚未选择' }}</span>
-          <input ref="sheetInput" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="loading || savingTask" @change="onSheet" />
-        </div>
-        <p v-if="sheetNotice" class="hint">{{ sheetNotice }}</p>
-        <p v-if="sheetRows.length" class="hint">{{ sheetSummary }}</p>
-        <div class="filters">
-          <button class="solid" type="button" :disabled="loading || savingTask" @click="createTask">{{ savingTask ? '正在创建…' : '按表格创建任务' }}</button>
-          <button class="ghost" type="button" :disabled="loading || savingTask" @click="querySheet('batch')">所有文号一起查询</button>
-          <button class="ghost" type="button" :disabled="loading || savingTask" @click="querySheet('each')">逐个文号查询</button>
+        <div class="pct-sheet">
+          <div class="pct-sheet-side">
+            <label>发件人
+              <ThemeSelect :model-value="mailsetId" placeholder="选择发件邮箱" :options="mailsetOptions" @update:model-value="chooseSender(String($event))" />
+            </label>
+            <div class="sheet-pick">
+              <button class="ghost" type="button" :disabled="loading || savingTask" @click="sheetInput?.click()">选择表格</button>
+              <span class="name">{{ sheetFileName || '尚未选择' }}</span>
+              <input ref="sheetInput" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="loading || savingTask" @change="onSheet" />
+            </div>
+            <p v-if="sheetNotice" class="hint">{{ sheetNotice }}</p>
+            <p v-if="sheetRows.length" class="hint">{{ sheetSummary }}</p>
+            <div class="pct-sheet-actions">
+              <button class="solid" type="button" :disabled="loading || savingTask" @click="createTask">{{ savingTask ? '正在创建…' : '按表格创建任务' }}</button>
+              <button class="ghost" type="button" :disabled="loading || savingTask" @click="querySheet('batch')">所有文号一起查询</button>
+              <button class="ghost" type="button" :disabled="loading || savingTask" @click="querySheet('each')">逐个文号查询</button>
+            </div>
+            <p class="hint">没改的话用发文规则里保存的默认发件人。这里改一次，会记在这次任务上，并记住到这个客户。</p>
+            <p v-if="!senderTouched && !pctCustomer?.mailsetId && rules?.defaultSender && mailsetId === rules.defaultSender.mailsetId" class="hint">当前沿用默认：{{ rules.defaultSender.label }}</p>
+            <p v-if="mailsetMessage" class="hint">{{ mailsetMessage }}</p>
+            <button type="button" class="text-button" @click="loadMailSets(true)">重新读取发件邮箱</button>
+          </div>
+          <div class="pct-sheet-side">
+            <label>收件人<span v-if="activeRow">（{{ activeRow.ourVolume }}）</span>
+              <textarea :value="activeRow?.mailTo ?? ''" rows="3" maxlength="4000" placeholder="名称(邮箱);" :disabled="!activeRow" @input="writeActive('mailTo', ($event.target as HTMLTextAreaElement).value)" />
+            </label>
+            <label>抄送<span v-if="activeRow">（{{ activeRow.ourVolume }}）</span>
+              <textarea :value="activeRow?.mailCc ?? ''" rows="3" maxlength="4000" placeholder="名称(邮箱);" :disabled="!activeRow" @input="writeActive('mailCc', ($event.target as HTMLTextAreaElement).value)" />
+            </label>
+            <p class="hint">外部表格的一行是一个发文任务。打开这一行已经加载的发文后追加：只用这一行的第一客户联系人和客户联系人(IPR)。这封发文加载时填上的地址留在前面。</p>
+            <button class="ghost" type="button" :disabled="loading || savingTask || appendingContacts || !sheetRows.length" @click="appendSheetContacts">{{ appendingContacts ? '正在追加…' : '按表格追加联系人' }}</button>
+          </div>
         </div>
       </section>
       <BindQueryBar surface="limit" show-load :fields="boundFields" :template-id="templateId" @load="loadBound" />

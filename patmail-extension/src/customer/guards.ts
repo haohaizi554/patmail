@@ -44,6 +44,8 @@ function isPctRow(value: unknown): value is PctTaskRow {
   if (!shortText(row.mailTypeLabel, 80) || !row.mailTypeLabel.trim()) return false
   if (row.mailTypeId !== undefined && (typeof row.mailTypeId !== 'string' || !isQueryGuid(row.mailTypeId))) return false
   if (row.mailTypeRadioIndex !== undefined && row.mailTypeRadioIndex !== 1 && row.mailTypeRadioIndex !== 3) return false
+  if (row.mailTo !== undefined && (typeof row.mailTo !== 'string' || row.mailTo.length > 4000)) return false
+  if (row.mailCc !== undefined && (typeof row.mailCc !== 'string' || row.mailCc.length > 4000)) return false
   return true
 }
 
@@ -57,5 +59,7 @@ export function isPctTask(value: unknown): value is PctTaskDraft {
   if (!task.confirmedProcIds.every(item => typeof item === 'string' && isQueryGuid(item))) return false
   if (task.mailsetId !== undefined && (typeof task.mailsetId !== 'string' || !isQueryGuid(task.mailsetId))) return false
   if (task.mailsetLabel !== undefined && (typeof task.mailsetLabel !== 'string' || task.mailsetLabel.length > 160)) return false
+  if (task.mailTo !== undefined && (typeof task.mailTo !== 'string' || task.mailTo.length > 4000)) return false
+  if (task.mailCc !== undefined && (typeof task.mailCc !== 'string' || task.mailCc.length > 4000)) return false
   return typeof task.createdAt === 'string' && task.createdAt.length <= 40
 }
