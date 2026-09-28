@@ -15,7 +15,7 @@ function submit(): void {
 <template>
   <section class="card">
     <h2>文件描述映射</h2>
-    <div class="stack-form">
+    <div class="rule-fields">
       <label>文件描述 <input v-model="description" type="text" /></label>
       <label>发文类型 GUID <input v-model="mailTypeId" type="text" /></label>
       <label>发文类型名称 <input v-model="mailTypeName" type="text" /></label>

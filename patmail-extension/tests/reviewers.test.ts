@@ -56,5 +56,15 @@ describe('审核人名单', () => {
     const read = readMailRules(legacy, 'op')
     expect(read.writable).toBe(true)
     expect(read.bundle.defaultReviewer).toBeNull()
+    expect(read.bundle.defaultSender).toBeNull()
+  })
+
+  it('旧规则没有默认发件人时仍可读取', () => {
+    const stored = emptyMailRules(self)
+    const legacy = { ...stored }
+    delete (legacy as { defaultSender?: unknown }).defaultSender
+    const read = readMailRules(legacy, self)
+    expect(read.writable).toBe(true)
+    expect(read.bundle.defaultSender).toBeNull()
   })
 })

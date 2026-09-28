@@ -241,6 +241,7 @@ onBeforeUnmount(() => {
     </section>
 
     <QueryTemplateSection :bridge="bridge" :can-search="canSearch" :user-id="queryUserId" :origin="accountOrigin" mode="history" :manage="false" :page-size="pageSize" @search="executeSearch" />
+    <slot />
 
     <section ref="resultsSection" class="card file-results" aria-label="查询结果">
       <div class="section-heading"><strong>查询结果</strong><button type="button" class="text-button" :disabled="!canSearch || !lastQuery || searchState === 'loading'" @click="refresh">刷新</button></div>

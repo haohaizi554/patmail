@@ -20,15 +20,29 @@ import {
   workflowsFor
 } from '../../customer/mail-flow'
 import { fetchMailTypeNodes } from '../../customer/mail-type-load'
+import { fetchMailSenders } from '../../customer/mailset-load'
+import type { MailSender } from '../../customer/mailset'
 import type { MessageBridge } from '../../shared/message'
 import type { FileMailStyle, LimitMailStyle, QuerySurfaceId, WorkflowId } from '../../customer/types'
 import { scopeFromConnection, type ExpectedAccountScope } from '../../shared/connection'
+import { confirmDialog } from '../dialog'
 import { useWorkspace } from '../composables/useWorkspace'
 
 const bridge = inject<MessageBridge>('bridge')
 const { connection, customers, call } = useWorkspace()
 const mailNodes = ref<Array<{ id: string; name: string }>>([])
 const mailTypeMessage = ref('正在从原网站读取发文类型…')
+const mailsets = ref<MailSender[]>([])
+const mailsetId = ref('')
+const mailsetMessage = ref('正在从原网站读取发件邮箱…')
+const mailsetOptions = computed(() => {
+  const items = mailsets.value.map(item => ({ value: item.id, label: item.label }))
+  if (mailsetId.value && !items.some(item => item.value === mailsetId.value)) {
+    const saved = customers.value.find(item => item.mailsetId === mailsetId.value)?.mailsetLabel
+    items.unshift({ value: mailsetId.value, label: saved || '已保存的发件邮箱' })
+  }
+  return items
+})
 const mailMatch = computed(() => matchPctMailTypes(mailNodes.value))
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
 const name = ref('')
@@ -72,6 +86,7 @@ function edit(id: string): void {
   workflow.value = profile.workflowId ?? (surface.value === 'limit' ? 'pct-reminder' : '')
   mailStyle.value = (surface.value === 'limit' ? profile.limitMailStyle : profile.fileMailStyle) ?? ''
   reviewChoice.value = profile.reviewTarget ?? 'self'
+  mailsetId.value = profile.mailsetId ?? ''
   enabled.value = profile.enabled
   createdAt.value = profile.createdAt
   keptCustomerId.value = profile.easyCustomerId && isQueryGuid(profile.easyCustomerId) ? profile.easyCustomerId : ''
@@ -87,6 +102,7 @@ function cancel(): void {
   workflow.value = ''
   mailStyle.value = ''
   reviewChoice.value = 'self'
+  mailsetId.value = ''
   enabled.value = true
   createdAt.value = ''
   keptCustomerId.value = ''
@@ -97,7 +113,12 @@ function cancel(): void {
 async function remove(id: string): Promise<void> {
   const profile = customers.value.find(item => item.id === id)
   if (!profile || removingId.value) return
-  if (!window.confirm(`删除客户「${profile.name}」？绑定的查询条件和 PCT 任务会一起删掉。`)) return
+  const agreed = await confirmDialog({
+    title: '删除客户',
+    message: `删除客户「${profile.name}」？绑定的查询条件和 PCT 任务会一起删掉。`,
+    confirmLabel: '删除'
+  })
+  if (!agreed) return
   const scope = scopeFromConnection(connection.value)
   if (!scope) {
     listMessage.value = '还没确认当前登录的人，没有删除。'
@@ -136,6 +157,8 @@ async function save(goAfter: boolean): Promise<void> {
   const existing = editingId.value ? customers.value.find(item => item.id === editingId.value) : null
   const scope = editingId.value ? formScope.value : scopeFromConnection(connection.value)
   if (!scope) { formMessage.value = '还没确认当前登录的人，没有保存。'; return }
+  const pickedSender = mailsets.value.find(item => item.id === mailsetId.value)
+    ?? (existing?.mailsetId === mailsetId.value && existing.mailsetLabel ? { id: existing.mailsetId, label: existing.mailsetLabel } : null)
   const id = editingId.value || `customer-${crypto.randomUUID()}`
   const now = new Date().toISOString()
   const sameSurface = !existing || (existing.querySurface ?? 'file') === surface.value
@@ -154,6 +177,7 @@ async function save(goAfter: boolean): Promise<void> {
       ...(surface.value === 'limit' ? { limitMailStyle: mailStyle.value as LimitMailStyle } : {}),
       ...(surface.value === 'file' ? { fileMailStyle: mailStyle.value as FileMailStyle } : {}),
       ...(surface.value === 'limit' && reviewChoice.value === 'self' ? { reviewTarget: 'self' as const } : {}),
+      ...(pickedSender ? { mailsetId: pickedSender.id, mailsetLabel: pickedSender.label } : {}),
       enabled: enabled.value,
       createdAt: createdAt.value || now,
       updatedAt: now,
@@ -193,8 +217,23 @@ watch(surface, (next) => {
   if (!flows.some(item => item.id === workflow.value)) workflow.value = flows[0]?.id ?? ''
   if (!mailStylesFor(next).some(item => item.value === mailStyle.value)) mailStyle.value = ''
 })
+async function loadMailSets(force: boolean): Promise<void> {
+  if (!bridge || !ready.value) {
+    mailsets.value = []
+    mailsetMessage.value = '还没确认当前登录的人，发件邮箱还没读取。'
+    return
+  }
+  mailsetMessage.value = '正在从原网站读取发件邮箱…'
+  const loaded = await fetchMailSenders(bridge, force)
+  mailsets.value = loaded.items
+  mailsetMessage.value = loaded.message
+}
+
 watch([workflow, ready], () => {
-  if (workflow.value === 'pct-reminder' && ready.value) void loadMailTypes(false)
+  if (workflow.value === 'pct-reminder' && ready.value) {
+    void loadMailTypes(false)
+    void loadMailSets(false)
+  }
 }, { immediate: true })
 watch(() => connection.value.operatorId, () => {
   if (!editingId.value && !name.value) return
@@ -250,12 +289,18 @@ watch(() => connection.value.operatorId, () => {
             <label v-else-if="mode.id === 'review'">{{ mode.label }}
               <ThemeSelect :model-value="reviewChoice" :options="mode.options ?? []" @update:model-value="reviewChoice = String($event)" />
             </label>
+            <div v-else-if="mode.id === 'from'">
+              <label>{{ mode.label }}
+                <ThemeSelect :model-value="mailsetId" placeholder="选择发件邮箱" :options="mailsetOptions" @update:model-value="mailsetId = String($event)" />
+              </label>
+              <p v-if="mailsetMessage" class="hint">{{ mailsetMessage }}</p>
+              <button type="button" class="text-button" @click="loadMailSets(true)">重新读取发件邮箱</button>
+            </div>
             <div v-else-if="mode.id === 'volume'" class="hint">
               <p><strong>{{ mode.label }}</strong>：{{ mode.decidedBy }}</p>
               <p v-if="mailTypeMessage">{{ mailTypeMessage }}</p>
               <template v-else>
                 <p>有客户文号：{{ mailMatch.customerVolume?.name || '原网站这次没有返回这一项' }}</p>
-                <p v-if="mailMatch.ourVolumeOtherCity">{{ mailMatch.ourVolumeOtherCity.name }}</p>
                 <p>只有我方文号：{{ mailMatch.ourVolumeShenzhen?.name || '原网站这次没有返回这一项' }}</p>
               </template>
               <button type="button" class="text-button" @click="loadMailTypes(true)">重新读取发文类型</button>
@@ -267,13 +312,15 @@ watch(() => connection.value.operatorId, () => {
           <ThemeSelect :model-value="mailStyle" :placeholder="stylePlaceholder" :options="mailStylesFor(surface)" @update:model-value="mailStyle = String($event)" />
         </label>
         <p v-else-if="!surface" class="hint">先选查询入口。期限监控会带出已封装的工作流。</p>
-        <label class="check-line"><input v-model="enabled" type="checkbox" />以后发文时可以使用这位客户</label>
       </div>
       <p v-if="formMessage" class="hint">{{ formMessage }}</p>
-      <div class="filters">
-        <button class="solid" type="submit">保存</button>
-        <button class="solid" type="button" @click="save(true)">保存并前往查询</button>
-        <button v-if="editingId" class="ghost" type="button" @click="cancel">取消</button>
+      <div class="form-footer">
+        <label class="check-line"><input v-model="enabled" type="checkbox" />以后发文时可以使用这位客户</label>
+        <div class="filters">
+          <button class="solid" type="submit">保存</button>
+          <button class="solid" type="button" @click="save(true)">保存并前往查询</button>
+          <button v-if="editingId" class="ghost" type="button" @click="cancel">取消</button>
+        </div>
       </div>
     </form>
   </template>

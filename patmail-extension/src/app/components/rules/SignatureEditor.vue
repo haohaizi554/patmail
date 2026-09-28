@@ -10,9 +10,9 @@ const content = defineModel<string>('content', { default: '' })
 <template>
   <section class="card">
     <h2>操作员签名</h2>
-    <div class="stack-form">
-      <label>签名名称 <input v-model="name" type="text" /></label>
-      <label>签名内容 <textarea v-model="content" rows="3"></textarea></label>
+    <div class="rule-fields">
+      <label class="span-row">签名名称 <input v-model="name" type="text" /></label>
+      <label class="span-row">签名内容 <textarea v-model="content" rows="3"></textarea></label>
       <button type="button" class="solid" @click="emit('save', { name: name.trim(), content })">保存签名</button>
     </div>
     <p v-if="signatures.length === 0" class="empty">尚未设置签名。</p>

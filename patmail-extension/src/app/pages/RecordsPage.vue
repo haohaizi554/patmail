@@ -2,7 +2,7 @@
 import { computed, inject, ref, watch } from 'vue'
 import PageHead from '../../../../src/components/PageHead.vue'
 import { bg } from '../../../../src/assets'
-import { PROCESS_SPECS, mailPageUrl, type ProcessKind, type ProcessListRow } from '../../api/mail-process'
+import { PROCESS_SPECS, type ProcessKind, type ProcessListRow } from '../../api/mail-process'
 import { describeTaskRecord } from '../record-status'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useWorkspace } from '../composables/useWorkspace'
@@ -123,19 +123,26 @@ function switchKind(next: ProcessKind): void {
   void load(1, false)
 }
 
-async function openMail(row: ProcessListRow): Promise<void> {
-  const url = mailPageUrl(connection.value.easyOrigin, row.id)
-  if (!url) {
-    message.value = '这条记录没有邮件编号，不能打开原网站。'
-    return
-  }
-  const tabs = (globalThis as { chrome?: { tabs?: { create?: (properties: { url: string; active: boolean }) => Promise<unknown> } } }).chrome?.tabs
-  if (typeof tabs?.create !== 'function') {
-    message.value = '当前页面不能打开原网站。'
+async function openRow(row: ProcessListRow): Promise<void> {
+  if (!bridge || !row.open) {
+    message.value = '这条记录没有原站打开所需的编号。'
     return
   }
   message.value = ''
-  await tabs.create({ url, active: true })
+  const response = await bridge.request({ type: MessageType.OpenEasyForm, payload: { target: row.open } })
+  if (response.type === MessageType.Error) {
+    message.value = response.payload.message
+    return
+  }
+  if (response.type !== MessageType.OpenEasyFormResult) {
+    message.value = '打开请求没有得到结果。'
+    return
+  }
+  message.value = response.payload.message
+  if (!response.payload.ok) return
+  const tabId = connection.value.easyTabId
+  const tabs = (globalThis as { chrome?: { tabs?: { update?: (id: number, properties: { active: boolean }) => Promise<unknown> } } }).chrome?.tabs
+  if (tabId != null && typeof tabs?.update === 'function') await tabs.update(tabId, { active: true })
 }
 
 async function load(nextPage = page.value, force = true): Promise<void> {
@@ -203,13 +210,13 @@ watch(ready, (ok) => {
       <thead>
         <tr>
           <th v-for="column in columns" :key="column.key">{{ column.label }}</th>
-          <th v-if="kind === 'CO'"></th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="(row, index) in rows" :key="row.id || kind + index">
           <td v-for="column in columns" :key="column.key">{{ row.cells[column.key] || '—' }}</td>
-          <td v-if="kind === 'CO'"><button type="button" class="ghost" @click="openMail(row)">打开</button></td>
+          <td><button type="button" class="ghost" @click="openRow(row)">打开</button></td>
         </tr>
       </tbody>
     </table>

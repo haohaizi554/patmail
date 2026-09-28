@@ -25,7 +25,8 @@ function onSearched(query: FileSearchQuery): void {
   </section>
   <template v-else>
     <p class="hint">先套模板，再手工改条件。文件描述和发文类型是一对一，对照表在「发文规则与映射配置」，可以直接看，也可以随时改。</p>
-    <BindQueryBar surface="file" :fields="fields" />
-    <FileSearchPanel :page-origin="connection.easyOrigin" :show-session="false" @searched="onSearched" />
+    <FileSearchPanel :page-origin="connection.easyOrigin" :show-session="false" @searched="onSearched">
+      <BindQueryBar surface="file" :fields="fields" />
+    </FileSearchPanel>
   </template>
 </template>

@@ -27,6 +27,7 @@ export class CustomerQueryService {
       ...(input.fileMailStyle ? { fileMailStyle: input.fileMailStyle } : {}),
       ...(input.boundQuery ? { boundQuery: { ...input.boundQuery } } : {}),
       ...(input.reviewTarget ? { reviewTarget: input.reviewTarget } : {}),
+      ...(input.mailsetId && input.mailsetLabel ? { mailsetId: input.mailsetId, mailsetLabel: input.mailsetLabel } : {}),
       ...(input.pctTask ? { pctTask: { ...input.pctTask, rows: input.pctTask.rows.map(row => ({ ...row })), confirmedProcIds: [...input.pctTask.confirmedProcIds] } } : {}),
       enabled: input.enabled,
       revision: input.revision ?? existing?.revision ?? 1,

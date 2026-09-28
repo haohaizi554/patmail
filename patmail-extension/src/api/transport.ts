@@ -8,7 +8,7 @@ export type EasyOperation =
   | 'mailCustomer' | 'mailInfoInit' | 'getMailInfo' | 'getMailFile' | 'getMailCase'
   | 'getMailRule' | 'getCustomerContact' | 'getSignature' | 'saveMailInfo' | 'saveMailRelatedFiles'
   | 'getFlowInfo' | 'getFlowHistory' | 'getUrgencyList' | 'getFlowSubmit' | 'getFlowLastStatus'
-  | 'limitMonitor' | 'mailProcess' | 'processAP' | 'processEF'
+  | 'limitMonitor' | 'mailProcess' | 'processAP' | 'processEF' | 'getIsNewCpc'
 
 export interface TransportOptions {
   fetcher?: typeof fetch
@@ -51,7 +51,8 @@ const ROUTES: Record<EasyOperation, { path: string; call: string }> = {
   limitMonitor: { path: '/AjaxServers/Report.ashx', call: 'GetLimitMonitorCaseList' },
   mailProcess: { path: '/AjaxServers/Common.ashx', call: 'GetProcessByTypeCO' },
   processAP: { path: '/AjaxServers/Common.ashx', call: 'GetProcessByTypeAP' },
-  processEF: { path: '/AjaxServers/Common.ashx', call: 'GetProcessByTypeEF' }
+  processEF: { path: '/AjaxServers/Common.ashx', call: 'GetProcessByTypeEF' },
+  getIsNewCpc: { path: '/AjaxServers/CaseInfo.ashx', call: 'GetIsNewCPC' }
 }
 
 function loginRedirect(response: Response, origin: string): boolean {

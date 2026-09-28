@@ -5,7 +5,8 @@ import { DictionaryService } from './dictionaries'
 import type { DictionaryLoadRequest, DictionarySnapshot } from './dictionaries'
 import { buildGetSearchFilesFromFields, buildGetSearchFilesParams, type FileSearchQuery } from './file-search-params'
 import { buildLimitMonitorParams, type LimitMonitorQuery } from './limit-monitor-params'
-import { buildMailProcessParams, buildProcessListParams, normalizeMailProcess, normalizeProcessList, type ProcessKind, type ProcessListQuery, type ProcessListResult } from './mail-process'
+import { buildMailProcessParams, buildProcessListParams, filingNeedsCpcFlag, normalizeMailProcess, normalizeProcessList, processFormPath, type ProcessKind, type ProcessListQuery, type ProcessListResult, type ProcessOpenTarget } from './mail-process'
+import { isRecord } from './response-guards'
 import { normalizeLimitMonitor } from './limit-monitor-normalizer'
 import type { LimitMonitorResult } from './limit-monitor-types'
 import { HistoryQueryService } from './query-history'
@@ -29,6 +30,14 @@ import { EasyMailReadService } from '../mail/easy/read-service'
 import type { ExistingMailDiagnostic } from '../shared/message'
 import { EasyTransport, type EasyOperation, type TransportOptions } from './transport'
 import { apiError, type ApiResult } from './types'
+
+function readNewCpcFlag(data: unknown): boolean | null {
+  if (!isRecord(data) || !Array.isArray(data.IsNewCPC) || !isRecord(data.IsNewCPC[0])) return null
+  const flag = data.IsNewCPC[0].filing_new
+  if (flag === true || flag === 1 || flag === '1') return true
+  if (flag === false || flag === 0 || flag === '0') return false
+  return null
+}
 
 function processOperation(kind: ProcessKind): EasyOperation {
   if (kind === 'AP') return 'processAP'
@@ -337,6 +346,33 @@ export class EasyRuntime {
         workflow
       }
     })
+  }
+
+  /** 只读确认递交走新 CPC 还是旧页面，然后给出首页页签地址。不提交、不创建。 */
+  resolveProcessForm(target: ProcessOpenTarget): Promise<ApiResult<string>> {
+    return (async (): Promise<ApiResult<string>> => {
+      let isNewCpc: boolean | null = null
+      if (target.kind === 'EF' && filingNeedsCpcFlag(target.filingType)) {
+        if (!(await this.confirmAccountRead())) {
+          return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
+        }
+        const params = new URLSearchParams()
+        params.set('Call', 'GetIsNewCPC')
+        params.set('filing_id', target.id)
+        params.set('log_pagename', 'ProcessNew.aspx')
+        const response = await this.transport.post('getIsNewCpc', params)
+        if (!response.ok) {
+          if (response.error.code === 'SESSION_EXPIRED') this.session.expire()
+          return response
+        }
+        const flag = readNewCpcFlag(response.data)
+        if (flag === null) return apiError('INVALID_RESPONSE', '没有读到递交页面版本，不能打开。')
+        isNewCpc = flag
+      }
+      const path = processFormPath(target, isNewCpc)
+      if (!path) return apiError('INVALID_QUERY', '这条记录对不上原站的打开页面。')
+      return { ok: true, data: path }
+    })()
   }
 
   listMailProcesses(query: ProcessListQuery): Promise<ApiResult<ProcessListResult>> {

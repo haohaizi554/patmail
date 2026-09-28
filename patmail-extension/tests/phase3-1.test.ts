@@ -10,6 +10,7 @@ import { scopeExtensionPageMessage } from '../src/background/scope'
 import { handleWorkspaceMessage, type WorkspaceHost } from '../src/background/workspace'
 import type { CustomerQueryProfile } from '../src/customer/types'
 import { emptyMailRules } from '../src/mail'
+import { MailRuleRepository } from '../src/mail/repository'
 import type { MailRuleBundle, SelectedPatentFile } from '../src/mail/types'
 import { EasyConnectionController, emptyConnection, scopeFromConnection } from '../src/shared/connection'
 import { MessageType } from '../src/shared/message'
@@ -90,6 +91,17 @@ describe('Phase 3.1 连接、规则与任务来源', () => {
     const second = await saveRuleAccount(area, origin, userA, { ...first, subject: { ...first.subject, template: '新的标题' } }, null)
     expect(second.subject.template).toBe('新的标题')
     expect(second.revision).toBeGreaterThan(first.revision)
+    const withReviewer = await saveRuleAccount(area, origin, userA, { ...second, defaultReviewer: { userId: userA, name: '吴晨晨' } }, null)
+    expect(withReviewer.defaultReviewer).toEqual({ userId: userA, name: '吴晨晨' })
+    const loaded = await new MailRuleRepository(userA, origin, area).load()
+    expect(loaded.bundle.defaultReviewer).toEqual({ userId: userA, name: '吴晨晨' })
+    expect(loaded.bundle.subject.template).toBe('新的标题')
+    const mailbox = '33333333-3333-4333-8333-333333333333'
+    const withSender = await saveRuleAccount(area, origin, userA, { ...withReviewer, defaultSender: { mailsetId: mailbox, label: '吴晨晨<wu@example.com>' } }, null)
+    expect(withSender.defaultSender).toEqual({ mailsetId: mailbox, label: '吴晨晨<wu@example.com>' })
+    const stored = await new MailRuleRepository(userA, origin, area).load()
+    expect(stored.bundle.defaultSender).toEqual({ mailsetId: mailbox, label: '吴晨晨<wu@example.com>' })
+    expect(stored.bundle.defaultReviewer).toEqual({ userId: userA, name: '吴晨晨' })
   })
 
   it('saves a task only when the message origin is the EASY origin', async () => {

@@ -18,7 +18,7 @@ function submit(): void {
 <template>
   <section class="card">
     <h2>收件人</h2>
-    <div class="stack-form">
+    <div class="rule-fields">
       <label>客户配置
         <ThemeSelect v-model="profileId" :options="[{ value: '', label: '选择客户' }, ...customers.map(item => ({ value: item.id, label: item.name }))]" />
       </label>

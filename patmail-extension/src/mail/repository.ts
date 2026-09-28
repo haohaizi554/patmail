@@ -1,5 +1,5 @@
 import { plainClone } from '../automation/snapshot'
-import type { BodyRule, CustomerMailPolicy, CustomerRecipientTemplate, DefaultReviewer, DescriptionMailTypeMapping, MailRuleBundle, OperatorSignature, SubjectRule } from './types'
+import type { BodyRule, CustomerMailPolicy, CustomerRecipientTemplate, DefaultReviewer, DefaultSender, DescriptionMailTypeMapping, MailRuleBundle, OperatorSignature, SubjectRule } from './types'
 import { isQueryGuid } from '../query/query-validator'
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -15,7 +15,8 @@ export function emptyMailRules(ownerId: string): MailRuleBundle {
     policies: [], mappings: [], recipients: [], signatures: [],
     subject: { template: '关于{文件名称}的通知', countInjection: false, anchor: '关于', missingAnchor: 'keep', version: 1 },
     body: { template: '请查收{文件数量}个文件。', supplement: '', version: 1 },
-    defaultReviewer: null
+    defaultReviewer: null,
+    defaultSender: null
   }
 }
 
@@ -87,7 +88,11 @@ export function readMailRules(value: unknown, ownerId: string): { bundle: MailRu
   if (record.defaultReviewer !== undefined && record.defaultReviewer !== null && !reviewer) {
     return { bundle: emptyMailRules(ownerId), writable: false, warning: '默认审核人无法识别，未覆盖原数据。' }
   }
-  return { bundle: { version: 1, revision: record.revision, ownerId, policies, mappings, recipients, signatures, subject: record.subject, body: record.body, defaultReviewer: reviewer }, writable: true }
+  const sender = readDefaultSender(record.defaultSender)
+  if (record.defaultSender !== undefined && record.defaultSender !== null && !sender) {
+    return { bundle: emptyMailRules(ownerId), writable: false, warning: '默认发件人无法识别，未覆盖原数据。' }
+  }
+  return { bundle: { version: 1, revision: record.revision, ownerId, policies, mappings, recipients, signatures, subject: record.subject, body: record.body, defaultReviewer: reviewer, defaultSender: sender }, writable: true }
 }
 
 function readDefaultReviewer(value: unknown): DefaultReviewer | null {
@@ -96,6 +101,14 @@ function readDefaultReviewer(value: unknown): DefaultReviewer | null {
   const row = value as DefaultReviewer
   if (!isQueryGuid(row.userId) || typeof row.name !== 'string' || !row.name.trim() || row.name.length > 80) return null
   return { userId: row.userId, name: row.name.trim() }
+}
+
+function readDefaultSender(value: unknown): DefaultSender | null {
+  if (value === undefined || value === null) return null
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const row = value as DefaultSender
+  if (!isQueryGuid(row.mailsetId) || typeof row.label !== 'string' || !row.label.trim() || row.label.length > 160) return null
+  return { mailsetId: row.mailsetId, label: row.label.trim() }
 }
 
 type StorageAreaLike = { get: (key: string) => Promise<Record<string, unknown>>; set: (items: Record<string, unknown>) => Promise<void> }
@@ -161,6 +174,7 @@ export class MailRuleRepository {
       bundle.subject = read.bundle.subject
       bundle.body = read.bundle.body
       bundle.defaultReviewer = read.bundle.defaultReviewer
+      bundle.defaultSender = read.bundle.defaultSender
     })
   }
 }

@@ -5,7 +5,7 @@ import type { HistoryQueryDetail, HistoryQueryOption } from './query-history'
 import type { FileSearchResult, PatentFile } from './file-search-types'
 import { isLimitMonitorInputField, isLimitMonitorType, type LimitMonitorQuery } from './limit-monitor-params'
 import type { LimitMonitorResult, LimitMonitorRow } from './limit-monitor-types'
-import { isProcessKind, PROCESS_SPECS, type ProcessListQuery, type ProcessListResult, type ProcessListRow } from './mail-process'
+import { isProcessKind, isProcessOpenTarget, PROCESS_SPECS, type ProcessListQuery, type ProcessListResult, type ProcessListRow } from './mail-process'
 import type { SessionSummary } from './session'
 import type { ApiError, ApiResult } from './types'
 
@@ -126,7 +126,9 @@ export function isMailProcessQuery(value: unknown): value is ProcessListQuery {
 
 function isProcessListRow(value: unknown, kind: ProcessListQuery['kind']): value is ProcessListRow {
   if (!isRecord(value) || typeof value.id !== 'string' || !isRecord(value.cells)) return false
-  if (Object.keys(value).some(key => key !== 'id' && key !== 'cells')) return false
+  if (Object.keys(value).some(key => key !== 'id' && key !== 'cells' && key !== 'open')) return false
+  if (value.open !== null && !isProcessOpenTarget(value.open)) return false
+  if (isRecord(value.open) && value.open.kind !== kind) return false
   const columns = PROCESS_SPECS[kind].columns
   const cells = value.cells
   return Object.keys(cells).length === columns.length && columns.every(column => typeof cells[column.key] === 'string')
@@ -165,7 +167,7 @@ export function isHistoryDetailResult(value: unknown): value is ApiResult<Histor
 
 function isDictionarySnapshot(value: unknown): value is DictionarySnapshot {
   return isRecord(value) && (value.kind === 'basic' || value.kind === 'flow' || value.kind === 'fileType' ||
-    value.kind === 'fieldColumn' || value.kind === 'listColumn' || value.kind === 'mailType' || value.kind === 'reviewer' || value.kind === 'picker')
+    value.kind === 'fieldColumn' || value.kind === 'listColumn' || value.kind === 'mailType' || value.kind === 'reviewer' || value.kind === 'picker' || value.kind === 'mailSet')
 }
 
 export function isDictionaryResult(value: unknown): value is ApiResult<DictionarySnapshot> {

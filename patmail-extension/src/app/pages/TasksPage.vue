@@ -4,6 +4,8 @@ import PageHead from '../../../../src/components/PageHead.vue'
 import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
 import { bg } from '../../../../src/assets'
 import type { PatentFile } from '../../api/file-search-types'
+import { fetchMailSenders } from '../../customer/mailset-load'
+import type { MailSender } from '../../customer/mailset'
 import { summarizePctTask } from '../../customer/pct-sheet'
 import type { CustomerQueryProfile } from '../../customer/types'
 import { assembleMail, fillFromRules } from '../../mail'
@@ -35,6 +37,10 @@ const draftSubject = ref('')
 const draftBody = ref('')
 const fillNotes = ref<string[]>([])
 const preview = ref<AssembledMail | null>(null)
+const mailsets = ref<MailSender[]>([])
+const mailsetId = ref('')
+const senderTouched = ref(false)
+const senderNotice = ref('')
 
 const customer = computed(() => customers.value.find(item => item.id === customerId.value) ?? null)
 const mailTypeName = computed(() => mailTypes.value.find(item => item.id === mailTypeId.value)?.name ?? '')
@@ -165,6 +171,7 @@ function buildPreview(): void {
     mailTypeName: mailTypeName.value,
     files: picked.value,
     reviewer: rules.value?.defaultReviewer ?? null,
+    sender: currentSender(),
     to: draftTo.value,
     cc: draftCc.value,
     subject: draftSubject.value,
@@ -174,6 +181,15 @@ function buildPreview(): void {
 
 const pctPlans = computed(() => customers.value.filter(item => item.pctTask && item.pctTask.rows.length > 0))
 
+const senderOptions = computed(() => {
+  const items = mailsets.value.map(item => ({ value: item.id, label: item.label }))
+  const saved = rules.value?.defaultSender
+  if (mailsetId.value && saved?.mailsetId === mailsetId.value && !items.some(item => item.value === mailsetId.value)) {
+    items.unshift({ value: saved.mailsetId, label: saved.label })
+  }
+  return [{ value: '', label: '不指定发件人' }, ...items]
+})
+
 function customerOptions(rows: CustomerQueryProfile[]): Array<{ value: string; label: string }> {
   return [{ value: '', label: '选择客户' }, ...rows.map(item => ({ value: item.id, label: item.name }))]
 }
@@ -181,7 +197,33 @@ function customerOptions(rows: CustomerQueryProfile[]): Array<{ value: string; l
 watch(ready, (ok) => {
   if (!ok) return
   void loadMailTypes()
+  void loadSenders(false)
 }, { immediate: true })
+
+watch(() => rules.value?.defaultSender?.mailsetId, (id) => {
+  if (senderTouched.value) return
+  mailsetId.value = id ?? ''
+}, { immediate: true })
+
+async function loadSenders(force: boolean): Promise<void> {
+  if (!bridge || !ready.value) return
+  const loaded = await fetchMailSenders(bridge, force)
+  mailsets.value = loaded.items
+  senderNotice.value = loaded.message
+}
+
+function chooseSender(value: string): void {
+  senderTouched.value = true
+  mailsetId.value = value
+}
+
+function currentSender(): { mailsetId: string; label: string } | null {
+  const picked = mailsets.value.find(item => item.id === mailsetId.value)
+  if (picked) return { mailsetId: picked.id, label: picked.label }
+  const saved = rules.value?.defaultSender
+  if (saved && saved.mailsetId === mailsetId.value) return saved
+  return null
+}
 onMounted(() => { if (ready.value) void call({ action: 'load' }) })
 </script>
 
@@ -191,10 +233,11 @@ onMounted(() => { if (ready.value) void call({ action: 'load' }) })
   <template v-else>
     <section class="card">
       <div class="card-head"><h2>拼一封发文</h2></div>
-      <p class="hint">创建任务是把客户、文件、发文类型和已保存规则自己拼起来。这一步只生成预览，不会在 EASY 创建邮件。</p>
+      <p class="hint">创建任务是把客户、文件、发文类型和已保存规则自己拼起来。这一步只生成预览，还不会提交到 EASY。</p>
       <div class="form-grid">
         <label>客户<ThemeSelect v-model="customerId" :options="customerOptions(customers)" /></label>
         <label>发文类型<ThemeSelect v-model="mailTypeId" :options="[{ value: '', label: '选择发文类型' }, ...mailTypes.map(item => ({ value: item.id, label: item.name }))]" /></label>
+        <label>发件人<ThemeSelect :model-value="mailsetId" placeholder="选择发件邮箱" :options="senderOptions" @update:model-value="chooseSender(String($event))" /></label>
         <label>文件名<input v-model="fileKeyword" placeholder="可按文件名缩小范围" @keydown.enter="searchFiles" /></label>
       </div>
       <div class="filters">
@@ -203,6 +246,8 @@ onMounted(() => { if (ready.value) void call({ action: 'load' }) })
         <button type="button" class="solid" @click="buildPreview">拼成预览</button>
       </div>
       <p v-if="fileMessage" class="hint">{{ fileMessage }}</p>
+      <p v-if="senderNotice" class="hint">{{ senderNotice }}</p>
+      <p v-else-if="!senderTouched && rules?.defaultSender && mailsetId === rules.defaultSender.mailsetId" class="hint">发件人沿用规则默认：{{ rules.defaultSender.label }}。要换的话在上面改，只影响这次预览。</p>
       <p v-for="note in fillNotes" :key="note" class="hint">{{ note }}</p>
       <table v-if="fileHits.length" class="grid">
         <thead><tr><th></th><th>文件</th><th>客户</th><th>我方文号</th></tr></thead>
@@ -227,14 +272,14 @@ onMounted(() => { if (ready.value) void call({ action: 'load' }) })
         <p v-if="preview.gaps.length" class="hint">还缺：{{ preview.gaps.join('') }}</p>
         <p class="hint">客户 {{ preview.customerName || '未选' }} · 类型 {{ preview.mailTypeName || '未选' }} · 文件 {{ preview.fileNames.join('、') || '未选' }}</p>
         <p class="hint">收件人 {{ preview.to || '空' }} · 抄送 {{ preview.cc || '空' }}</p>
-        <p class="hint">主题 {{ preview.subject || '空' }} · 审核人 {{ preview.reviewerName || '未设默认' }}</p>
+        <p class="hint">主题 {{ preview.subject || '空' }} · 审核人 {{ preview.reviewerName || '未设默认' }} · 发件人 {{ preview.senderLabel || '未设默认' }}</p>
         <p class="hint">{{ preview.body || '正文还是空的。' }}</p>
       </section>
     </section>
 
     <section v-if="pctPlans.length" class="card">
       <h2>PCT 提醒任务</h2>
-      <p class="hint">这些任务来自表格。发文类型按每行的客户文号和我方文号决定。还不会向 EASY 提交发文。</p>
+      <p class="hint">这些任务来自表格。发文类型按每行的客户文号和我方文号决定。任务记在插件里，还不会提交到 EASY。</p>
       <table class="grid">
         <thead><tr><th>客户</th><th>任务</th></tr></thead>
         <tbody>

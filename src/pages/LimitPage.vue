@@ -115,7 +115,7 @@ function reset() {
         <span>{{ pageIndex }} / {{ totalPages }}</span>
         <button class="ghost tiny" type="button" :disabled="pageIndex >= totalPages || loading" @click="goPage(pageIndex + 1)">下一页</button>
       </div>
-      <button class="ghost" type="button" disabled title="LimitMailCustomer 的写开关关闭，不会创建发文">创建发文</button>
+      <button class="ghost" type="button" disabled title="这一步会向 EASY 提交发文，写开关还关着。本机任务用上面的「按表格创建任务」。">提交到 EASY</button>
     </div>
     <p v-if="message" class="hint">{{ message }}</p>
     <p v-else-if="live && !connected" class="hint">尚未连接 EASY。连接后在这里查询期限，不会使用本页地址发请求。</p>

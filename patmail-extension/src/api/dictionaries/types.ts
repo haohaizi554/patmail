@@ -79,7 +79,7 @@ export interface PickerSnapshot {
 }
 
 export type DictionarySnapshot =
-  | BasicDataSnapshot | FlowDataSnapshot | FileTypeTreeSnapshot | FieldColumnSnapshot | ListColumnSnapshot | MailTypeSnapshot | ReviewerSnapshot | PickerSnapshot
+  | BasicDataSnapshot | FlowDataSnapshot | FileTypeTreeSnapshot | FieldColumnSnapshot | ListColumnSnapshot | MailTypeSnapshot | ReviewerSnapshot | PickerSnapshot | MailSetSnapshot
 
 export interface MailTypeSnapshot {
   kind: 'mailType'
@@ -92,9 +92,14 @@ export interface ReviewerSnapshot {
   reviewers: Array<{ id: string; name: string }>
 }
 
-export type DictionaryKind = 'basic' | 'flow' | 'fileType' | 'fieldColumn' | 'listColumn' | 'mailType' | 'reviewer' | 'picker'
+export interface MailSetSnapshot {
+  kind: 'mailSet'
+  items: Array<{ id: string; name: string; email: string; label: string }>
+}
+
+export type DictionaryKind = 'basic' | 'flow' | 'fileType' | 'fieldColumn' | 'listColumn' | 'mailType' | 'reviewer' | 'picker' | 'mailSet'
 
 export type DictionaryLoadRequest =
-  | { kind: 'basic' | 'flow' | 'fieldColumn' | 'listColumn' | 'mailType' | 'reviewer'; force: boolean }
+  | { kind: 'basic' | 'flow' | 'fieldColumn' | 'listColumn' | 'mailType' | 'reviewer' | 'mailSet'; force: boolean }
   | { kind: 'picker'; force: boolean; caseTypeId?: string; country?: string; procType?: string }
   | { kind: 'fileType'; force: boolean; caseTypeId: string }

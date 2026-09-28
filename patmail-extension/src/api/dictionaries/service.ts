@@ -10,8 +10,9 @@ import {
 } from './adapters'
 import { DictionaryCache } from './cache'
 import { readDictionaryBody, responseKeyNames } from './guards'
+import { readMailSenders } from '../../customer/mailset'
 import type {
-  BasicDataSnapshot, DictionarySnapshot, FieldColumnSnapshot, FileTypeTreeSnapshot, FlowDataSnapshot, ListColumnSnapshot, MailTypeSnapshot, PickerSnapshot, ReviewerSnapshot
+  BasicDataSnapshot, DictionarySnapshot, FieldColumnSnapshot, FileTypeTreeSnapshot, FlowDataSnapshot, ListColumnSnapshot, MailSetSnapshot, MailTypeSnapshot, PickerSnapshot, ReviewerSnapshot
 } from './types'
 import { buildPickerCatalog } from './picker-catalog'
 import { readReviewers } from './reviewers'
@@ -160,6 +161,19 @@ export class DictionaryService {
     })
   }
 
+  /** 发文页发件人下拉。MailinfoInit 的 mailsettinglist。不保存响应里可能带出的新邮件编号。 */
+  loadMailSets(userKey: string, force: boolean, signal?: AbortSignal): Promise<ApiResult<MailSetSnapshot>> {
+    return this.cache.load(this.cache.mailSetKey(userKey), force, async () => {
+      const response = await this.transport.post('mailInfoInit', params({
+        Call: 'MailinfoInit', mail_id: '', case_id: '', proc_id: '', file_ids: '', customer_id: '', log_pagename: 'mail.aspx'
+      }), signal)
+      if (!response.ok) return response
+      const body = readDictionaryBody(response.data)
+      if (!body.ok) return body
+      return { ok: true, data: { kind: 'mailSet', items: readMailSenders(body.data) } }
+    })
+  }
+
   loadReviewers(userKey: string, force: boolean, signal?: AbortSignal): Promise<ApiResult<ReviewerSnapshot>> {
     return this.cache.load(this.cache.reviewerKey(userKey), force, async () => {
       const response = await this.transport.post('treeUser', params({ Call: 'GetTreeUser', log_pagename: PAGE }), signal)
@@ -232,6 +246,7 @@ export class DictionaryService {
     if (kind === 'fileType') return this.loadFileTypes(userKey, caseTypeId, force, signal)
     if (kind === 'fieldColumn') return this.loadFieldColumns(userKey, force, signal)
     if (kind === 'mailType') return this.loadMailTypes(userKey, force, signal)
+    if (kind === 'mailSet') return this.loadMailSets(userKey, force, signal)
     if (kind === 'reviewer') return this.loadReviewers(userKey, force, signal)
     if (kind === 'picker') return this.loadPicker(userKey, force, caseTypeId, signal, picker)
     return this.loadListColumns(userKey, force, signal)

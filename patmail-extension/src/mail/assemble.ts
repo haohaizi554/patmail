@@ -16,6 +16,8 @@ export interface AssembledMail {
   body: string
   reviewerId: string
   reviewerName: string
+  senderId: string
+  senderLabel: string
   gaps: string[]
 }
 
@@ -103,6 +105,7 @@ export function assembleMail(input: {
   subject: string
   body: string
   reviewer?: { userId: string; name: string } | null
+  sender?: { mailsetId: string; label: string } | null
 }): AssembledMail {
   const gaps: string[] = []
   if (!input.customer) gaps.push('还没有选择客户。')
@@ -123,6 +126,8 @@ export function assembleMail(input: {
     body: input.body.trim(),
     reviewerId: input.reviewer?.userId ?? '',
     reviewerName: input.reviewer?.name.trim() ?? '',
+    senderId: input.sender?.mailsetId ?? '',
+    senderLabel: input.sender?.label.trim() ?? '',
     gaps
   }
 }

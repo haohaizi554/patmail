@@ -16,6 +16,8 @@ import SignatureEditor from '../components/rules/SignatureEditor.vue'
 import SubjectRuleEditor from '../components/rules/SubjectRuleEditor.vue'
 import BodyRuleEditor from '../components/rules/BodyRuleEditor.vue'
 import DefaultReviewerEditor from '../components/rules/DefaultReviewerEditor.vue'
+import DefaultSenderEditor from '../components/rules/DefaultSenderEditor.vue'
+import { fetchMailSenders } from '../../customer/mailset-load'
 
 const bridge = inject<MessageBridge>('bridge')
 const { connection, customers, rules, accountEpoch, call } = useWorkspace()
@@ -26,13 +28,15 @@ const message = ref('')
 const importText = ref('')
 const reviewers = ref<Array<{ id: string; name: string }>>([])
 const reviewerNotice = ref('')
+const senders = ref<Array<{ id: string; label: string }>>([])
+const senderNotice = ref('')
 
 watch(rules, (bundle) => {
   draft.value = bundle ? plainClone(bundle) : null
   draftScope.value = scopeFromConnection(connection.value)
 }, { immediate: true })
 watch(accountEpoch, () => { importText.value = '' })
-watch(ready, (ok) => { if (ok) void loadReviewers() }, { immediate: true })
+watch(ready, (ok) => { if (ok) { void loadReviewers(); void loadSenders(false) } }, { immediate: true })
 
 async function loadReviewers(): Promise<void> {
   if (!bridge || !ready.value) return
@@ -54,6 +58,14 @@ async function loadReviewers(): Promise<void> {
   }
   reviewers.value = response.payload.data.reviewers
   reviewerNotice.value = response.payload.data.message
+}
+
+async function loadSenders(force: boolean): Promise<void> {
+  if (!bridge || !ready.value) return
+  senderNotice.value = '正在从原网站读取发件邮箱…'
+  const loaded = await fetchMailSenders(bridge, force)
+  senders.value = loaded.items.map(item => ({ id: item.id, label: item.label }))
+  senderNotice.value = loaded.message
 }
 
 async function persist(mutate: (bundle: MailRuleBundle) => void): Promise<void> {
@@ -132,6 +144,11 @@ async function saveReviewer(input: { userId: string; name: string }): Promise<vo
   await persist(bundle => { bundle.defaultReviewer = { userId: input.userId, name: input.name.trim() } })
 }
 
+async function saveSender(input: { mailsetId: string; label: string }): Promise<void> {
+  if (!isQueryGuid(input.mailsetId) || !input.label.trim()) { message.value = '请从原网站的发件邮箱里选择默认发件人。'; return }
+  await persist(bundle => { bundle.defaultSender = { mailsetId: input.mailsetId, label: input.label.trim() } })
+}
+
 async function saveText(): Promise<void> {
   await persist(bundle => {
     if (!draft.value) return
@@ -157,6 +174,7 @@ async function importRules(): Promise<void> {
     bundle.subject = parsed.subject
     bundle.body = parsed.body
     bundle.defaultReviewer = parsed.defaultReviewer ?? null
+    bundle.defaultSender = parsed.defaultSender ?? null
   })
 }
 </script>
@@ -164,21 +182,30 @@ async function importRules(): Promise<void> {
 <template>
   <PageHead title="发文规则与映射配置" desc="配置企业个性化发文规则，让自动化更贴合您的业务场景。" :art="bg('规则配置好，发文更轻松.png')" art-large />
   <section v-if="!ready || !draft" class="card"><p class="empty">尚未确认 EASY 用户，不能读取发文规则。</p></section>
-  <template v-else>
+  <div v-else class="rules-page">
     <section class="card">
       <h2>发文规则</h2>
       <p class="hint">当前版本 {{ draft.revision }}。保存走后台规则服务。内容变化后，未发出的旧任务会标记为过期。</p>
       <p v-if="message" class="hint">{{ message }}</p>
     </section>
-    <CustomerPolicyEditor :policies="draft.policies" :customers="customers" @save="savePolicy" />
-    <DescriptionMailTypeEditor :mappings="draft.mappings" @save="saveMapping" />
-    <RecipientEditor :recipients="draft.recipients" :customers="customers" @save="saveRecipient" />
-    <SignatureEditor :signatures="draft.signatures" @save="saveSignature" />
-    <DefaultReviewerEditor :reviewers="reviewers" :current-id="connection.operatorId" :selected="draft.defaultReviewer" :notice="reviewerNotice" @save="saveReviewer" />
+    <div class="rule-columns">
+      <CustomerPolicyEditor :policies="draft.policies" :customers="customers" @save="savePolicy" />
+      <DescriptionMailTypeEditor :mappings="draft.mappings" @save="saveMapping" />
+    </div>
+    <div class="rule-columns">
+      <RecipientEditor :recipients="draft.recipients" :customers="customers" @save="saveRecipient" />
+      <SignatureEditor :signatures="draft.signatures" @save="saveSignature" />
+    </div>
+    <div class="rule-columns">
+      <DefaultReviewerEditor :reviewers="reviewers" :current-id="connection.operatorId" :selected="draft.defaultReviewer" :notice="reviewerNotice" @save="saveReviewer" />
+      <DefaultSenderEditor :senders="senders" :selected="draft.defaultSender" :notice="senderNotice" @save="saveSender" @reload="loadSenders(true)" />
+    </div>
     <form class="card stack-form" @submit.prevent="saveText">
       <h2>标题和正文</h2>
-      <SubjectRuleEditor v-model="draft.subject" />
-      <BodyRuleEditor v-model="draft.body" />
+      <div class="rule-fields">
+        <SubjectRuleEditor v-model="draft.subject" />
+        <BodyRuleEditor v-model="draft.body" />
+      </div>
       <button class="solid" type="submit">保存标题和正文</button>
     </form>
     <form class="card stack-form" @submit.prevent="importRules">
@@ -186,5 +213,5 @@ async function importRules(): Promise<void> {
       <label>规则 JSON <textarea v-model="importText" rows="4"></textarea></label>
       <button class="ghost" type="submit">导入到当前账号</button>
     </form>
-  </template>
+  </div>
 </template>

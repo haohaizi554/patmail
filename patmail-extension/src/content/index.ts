@@ -1,4 +1,5 @@
 import { isContentRequest, MessageType, type ContentResponse, type FileSearchFormField, type MessageBridge } from '../shared/message'
+import type { ProcessOpenTarget } from '../api/mail-process'
 import { sendToBackground } from '../utils/runtime'
 import { injectPanel } from './injector'
 import { readPageInfo, scanPage } from './scanner'
@@ -65,6 +66,65 @@ async function scanDocument(doc: Document): Promise<FileSearchFormField[]> {
   return scanThroughPageScript(doc)
 }
 
+function openEasyTab(tabId: string, title: string, path: string): Promise<{ ok: boolean; message: string }> {
+  const marker = `patmail-open-${Date.now()}`
+  return new Promise(resolve => {
+    const timer = window.setTimeout(() => {
+      window.removeEventListener('message', onMessage)
+      resolve({ ok: false, message: '原网站没有接住打开请求。请回到 EASY 首页后再试。' })
+    }, 4000)
+    function onMessage(event: MessageEvent): void {
+      if (event.source !== window || event.origin !== location.origin) return
+      const data = event.data as { marker?: string; ok?: boolean; message?: string } | null
+      if (!data || data.marker !== marker) return
+      window.clearTimeout(timer)
+      window.removeEventListener('message', onMessage)
+      resolve({
+        ok: data.ok === true,
+        message: typeof data.message === 'string' ? data.message.slice(0, 200) : ''
+      })
+    }
+    window.addEventListener('message', onMessage)
+    const script = document.createElement('script')
+    script.textContent = `(() => {
+      const path = ${JSON.stringify(path)};
+      const marker = ${JSON.stringify(marker)};
+      const report = (ok, message) => window.postMessage({ marker, ok, message }, location.origin);
+      const open = window.AddBusinessTab;
+      if (typeof open !== 'function') {
+        report(false, '当前标签不是 EASY 首页，打不开内部页签。请先回到首页。');
+        return;
+      }
+      const bare = path.indexOf('?') > -1 ? path.slice(0, path.indexOf('?')) : path;
+      const menu = window._UserMenu;
+      let allowed = bare.toLowerCase().indexOf('forms/faq') >= 0;
+      if (!allowed && Array.isArray(menu)) {
+        for (let i = 0; i < menu.length; i++) {
+          const node = menu[i] || {};
+          if ((node.is_business || node.is_page) && String(node.menu_url || '').toLowerCase() === bare.toLowerCase()) {
+            allowed = true;
+            break;
+          }
+        }
+      }
+      if (!allowed) {
+        report(false, '原网站菜单里没有这个页面，不能打开。');
+        return;
+      }
+      open(${JSON.stringify(tabId)}, ${JSON.stringify(title)}, path);
+      report(true, '已在 EASY 首页打开。');
+    })()`
+    document.documentElement.appendChild(script)
+    script.remove()
+  })
+}
+
+async function openProcessForm(target: ProcessOpenTarget): Promise<{ ok: boolean; message: string }> {
+  const resolved = await easyRuntime.resolveProcessForm(target)
+  if (!resolved.ok) return { ok: false, message: resolved.error.message.slice(0, 200) }
+  return openEasyTab(`f_${target.id}`, target.title, resolved.data)
+}
+
 async function readFileSearchForm(): Promise<FileSearchFormField[]> {
   if (hasSearchTable(document)) return scanDocument(document)
   const frame = document.querySelector('iframe#mframe')
@@ -111,6 +171,8 @@ const bridge: MessageBridge = {
       case MessageType.ListMailProcesses:
         return { type: MessageType.ListMailProcessesResult,
           payload: await easyRuntime.listMailProcesses(message.payload.query) }
+      case MessageType.OpenEasyForm:
+        return { type: MessageType.OpenEasyFormResult, payload: await openProcessForm(message.payload.target) }
       case MessageType.ListFlowReviewers:
         return { type: MessageType.ListFlowReviewersResult,
           payload: await easyRuntime.listFlowReviewers() }

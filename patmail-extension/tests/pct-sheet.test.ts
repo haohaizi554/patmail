@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 import { isCustomerProfile, isPctTask } from '../src/customer/guards'
 import { pctMailTypeFor } from '../src/customer/mail-flow'
-import { pctRowsFromTable, summarizePctTask } from '../src/customer/pct-sheet'
+import { matchSheetCtrlProcs, pctRowsFromTable, summarizePctTask } from '../src/customer/pct-sheet'
 import type { CustomerQueryProfile, PctTaskDraft } from '../src/customer/types'
 import { joinCaseVolumes, splitCaseVolumes } from '../src/customer/volume-list'
 import { readXlsxRows, rowsFromSheetXml, sharedStringsFromXml } from '../src/customer/xlsx-table'
@@ -67,6 +67,22 @@ describe('PCT 表格', () => {
       pctMailTypeFor({ ourVolume: 'PA2' }, nodes)?.id
     ])
     expect(parsed.rows[1]?.mailTypeRadioIndex).toBe(3)
+  })
+
+  it('处理事项按名称对上具体项，分类和重名都不选用', () => {
+    const leaf = '71d067a3-d1a3-4d4b-87f9-38ea9d96bf70'
+    const other = '93f289c5-f3c5-4f6d-a90b-50ac1fb8d092'
+    const options = [
+      { id: 'folder', label: '提醒申请PCT' },
+      { id: leaf, label: '提醒申请PCT', parentId: 'folder' },
+      { id: other, label: '补正' }
+    ]
+    expect(matchSheetCtrlProcs(['提醒申请PCT'], options)).toEqual({ ok: true, ids: leaf, names: ['提醒申请PCT'] })
+    expect(matchSheetCtrlProcs(['没有这项'], options).ok).toBe(false)
+    expect(matchSheetCtrlProcs(['补正'], [
+      { id: leaf, label: '补正' },
+      { id: other, label: '补正' }
+    ]).ok).toBe(false)
   })
 
   it('没有我方文号和处理事项列时不组任务', () => {

@@ -9,7 +9,7 @@ import type { QueryTemplate } from '../query/query-types'
 import { isEasyConnection, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope } from './connection'
 import { isDictionaryResult, isFileSearchApiResult, isFileSearchQuery, isHistoryDetailResult, isHistoryListResult, isLimitMonitorApiResult, isLimitMonitorQuery, isMailProcessApiResult, isMailProcessQuery, isSessionResult } from '../api/message-guards'
 import type { LimitMonitorQuery } from '../api/limit-monitor-params'
-import type { ProcessListQuery, ProcessListResult } from '../api/mail-process'
+import { isProcessOpenTarget, type ProcessListQuery, type ProcessListResult, type ProcessOpenTarget } from '../api/mail-process'
 import type { AccountReviewerList } from '../workflow/contracts'
 import type { LimitMonitorResult } from '../api/limit-monitor-types'
 import type { DictionaryLoadRequest, DictionarySnapshot } from '../api/dictionaries'
@@ -50,6 +50,8 @@ export const MessageType = {
   SearchLimitMonitorResult: 'SEARCH_LIMIT_MONITOR_RESULT',
   ListMailProcesses: 'LIST_MAIL_PROCESSES',
   ListMailProcessesResult: 'LIST_MAIL_PROCESSES_RESULT',
+  OpenEasyForm: 'OPEN_EASY_FORM',
+  OpenEasyFormResult: 'OPEN_EASY_FORM_RESULT',
   ListFlowReviewers: 'LIST_FLOW_REVIEWERS',
   ListFlowReviewersResult: 'LIST_FLOW_REVIEWERS_RESULT',
   CancelFileSearch: 'CANCEL_FILE_SEARCH',
@@ -112,6 +114,7 @@ export type ContentRequest =
   | Request<'CANCEL_FILE_SEARCH'> | Response<'SEARCH_FILES', { query: FileSearchQuery; continuation?: { querySessionId: string } }>
   | Response<'SEARCH_LIMIT_MONITOR', { query: LimitMonitorQuery }>
   | Response<'LIST_MAIL_PROCESSES', { query: ProcessListQuery }>
+  | Response<'OPEN_EASY_FORM', { target: ProcessOpenTarget }>
   | Request<'LIST_FLOW_REVIEWERS'>
   | Response<'LIST_HISTORY_QUERIES', { force: boolean; surface?: 'file' | 'limit' }>
   | Response<'GET_HISTORY_QUERY', { queryId: string; surface?: 'file' | 'limit' }>
@@ -250,6 +253,7 @@ export type ContentResponse =
   | Response<'SEARCH_FILES_RESULT', ApiResult<FileSearchResult>>
   | Response<'SEARCH_LIMIT_MONITOR_RESULT', ApiResult<LimitMonitorResult>>
   | Response<'LIST_MAIL_PROCESSES_RESULT', ApiResult<ProcessListResult>>
+  | Response<'OPEN_EASY_FORM_RESULT', { ok: boolean; message: string }>
   | Response<'LIST_FLOW_REVIEWERS_RESULT', ApiResult<AccountReviewerList>>
   | Response<'FILE_SEARCH_CANCELLED', { ok: true }>
   | Response<'HISTORY_QUERIES_RESULT', ApiResult<HistoryQueryOption[]>>
@@ -374,6 +378,11 @@ export function isMessage(value: unknown): value is AppMessage {
       return isRecord(value.payload) && isLimitMonitorQuery(value.payload.query) && Object.keys(value.payload).length === 1
     case MessageType.ListMailProcesses:
       return isRecord(value.payload) && isMailProcessQuery(value.payload.query) && Object.keys(value.payload).length === 1
+    case MessageType.OpenEasyForm:
+      return isRecord(value.payload) && isProcessOpenTarget(value.payload.target) && Object.keys(value.payload).length === 1
+    case MessageType.OpenEasyFormResult:
+      return isRecord(value.payload) && typeof value.payload.ok === 'boolean' && typeof value.payload.message === 'string' &&
+        value.payload.message.length <= 200 && Object.keys(value.payload).length === 2
     case MessageType.ScanResult:
       return isPageSnapshot(value.payload)
     case MessageType.PageInfo:
@@ -436,6 +445,7 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.CheckSession || value.type === MessageType.CancelSessionCheck ||
     value.type === MessageType.SearchFiles || value.type === MessageType.CancelFileSearch ||
     value.type === MessageType.SearchLimitMonitor || value.type === MessageType.ListMailProcesses ||
+    value.type === MessageType.OpenEasyForm ||
     value.type === MessageType.ListFlowReviewers ||
     value.type === MessageType.ListHistoryQueries || value.type === MessageType.GetHistoryQuery ||
     value.type === MessageType.LoadDictionary || value.type === MessageType.ScanFileSearchForm || value.type === MessageType.CreateEasyMail ||
@@ -447,7 +457,7 @@ export function isContentRequest(value: unknown): value is ContentRequest {
   )
 }
 
-const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'SEARCH_LIMIT_MONITOR', 'LIST_MAIL_PROCESSES', 'LIST_FLOW_REVIEWERS', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
+const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'SEARCH_LIMIT_MONITOR', 'LIST_MAIL_PROCESSES', 'OPEN_EASY_FORM', 'LIST_FLOW_REVIEWERS', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
 
 /** 消息校验和后台派发共用同一份许可，避免新查询只通过前一层、却被后一层截断。 */
 export function isWorkspaceForwardRequest(value: unknown): value is ContentRequest {
@@ -646,7 +656,7 @@ function isWorkflowPreview(value: unknown): value is { executionId: string; node
     typeof value.urgencyId === 'string' && value.nodeId.length <= 80 && value.reviewerId.length <= 80 && value.urgencyId.length <= 80
 }
 
-const DICTIONARY_KINDS = new Set(['basic', 'flow', 'fieldColumn', 'listColumn', 'fileType', 'mailType', 'reviewer', 'picker'])
+const DICTIONARY_KINDS = new Set(['basic', 'flow', 'fieldColumn', 'listColumn', 'fileType', 'mailType', 'reviewer', 'picker', 'mailSet'])
 
 function isDictionaryRequest(value: unknown): value is DictionaryLoadRequest {
   if (!isRecord(value) || (value.force !== true && value.force !== false) || typeof value.kind !== 'string' || !DICTIONARY_KINDS.has(value.kind)) {

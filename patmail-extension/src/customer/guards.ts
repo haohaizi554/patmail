@@ -19,6 +19,8 @@ export function isCustomerProfile(value: unknown): value is CustomerQueryProfile
   if (profile.limitMailStyle !== undefined && !isLimitMailStyle(profile.limitMailStyle)) return false
   if (profile.fileMailStyle !== undefined && !isFileMailStyle(profile.fileMailStyle)) return false
   if (profile.reviewTarget !== undefined && profile.reviewTarget !== 'self') return false
+  if (profile.mailsetId !== undefined && (typeof profile.mailsetId !== 'string' || !isQueryGuid(profile.mailsetId))) return false
+  if (profile.mailsetLabel !== undefined && (typeof profile.mailsetLabel !== 'string' || profile.mailsetLabel.length > 160)) return false
   if (profile.boundQuery !== undefined && !isBoundQuery(profile.boundQuery)) return false
   if (profile.pctTask !== undefined && !isPctTask(profile.pctTask)) return false
   if (profile.overrides === null || typeof profile.overrides !== 'object' || Array.isArray(profile.overrides)) return false
@@ -53,5 +55,7 @@ export function isPctTask(value: unknown): value is PctTaskDraft {
   if (!Array.isArray(task.rows) || task.rows.length < 1 || task.rows.length > 300 || !task.rows.every(isPctRow)) return false
   if (!Array.isArray(task.confirmedProcIds) || task.confirmedProcIds.length > 300) return false
   if (!task.confirmedProcIds.every(item => typeof item === 'string' && isQueryGuid(item))) return false
+  if (task.mailsetId !== undefined && (typeof task.mailsetId !== 'string' || !isQueryGuid(task.mailsetId))) return false
+  if (task.mailsetLabel !== undefined && (typeof task.mailsetLabel !== 'string' || task.mailsetLabel.length > 160)) return false
   return typeof task.createdAt === 'string' && task.createdAt.length <= 40
 }

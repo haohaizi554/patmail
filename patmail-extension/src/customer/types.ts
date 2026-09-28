@@ -25,6 +25,9 @@ export interface PctTaskDraft {
   ctrlProcId: string
   rows: PctTaskRow[]
   confirmedProcIds: string[]
+  /** 创建任务时选中的发件邮箱。没选则沿用客户配置。 */
+  mailsetId?: string
+  mailsetLabel?: string
   createdAt: string
 }
 /** 已封装的工作流。PCT提醒是第一条。 */
@@ -48,6 +51,9 @@ export interface CustomerQueryProfile {
   boundQuery?: Record<string, string>
   /** PCT 提醒提交给当前登录人审核。 */
   reviewTarget?: ReviewTarget
+  /** 从原站发件人列表选中的邮箱。 */
+  mailsetId?: string
+  mailsetLabel?: string
   /** 由 PCT 表格创建的任务。不会向 EASY 提交发文。 */
   pctTask?: PctTaskDraft
   enabled: boolean

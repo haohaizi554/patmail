@@ -99,6 +99,12 @@ export interface DefaultReviewer {
   name: string
 }
 
+/** 发文规则里缓存的默认发件邮箱。名单仍从原站现读，这里只记选中的那一项。 */
+export interface DefaultSender {
+  mailsetId: string
+  label: string
+}
+
 export interface MailRuleBundle {
   version: 1
   revision: number
@@ -111,6 +117,8 @@ export interface MailRuleBundle {
   body: BodyRule
   /** 缺省表示还没设。旧配置没有这个字段时按未设置读取。 */
   defaultReviewer: DefaultReviewer | null
+  /** 缺省表示还没设。创建任务时可以沿用，也可以当场改。 */
+  defaultSender: DefaultSender | null
 }
 
 export interface MailGroup {

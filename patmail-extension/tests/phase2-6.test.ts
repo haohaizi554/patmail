@@ -45,7 +45,8 @@ function rules(): MailRuleBundle {
     signatures: [],
     subject: { template: '关于{文件名称}的通知', countInjection: false, anchor: '关于', missingAnchor: 'keep', version: 1 },
     body: { template: '请查收{文件数量}个文件。', supplement: '', version: 1 },
-    defaultReviewer: null
+    defaultReviewer: null,
+    defaultSender: null
   }
 }
 function profile(): CustomerQueryProfile {

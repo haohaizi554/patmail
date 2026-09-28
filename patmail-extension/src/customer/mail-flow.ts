@@ -50,7 +50,7 @@ export const WORKFLOWS: PackagedWorkflow[] = [
     label: 'PCT提醒',
     surface: 'limit',
     modes: [
-      { id: 'ctrl_proc', label: '处理事项', decidedBy: '表格「处理事项」。查询时只能从列表里选择，不能手填。这批清单是「提醒申请PCT」。' },
+      { id: 'ctrl_proc', label: '处理事项', decidedBy: '表格「处理事项」。上传后按这个名称到原网站的处理事项列表里对上再查。' },
       { id: 'our_volume', label: '我方文号', decidedBy: '表格「我方文号」。可以一个一个查，也可以用分号、空格或换行放在一起查。' },
       { id: 'customer_volume', label: '客户文号', decidedBy: '表格「客户文号」。' },
       { id: 'volume', label: '发文类型', decidedBy: '从原网站的发文类型树热加载。有客户文号对名称里带「贵方案号」和「深圳市」的那一项；没有客户文号、有我方文号时对带「我方案号」和「深圳市」、且不是非深圳市的那一项。' },
@@ -58,7 +58,7 @@ export const WORKFLOWS: PackagedWorkflow[] = [
       { id: 'customer_name', label: '客户名称', decidedBy: '表格「客户名称」。' },
       { id: 'to', label: '收件人', decidedBy: '表格「第一客户联系人」，角色是第一发明人（技术联系人）。' },
       { id: 'cc', label: '抄送', decidedBy: '商务，以及表格「客户联系人(IPR)」。' },
-      { id: 'from', label: '发件人', decidedBy: '国际部公用邮箱。发件页按这个角色热加载。' },
+      { id: 'from', label: '发件人', decidedBy: '从原网站的发件邮箱列表热加载，在这里或创建任务时选择。' },
       { id: 'review', label: '审核', options: [{ value: 'self', label: '提交给当前登录人' }] }
     ]
   }
@@ -164,6 +164,7 @@ export function applyBoundQuery(profile: CustomerQueryProfile, input: {
       ctrlProcId: profile.pctTask.ctrlProcId,
       createdAt: profile.pctTask.createdAt,
       confirmedProcIds: [...profile.pctTask.confirmedProcIds],
+      ...(profile.pctTask.mailsetId && profile.pctTask.mailsetLabel ? { mailsetId: profile.pctTask.mailsetId, mailsetLabel: profile.pctTask.mailsetLabel } : {}),
       rows: profile.pctTask.rows.map(row => ({ ...row }))
     }
   }
@@ -196,7 +197,7 @@ export const PCT_REMINDER = {
   queryFieldLabel: '处理事项',
   columns: ['我方文号', '客户文号', '客户名称', '第一客户联系人', '客户联系人(IPR)', '处理事项'],
   contacts: {
-    from: { role: '国际部公用邮箱', example: 'info@centips.com' },
+    from: { role: '发件邮箱', example: '从原站发件人列表选择' },
     to: { role: '第一发明人（技术联系人）', example: '姜颖 <liy02@pcl.ac.cn>' },
     cc: [
       { role: '商务', example: '林淑敏 <linsm@centips.com>' },

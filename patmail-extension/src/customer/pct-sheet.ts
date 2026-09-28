@@ -1,3 +1,4 @@
+import { isQueryGuid } from '../query/query-validator'
 import { PCT_REMINDER, pctMailTypeFor, pctVolumeSlot } from './mail-flow'
 import type { PctTaskDraft, PctTaskRow } from './types'
 import { joinCaseVolumes, splitCaseVolumes } from './volume-list'
@@ -67,6 +68,7 @@ export function clonePctTask(task: PctTaskDraft): PctTaskDraft {
     ctrlProcId: task.ctrlProcId,
     createdAt: task.createdAt,
     confirmedProcIds: [...task.confirmedProcIds],
+    ...(task.mailsetId && task.mailsetLabel ? { mailsetId: task.mailsetId, mailsetLabel: task.mailsetLabel } : {}),
     rows: task.rows.map(row => ({ ...row }))
   }
 }
@@ -80,6 +82,31 @@ export function applyPctMailTypes(rows: PctTaskRow[], mailTypes: Array<{ id: str
     ['我方文号', '客户文号', '客户名称', '第一客户联系人', '客户联系人(IPR)', '处理事项'],
     ...rows.map(row => [row.ourVolume, row.customerVolume, row.customerName, row.contactName, row.iprName, row.procLabel])
   ], mailTypes).rows
+}
+
+/** 表格里的处理事项名称，对原站处理事项列表里的具体项。分类节点和重名都不选用。 */
+export function matchSheetCtrlProcs(
+  labels: string[],
+  options: Array<{ id: string; label: string; parentId?: string }>
+): { ok: true; ids: string; names: string[] } | { ok: false; message: string } {
+  const wanted = [...new Set(labels.map(item => item.trim()).filter(Boolean))]
+  if (!wanted.length) return { ok: false, message: '表格里没有处理事项，查不了。' }
+  if (!options.length) return { ok: false, message: '处理事项列表还没从原网站读到。' }
+  const parents = new Set(options.map(item => item.parentId).filter((item): item is string => Boolean(item)))
+  const ids: string[] = []
+  const names: string[] = []
+  for (const label of wanted) {
+    const exact = options.filter(item => item.label.trim() === label && isQueryGuid(item.id))
+    const leaves = exact.filter(item => !parents.has(item.id))
+    if (leaves.length !== 1) {
+      if (!exact.length) return { ok: false, message: `表格里的处理事项「${label}」没有在原网站列表里对上。` }
+      if (!leaves.length) return { ok: false, message: `处理事项「${label}」对上的是分类，不是具体事项。` }
+      return { ok: false, message: `处理事项「${label}」在原网站对上了多项，没有选用。` }
+    }
+    ids.push(leaves[0].id)
+    names.push(label)
+  }
+  return { ok: true, ids: ids.join(','), names }
 }
 
 export function summarizePctTask(task: PctTaskDraft): string {

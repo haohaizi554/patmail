@@ -15,6 +15,7 @@ import AcceptancePage from './pages/AcceptancePage.vue'
 import SettingsPage from './pages/SettingsPage.vue'
 import LimitsPage from './pages/LimitsPage.vue'
 import Shell from '../../../src/components/Shell.vue'
+import AppDialog from './components/AppDialog.vue'
 
 const nav = [
   { name: '首页', path: 'home', hash: '/' },
@@ -78,4 +79,5 @@ onUnmounted(() => window.removeEventListener('hashchange', onHash))
       <component :is="page" :key="route" />
     </KeepAlive>
   </Shell>
+  <AppDialog />
 </template>

@@ -12,6 +12,59 @@
 .stack-form textarea { width: 100%; border: 1px solid #eadff0; border-radius: 10px; background: #fff; padding: 8px 10px; }
 .stack-form textarea { min-height: 72px; }
 .stack-form label:has(input[type="checkbox"]) { display: flex; align-items: center; font-weight: 600; }
+.rules-page > .card,
+.rules-page > form.card { margin-bottom: 14px; }
+.rule-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+  align-items: start;
+}
+.rule-columns > .card { min-width: 0; margin-bottom: 0; }
+.rule-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  align-items: start;
+}
+.rule-fields label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; color: #66758f; min-width: 0; }
+.rule-fields input:not([type="checkbox"]):not([type="radio"]),
+.rule-fields select,
+.rule-fields textarea { width: 100%; border: 1px solid #eadff0; border-radius: 10px; background: #fff; padding: 8px 10px; }
+.rule-fields textarea { min-height: 72px; }
+.rule-fields .span-row,
+.rule-fields > button { grid-column: 1 / -1; }
+@media (max-width: 720px) {
+  .rule-fields { grid-template-columns: 1fr; }
+}
+.rules-page > form.stack-form { max-width: none; }
+.form-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px 20px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #f6e5ee;
+}
+.form-footer .check-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #66758f;
+}
+.form-footer .check-line input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex: none;
+}
+.form-footer .filters { margin: 0; gap: 12px; }
 .workspace .query-template { gap: 14px; }
 .workspace .query-template .text-button { border: 1px solid #eadff0; border-radius: 999px; background: #fff; color: #e45b92; padding: 4px 10px; font-size: 12px; }
 .workspace .query-template .inline-actions { gap: 8px; }

@@ -6,8 +6,11 @@ import BindQueryBar from '../components/BindQueryBar.vue'
 import type { LimitMonitorResult, LimitMonitorRow } from '../../api/limit-monitor-types'
 import { isLimitMonitorType, type LimitMonitorQuery } from '../../api/limit-monitor-params'
 import { PENDING_CUSTOMER_KEY, applyBoundQuery, matchPctMailTypes, querySnapshot } from '../../customer/mail-flow'
+import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
 import { fetchMailTypeNodes } from '../../customer/mail-type-load'
-import { applyPctMailTypes, clonePctTask, pctRowsFromTable, summarizePctTask, volumesOf } from '../../customer/pct-sheet'
+import { fetchMailSenders } from '../../customer/mailset-load'
+import type { MailSender } from '../../customer/mailset'
+import { applyPctMailTypes, clonePctTask, matchSheetCtrlProcs, pctRowsFromTable, summarizePctTask, volumesOf } from '../../customer/pct-sheet'
 import { isPctTask } from '../../customer/guards'
 import type { PctTaskDraft, PctTaskRow } from '../../customer/types'
 import { joinCaseVolumes, splitCaseVolumes } from '../../customer/volume-list'
@@ -16,9 +19,10 @@ import { isQueryGuid } from '../../query/query-validator'
 import { scopeFromConnection } from '../../shared/connection'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useWorkspace } from '../composables/useWorkspace'
+import { infoDialog } from '../dialog'
 
 const bridge = inject<MessageBridge>('bridge')
-const { connection, customers, call } = useWorkspace()
+const { connection, customers, rules, call } = useWorkspace()
 const connected = computed(() => connection.value.sessionStatus === 'authenticated')
 const loading = ref(false)
 const savingTask = ref(false)
@@ -36,8 +40,28 @@ const draftFields = ref<Record<string, string>>({})
 const submittedFields = ref<Record<string, string>>({})
 const sheetRows = ref<PctTaskRow[]>([])
 const sheetNotice = ref('')
+const sheetFileName = ref('')
+const sheetInput = ref<HTMLInputElement | null>(null)
 const mailNodes = ref<Array<{ id: string; name: string }>>([])
 const mailTypeMessage = ref('正在从原网站读取发文类型…')
+const mailsets = ref<MailSender[]>([])
+const mailsetId = ref('')
+const senderTouched = ref(false)
+const mailsetMessage = ref('正在从原网站读取发件邮箱…')
+const ctrlOptions = ref<Array<{ id: string; label: string; parentId?: string }>>([])
+const ctrlListMessage = ref('')
+const mailsetOptions = computed(() => {
+  const items = mailsets.value.map(item => ({ value: item.id, label: item.label }))
+  if (mailsetId.value && !items.some(item => item.value === mailsetId.value)) {
+    const saved = pctCustomer.value?.mailsetId === mailsetId.value
+      ? pctCustomer.value.mailsetLabel
+      : rules.value?.defaultSender?.mailsetId === mailsetId.value
+        ? rules.value.defaultSender.label
+        : ''
+    items.unshift({ value: mailsetId.value, label: saved || '已保存的发件邮箱' })
+  }
+  return items
+})
 const mailMatch = computed(() => matchPctMailTypes(mailNodes.value))
 const sheetMerged = ref(false)
 const lastQuery = ref<Omit<LimitMonitorQuery, 'pageIndex' | 'pageSize'> | null>(null)
@@ -81,6 +105,46 @@ function remember(input: { caseVolume?: string; applicationNo?: string; customer
 function selectedCtrl(): string {
   const ids = (draftFields.value.ctrl_proc ?? '').split(',').map(item => item.trim()).filter(Boolean)
   return ids.length > 0 && ids.every(item => isQueryGuid(item)) ? ids.join(',') : ''
+}
+
+async function loadCtrlProcs(force: boolean): Promise<void> {
+  if (!bridge || !connected.value) {
+    ctrlOptions.value = []
+    ctrlListMessage.value = '还没连接 EASY，处理事项列表还没读取。'
+    return
+  }
+  ctrlListMessage.value = '正在从原网站读取处理事项…'
+  try {
+    const response = await bridge.request({ type: MessageType.LoadDictionary, payload: { kind: 'picker', force } })
+    if (response.type !== MessageType.DictionaryResult || !response.payload.ok || response.payload.data.kind !== 'picker') {
+      ctrlOptions.value = []
+      ctrlListMessage.value = response.type === MessageType.Error
+        ? response.payload.message
+        : response.type === MessageType.DictionaryResult && !response.payload.ok
+          ? response.payload.error.message
+          : '处理事项列表没有从原网站读到。'
+      return
+    }
+    const dictionary = response.payload.data.dictionaries.limitCtrlProc
+    ctrlOptions.value = (dictionary?.options ?? []).map(item => ({
+      id: item.value,
+      label: item.label,
+      ...(item.parentValue ? { parentId: item.parentValue } : {})
+    }))
+    ctrlListMessage.value = ctrlOptions.value.length ? '' : '原网站没有返回处理事项。'
+  } catch {
+    ctrlOptions.value = []
+    ctrlListMessage.value = '读取处理事项失败。'
+  }
+}
+
+async function ctrlForSheet(): Promise<{ id: string; message: string }> {
+  const chosen = selectedCtrl()
+  if (chosen) return { id: chosen, message: '' }
+  if (!ctrlOptions.value.length) await loadCtrlProcs(false)
+  const matched = matchSheetCtrlProcs(sheetRows.value.map(row => row.procLabel), ctrlOptions.value)
+  if (!matched.ok) return { id: '', message: ctrlListMessage.value || matched.message }
+  return { id: matched.ids, message: '' }
 }
 
 async function requestPage(query: LimitMonitorQuery): Promise<LimitMonitorResult> {
@@ -191,7 +255,7 @@ async function onConfirm(ids: string[]): Promise<void> {
   confirmedIds.value = procIds
   const customer = pctCustomer.value
   if (!customer?.pctTask) {
-    message.value = `已确认勾选 ${procIds.length} 件。创建任务时会带上这些处理事项，不会向 EASY 创建发文。`
+    message.value = `已确认勾选 ${procIds.length} 件。创建任务时会带上这些处理事项。任务记在插件里，还不会提交到 EASY。`
     return
   }
   const scope = scopeFromConnection(connection.value)
@@ -206,7 +270,7 @@ async function onConfirm(ids: string[]): Promise<void> {
     expectedRevision: customer.revision ?? 1
   })
   message.value = result?.ok
-    ? `已确认勾选 ${procIds.length} 件，并写进${customer.name}的 PCT 任务。不会向 EASY 创建发文。`
+    ? `已确认勾选 ${procIds.length} 件，并写进${customer.name}的 PCT 任务。任务记在插件里，还不会提交到 EASY。`
     : (result?.message || `已确认勾选 ${procIds.length} 件，但没有写进任务。`)
 }
 
@@ -223,13 +287,61 @@ async function loadMailTypes(force: boolean): Promise<void> {
   if (sheetRows.value.length) sheetRows.value = applyPctMailTypes(sheetRows.value, mailNodes.value)
 }
 
-watch(connected, (ok) => { if (ok) void loadMailTypes(false) }, { immediate: true })
+async function loadMailSets(force: boolean): Promise<void> {
+  if (!bridge || !connected.value) {
+    mailsets.value = []
+    mailsetMessage.value = '还没连接 EASY，发件邮箱还没读取。'
+    return
+  }
+  mailsetMessage.value = '正在从原网站读取发件邮箱…'
+  const loaded = await fetchMailSenders(bridge, force)
+  mailsets.value = loaded.items
+  mailsetMessage.value = loaded.message
+}
+
+watch(connected, (ok) => {
+  if (ok) {
+    void loadMailTypes(false)
+    void loadMailSets(false)
+    void loadCtrlProcs(false)
+  }
+}, { immediate: true })
+
+function preferredSenderId(): string {
+  return pctCustomer.value?.mailsetId || rules.value?.defaultSender?.mailsetId || ''
+}
+
+watch(() => pctCustomer.value?.id, () => {
+  senderTouched.value = false
+  mailsetId.value = preferredSenderId()
+}, { immediate: true })
+
+watch(() => rules.value?.defaultSender?.mailsetId, () => {
+  if (senderTouched.value || pctCustomer.value?.mailsetId) return
+  mailsetId.value = preferredSenderId()
+})
+
+function chooseSender(value: string): void {
+  senderTouched.value = true
+  mailsetId.value = value
+}
+
+function showSheetHelp(): void {
+  const customer = mailTypeMessage.value
+    ? mailTypeMessage.value
+    : `有客户文号：${mailMatch.value.customerVolume?.name || '原网站这次没有返回这一项'}\n只有我方文号：${mailMatch.value.ourVolumeShenzhen?.name || '原网站这次没有返回这一项'}`
+  void infoDialog({
+    title: 'PCT 提醒表格',
+    message: `客户管理里把查询入口选成期限监控，并选择 PCT提醒 之后，传入表格就能创建任务。\n\n上传后按表格里的处理事项名称，到原网站列表里对上，再用我方文号查询。\n\n发文类型从原网站读取：\n${customer}`
+  })
+}
 
 async function onSheet(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
+  sheetFileName.value = file.name
   if (!file.name.toLowerCase().endsWith('.xlsx')) {
     sheetRows.value = []
     sheetNotice.value = '请传入 xlsx 表格。'
@@ -239,6 +351,7 @@ async function onSheet(event: Event): Promise<void> {
     const parsed = pctRowsFromTable(await readXlsxRows(await file.arrayBuffer()))
     sheetRows.value = applyPctMailTypes(parsed.rows, mailNodes.value)
     sheetNotice.value = parsed.notice
+    if (sheetRows.value.length) await querySheet('batch')
   } catch (error) {
     sheetRows.value = []
     sheetNotice.value = error instanceof Error ? error.message : '表格没有读出来。'
@@ -255,9 +368,10 @@ function seedQuery(volumes: string[], ctrl: string): void {
 }
 
 async function querySheet(mode: 'batch' | 'each'): Promise<void> {
-  const ctrl = selectedCtrl()
+  const resolved = await ctrlForSheet()
+  const ctrl = resolved.id
   if (!ctrl) {
-    message.value = '处理事项要先从列表里选中，再查询。'
+    message.value = resolved.message
     return
   }
   const volumes = volumesOf(sheetRows.value)
@@ -268,6 +382,7 @@ async function querySheet(mode: 'batch' | 'each'): Promise<void> {
   if (mode === 'batch') {
     seedQuery(volumes, ctrl)
     await search({ type: 'all', caseVolume: joinCaseVolumes(volumes), ctrlProcId: ctrl, fields: { case_volume: joinCaseVolumes(volumes), ctrl_proc: ctrl } })
+    if (!rows.value.length && volumes.length > 1 && !message.value.includes('登录')) await queryEach(volumes, ctrl)
     return
   }
   await queryEach(volumes, ctrl)
@@ -319,9 +434,10 @@ async function createTask(): Promise<void> {
     message.value = '发文类型还没从原网站读全。连上 EASY 后点重新读取，再创建任务。'
     return
   }
-  const ctrl = selectedCtrl()
+  const resolved = await ctrlForSheet()
+  const ctrl = resolved.id
   if (!ctrl) {
-    message.value = '处理事项要先从列表里选中，再创建任务。'
+    message.value = resolved.message
     return
   }
   const scope = scopeFromConnection(connection.value)
@@ -332,11 +448,21 @@ async function createTask(): Promise<void> {
   const volumes = volumesOf(sheetRows.value)
   const caseVolume = joinCaseVolumes(volumes)
   const fields = querySnapshot({ ctrl_proc: ctrl, ...(caseVolume.length <= 4000 ? { case_volume: caseVolume } : {}) })
+  const chosenId = mailsetId.value || rules.value?.defaultSender?.mailsetId || ''
+  const picked = mailsets.value.find(item => item.id === chosenId)
+  const fromRules = rules.value?.defaultSender?.mailsetId === chosenId ? rules.value.defaultSender : null
+  const fromCustomer = customer.mailsetId === chosenId && customer.mailsetLabel
+    ? { mailsetId: customer.mailsetId, label: customer.mailsetLabel }
+    : null
+  const sender = picked
+    ? { mailsetId: picked.id, label: picked.label }
+    : fromRules ?? fromCustomer
   const task: PctTaskDraft = {
     workflowId: 'pct-reminder',
     ctrlProcId: ctrl,
     rows: sheetRows.value,
     confirmedProcIds: confirmedIds.value.filter(item => isQueryGuid(item)),
+    ...(sender ? { mailsetId: sender.mailsetId, mailsetLabel: sender.label } : {}),
     createdAt: new Date().toISOString()
   }
   if (!isPctTask(task)) {
@@ -351,6 +477,10 @@ async function createTask(): Promise<void> {
     reviewSelf: customer.reviewTarget === 'self'
   })
   next.pctTask = clonePctTask(task)
+  if (sender && senderTouched.value) {
+    next.mailsetId = sender.mailsetId
+    next.mailsetLabel = sender.label
+  }
   const result = await call({
     action: 'saveCustomer',
     profile: { ...next, updatedAt: new Date().toISOString() },
@@ -363,7 +493,9 @@ async function createTask(): Promise<void> {
     return
   }
   submittedFields.value = fields
-  const savedText = `已按表格创建任务。${summarizePctTask(task)}还不会向 EASY 提交发文。`
+  const savedText = sender
+    ? `已按表格创建任务，发件人是 ${sender.label}。${summarizePctTask(task)}任务记在插件里，还不会提交到 EASY。`
+    : `已按表格创建任务。这次没有发件人，规则里也还没设默认。${summarizePctTask(task)}任务记在插件里，还不会提交到 EASY。`
   seedQuery(volumes, ctrl)
   await search({ type: 'all', caseVolume, ctrlProcId: ctrl, fields: { case_volume: caseVolume, ctrl_proc: ctrl } })
   message.value = `${savedText}${message.value ? ` ${message.value}` : ''}`
@@ -374,19 +506,33 @@ async function createTask(): Promise<void> {
   <LimitPage live hide-form selectable :selected="selected" :rows="rows" :total="sheetMerged ? rows.length : total" :loading="loading" :message="message" :connected="connected" :page-index="pageIndex" :page-size="shownPageSize" @page="goPage" @select="onSelect" @confirm="onConfirm">
     <section v-if="!connected" class="card"><p class="empty">尚未确认 EASY 用户，不能读取期限模板。</p></section>
     <template v-else>
+      <LimitQuerySection :bridge="bridge" :user-id="connection.operatorId" :can-search="connected && !loading" :seed="seed" :seed-token="seedToken" @search="search" @draft="draftFields = $event" />
       <section class="card">
-        <div class="section-heading"><strong>PCT 提醒表格</strong></div>
-        <p class="hint">客户管理里选择了 PCT提醒 之后，传入表格就能创建任务。我方文号可以逐个查，也可以用分号、空格或换行一起查。处理事项只能从下面的列表里选择后再查。发文类型从原网站热加载：有客户文号对「贵方案号」且深圳市的那一项，只有我方文号对「我方案号」且深圳市的那一项。</p>
+        <div class="section-heading">
+          <strong>PCT 提醒表格</strong>
+          <span>
+            <button type="button" class="text-button" @click="loadMailTypes(true)">重新读取</button>
+            <button type="button" class="text-button" @click="showSheetHelp">详情</button>
+          </span>
+        </div>
+        <p class="hint">传入 xlsx 后，按表格里的处理事项到原网站对上，再用我方文号查询。</p>
         <p v-if="mailTypeMessage" class="hint">{{ mailTypeMessage }}</p>
-        <template v-else>
-          <p class="hint">有客户文号：{{ mailMatch.customerVolume?.name || '原网站这次没有返回这一项' }}</p>
-          <p v-if="mailMatch.ourVolumeOtherCity" class="hint">{{ mailMatch.ourVolumeOtherCity.name }}</p>
-          <p class="hint">只有我方文号：{{ mailMatch.ourVolumeShenzhen?.name || '原网站这次没有返回这一项' }}</p>
-        </template>
-        <button type="button" class="text-button" @click="loadMailTypes(true)">重新读取发文类型</button>
         <p v-if="pctCustomer" class="hint">当前客户：{{ pctCustomer.name }}<template v-if="pctCustomer.pctTask">。已有任务：{{ summarizePctTask(pctCustomer.pctTask) }}</template></p>
-        <p v-else class="hint">还没有选择 PCT提醒 的客户。先到客户管理把查询入口选成期限监控，再选 PCT提醒。</p>
-        <label>传入表格<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="loading || savingTask" @change="onSheet" /></label>
+        <p v-else class="hint">还没有选择 PCT提醒 的客户。</p>
+        <div class="stack-form">
+          <label>发件人
+            <ThemeSelect :model-value="mailsetId" placeholder="选择发件邮箱" :options="mailsetOptions" @update:model-value="chooseSender(String($event))" />
+          </label>
+          <p class="hint">没改的话用发文规则里保存的默认发件人。这里改一次，会记在这次任务上，并记住到这个客户。</p>
+          <p v-if="!senderTouched && !pctCustomer?.mailsetId && rules?.defaultSender && mailsetId === rules.defaultSender.mailsetId" class="hint">当前沿用默认：{{ rules.defaultSender.label }}</p>
+          <p v-if="mailsetMessage" class="hint">{{ mailsetMessage }}</p>
+          <button type="button" class="text-button" @click="loadMailSets(true)">重新读取发件邮箱</button>
+        </div>
+        <div class="sheet-pick">
+          <button class="ghost" type="button" :disabled="loading || savingTask" @click="sheetInput?.click()">选择表格</button>
+          <span class="name">{{ sheetFileName || '尚未选择' }}</span>
+          <input ref="sheetInput" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="loading || savingTask" @change="onSheet" />
+        </div>
         <p v-if="sheetNotice" class="hint">{{ sheetNotice }}</p>
         <p v-if="sheetRows.length" class="hint">{{ sheetSummary }}</p>
         <div class="filters">
@@ -397,8 +543,7 @@ async function createTask(): Promise<void> {
       </section>
       <BindQueryBar surface="limit" show-load :fields="boundFields" :template-id="templateId" @load="loadBound" />
       <p v-if="confirmedIds.length" class="hint">已确认勾选 {{ confirmedIds.length }} 件。</p>
-      <p v-else-if="selected.length" class="hint">已勾选 {{ selected.length }} 件。点结果表上的「确认勾选」才会记下来。创建发文的写开关仍然关着。</p>
-      <LimitQuerySection :bridge="bridge" :user-id="connection.operatorId" :can-search="connected && !loading" :seed="seed" :seed-token="seedToken" @search="search" @draft="draftFields = $event" />
+      <p v-else-if="selected.length" class="hint">已勾选 {{ selected.length }} 件。点结果表上的「确认勾选」才会记下来。记在插件里的任务不会因此提交到 EASY。</p>
     </template>
   </LimitPage>
 </template>

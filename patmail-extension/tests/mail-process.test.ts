@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildMailProcessParams, buildProcessListParams, mailPageUrl, normalizeMailProcess, normalizeProcessList } from '../src/api/mail-process'
+import { buildMailProcessParams, buildProcessListParams, mailPageUrl, normalizeMailProcess, normalizeProcessList, processFormPath } from '../src/api/mail-process'
 import { EASY_ORIGIN } from '../src/api/config'
 import { assembleMail, fillFromRules } from '../src/mail/assemble'
 import { emptyMailRules } from '../src/mail/repository'
@@ -78,6 +78,35 @@ describe('待办流程列表', () => {
     expect(parsed.data.items[0]?.cells.apply_name).toBe('玻璃幕墙装饰')
     expect(parsed.data.items[0]?.cells.customer_name).toBe('中国·华东大区')
     expect(parsed.data.items[0]?.cells.tapp_no).toBe('')
+    expect(parsed.data.items[0]?.open).toBeNull()
+  })
+
+  it('三个流程分别用原站的编号和页面，发文不拿 obj_id 冒充邮件编号', () => {
+    const mailId = '083aa041-008c-4114-8b7f-26df4c612a7f'
+    const otherId = '11111111-1111-4111-8111-111111111111'
+    const applyId = '22222222-2222-4222-8222-222222222222'
+    const caseType = '31D1A147-2931-43B5-94AE-B72B1525BA8A'
+    const filingId = '33333333-3333-4333-8333-333333333333'
+    const mail = normalizeProcessList({
+      ClientInfo: client, TableRowsCount: '1',
+      TableRows: [{ obj_id: otherId, mail_id: mailId, mail_subject: '电子证书' }]
+    }, { kind: 'CO', ...query })
+    const proposal = normalizeProcessList({
+      ClientInfo: client, TableRowsCount: '1',
+      TableRows: [{ obj_id: applyId, case_type_id: caseType, apply_name: '玻璃幕墙' }]
+    }, { kind: 'AP', ...query })
+    const filing = normalizeProcessList({
+      ClientInfo: client, TableRowsCount: '1',
+      TableRows: [{ filing_id: filingId, filing_type: 'E', case_volume: 'PA1' }]
+    }, { kind: 'EF', ...query })
+    expect(mail.ok && proposal.ok && filing.ok).toBe(true)
+    if (!mail.ok || !proposal.ok || !filing.ok) return
+    expect(mail.data.items[0]?.open?.id).toBe(mailId)
+    expect(processFormPath(mail.data.items[0]!.open!, null)).toBe(`Forms/mail/mail.aspx?objid=${mailId}`)
+    expect(processFormPath(proposal.data.items[0]!.open!, null)).toBe(`Forms/Patent/ApplyPatent.aspx?objid=${applyId}&type_id=${caseType}`)
+    expect(processFormPath(filing.data.items[0]!.open!, false)).toBe(`Forms/Filing/Filing.aspx?objid=${filingId}`)
+    expect(processFormPath(filing.data.items[0]!.open!, true)).toBe(`Forms/NewFiling/Filing.aspx?objid=${filingId}`)
+    expect(processFormPath(filing.data.items[0]!.open!, null)).toBeNull()
   })
 })
 

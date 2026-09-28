@@ -25,9 +25,19 @@ export interface ProcessListQuery {
   pageSize: number
 }
 
+/** 原站 ProcessNew.js 打开一行时用的编号。发文只用 mail_id，不用列表里的 obj_id。 */
+export interface ProcessOpenTarget {
+  kind: ProcessKind
+  id: string
+  caseTypeId: string
+  filingType: string
+  title: string
+}
+
 export interface ProcessListRow {
   id: string
   cells: Record<string, string>
+  open: ProcessOpenTarget | null
 }
 
 export interface ProcessListResult {
@@ -168,7 +178,88 @@ export function buildMailProcessParams(query: MailProcessQuery): ApiResult<URLSe
   return buildProcessListParams({ kind: 'CO', ...query })
 }
 
-/** 原站发文页。objid 是列表邮件编号；guid 由打开页签时在客户端生成。 */
+/** Process.CaseType。提案按案件类型打开对应页面。 */
+const APPLY_PAGES: Record<string, string> = {
+  '31D1A147-2931-43B5-94AE-B72B1525BA8A': 'ApplyPatent.aspx',
+  'ABD40742-04F9-455F-BC41-080E9D896F80': 'ApplyCopyRight.aspx',
+  '0E8A4B7F-E407-4EFF-9562-3809BF484207': 'ApplyTradeMark.aspx',
+  '122136EA-F3E3-46C5-A529-EFC358AC764B': 'ApplyOther.aspx',
+  '882D9F78-7656-468E-BE98-68FE5E334A9B': 'TechService.aspx',
+  '7A74BEB6-13DE-444B-892F-6E339D4067A2': 'LawCase.aspx',
+  '849F2D30-DDAA-4718-AD1E-1951DE67913D': 'ApplyTort2.aspx'
+}
+
+const FILING_TYPES = new Set(['E', 'P', 'C', 'T', 'PCT', 'PCTOA', 'US'])
+
+export function isProcessOpenTarget(value: unknown): value is ProcessOpenTarget {
+  if (!isRecord(value) || !isProcessKind(value.kind)) return false
+  if (Object.keys(value).length !== 5) return false
+  if (typeof value.id !== 'string' || !isQueryGuid(value.id)) return false
+  if (typeof value.caseTypeId !== 'string' || (value.caseTypeId !== '' && !isQueryGuid(value.caseTypeId))) return false
+  if (typeof value.filingType !== 'string' || value.filingType.length > 20) return false
+  if (typeof value.title !== 'string' || value.title.length === 0 || value.title.length > 120) return false
+  if (value.kind === 'AP') return value.filingType === '' && applyPageName(value.caseTypeId) !== null
+  if (value.kind === 'CO') return value.caseTypeId === '' && value.filingType === ''
+  return value.caseTypeId === '' && FILING_TYPES.has(value.filingType)
+}
+
+function applyPageName(caseTypeId: string): string | null {
+  const page = APPLY_PAGES[caseTypeId.toUpperCase()]
+  return page ?? null
+}
+
+export function filingNeedsCpcFlag(filingType: string): boolean {
+  return filingType === 'E' || filingType === 'PCT' || filingType === 'PCTOA'
+}
+
+/** 与 Process.OpenFiling 的分支一致。guid 由首页 AddBusinessTab 自己追加。 */
+export function processFormPath(target: ProcessOpenTarget, isNewCpc: boolean | null): string | null {
+  if (target.kind === 'CO') return `Forms/mail/mail.aspx?objid=${target.id}`
+  if (target.kind === 'AP') {
+    const page = applyPageName(target.caseTypeId)
+    if (!page) return null
+    return `Forms/Patent/${page}?objid=${target.id}&type_id=${target.caseTypeId}`
+  }
+  if (filingNeedsCpcFlag(target.filingType) && isNewCpc === null) return null
+  const next = isNewCpc === true
+  if (target.filingType === 'E' && !next) return `Forms/Filing/Filing.aspx?objid=${target.id}`
+  if (target.filingType === 'E' && next) return `Forms/NewFiling/Filing.aspx?objid=${target.id}`
+  if (target.filingType === 'P') return `Forms/Filing/PaperFiling.aspx?objid=${target.id}`
+  if (target.filingType === 'C') return `Forms/Filing/CopyFiling.aspx?objid=${target.id}`
+  if (target.filingType === 'T') return `Forms/NewTradeFiling/TradeFiling.aspx?objid=${target.id}`
+  if (target.filingType === 'PCT' && !next) return `Forms/Filing/FilingPCT.aspx?objid=${target.id}`
+  if (target.filingType === 'PCT' && next) return `Forms/NewFiling/FilingPCT.aspx?objid=${target.id}`
+  if (target.filingType === 'PCTOA' && !next) return `Forms/Filing/FilingPCTOA.aspx?objid=${target.id}`
+  if (target.filingType === 'PCTOA' && next) return `Forms/NewFiling/FilingPCTOA.aspx?objid=${target.id}`
+  if (target.filingType === 'US') return `Forms/Filing/FilingUS.aspx?objid=${target.id}`
+  return null
+}
+
+function clipTitle(value: string): string {
+  return value.replace(/[\r\n]/g, ' ').trim().slice(0, 80)
+}
+
+function openTarget(kind: ProcessKind, row: Record<string, unknown>): ProcessOpenTarget | null {
+  if (kind === 'CO') {
+    const id = text(row.mail_id)
+    if (!isQueryGuid(id)) return null
+    return { kind, id, caseTypeId: '', filingType: '', title: '发文' }
+  }
+  if (kind === 'AP') {
+    const id = text(row.obj_id)
+    const caseTypeId = text(row.case_type_id)
+    if (!isQueryGuid(id) || !applyPageName(caseTypeId)) return null
+    const name = clipTitle(text(row.apply_name))
+    return { kind, id, caseTypeId, filingType: '', title: name ? `提案-${name}` : '提案' }
+  }
+  const id = text(row.filing_id)
+  const filingType = text(row.filing_type)
+  if (!isQueryGuid(id) || !FILING_TYPES.has(filingType)) return null
+  const volume = clipTitle(text(row.case_volume))
+  return { kind, id, caseTypeId: '', filingType, title: volume || '递交' }
+}
+
+/** 原站发文页。objid 是邮件编号。单独打开这个地址不会走首页页签，记录页不再使用。 */
 export function mailPageUrl(origin: string, mailId: string, guid = globalThis.crypto.randomUUID()): string | null {
   if (origin !== EASY_ORIGIN || !isQueryGuid(mailId) || !isQueryGuid(guid)) return null
   const url = new URL('/Forms/mail/mail.aspx', origin)
@@ -205,10 +296,10 @@ export function normalizeProcessList(response: unknown, query: ProcessListQuery)
   const rows = readProcessRows(response, spec.label)
   if (!rows.ok) return rows
   const items: ProcessListRow[] = rows.data.map(row => {
-    const rawId = text(row.obj_id) || text(row.mail_id) || text(row.objid)
+    const open = openTarget(query.kind, row)
     const cells: Record<string, string> = {}
     for (const column of spec.columns) cells[column.key] = text(row[column.key])
-    return { id: isQueryGuid(rawId) ? rawId : '', cells }
+    return { id: open?.id ?? '', cells, open }
   })
   const total = totalOf(response, items.length)
   if (total === null || !Number.isSafeInteger(total)) return apiError('INVALID_RESPONSE', 'TableRowsCount 不是有效非负整数。')
