@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import functools
+import os
 import shutil
 import signal
 import subprocess
@@ -28,12 +29,65 @@ stopping = False
 print = functools.partial(print, flush=True)
 
 
+def registry_paths() -> list[str]:
+    if sys.platform != "win32":
+        return []
+    import winreg
+
+    found: list[str] = []
+    keys = (
+        (winreg.HKEY_CURRENT_USER, r"Environment"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+    )
+    for hive, subkey in keys:
+        try:
+            with winreg.OpenKey(hive, subkey) as key:
+                value, _ = winreg.QueryValueEx(key, "Path")
+        except OSError:
+            continue
+        if isinstance(value, str):
+            found.extend(
+                os.path.expandvars(part.strip())
+                for part in value.split(os.pathsep)
+                if part.strip()
+            )
+    return found
+
+
+def search_path() -> str:
+    local = os.environ.get("LOCALAPPDATA", "")
+    roaming = os.environ.get("APPDATA", "")
+    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    directories = [
+        *os.environ.get("PATH", "").split(os.pathsep),
+        *registry_paths(),
+        str(Path(program_files) / "nodejs"),
+        str(Path(program_files_x86) / "nodejs"),
+        str(Path(local) / "Programs" / "nodejs"),
+        str(Path(roaming) / "npm"),
+        str(Path(local) / "pnpm"),
+    ]
+    unique: list[str] = []
+    for directory in directories:
+        if directory and directory not in unique:
+            unique.append(directory)
+    return os.pathsep.join(unique)
+
+
 def command(name: str) -> str | None:
+    path = search_path()
     if sys.platform == "win32":
-        found = shutil.which(f"{name}.cmd")
+        found = shutil.which(f"{name}.cmd", path=path)
         if found:
             return found
-    return shutil.which(name)
+    return shutil.which(name, path=path)
+
+
+def tool_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env["PATH"] = search_path()
+    return env
 
 
 def fail(message: str) -> None:
@@ -57,6 +111,7 @@ def ensure_frontend(runner: str) -> None:
     result = subprocess.run(
         [runner, "install", "--frozen-lockfile", "--ignore-workspace"],
         cwd=ROOT,
+        env=tool_env(),
         check=False,
     )
     if result.returncode != 0 or not vite_js.is_file():
@@ -110,6 +165,7 @@ def build_extension(runner: str) -> None:
         install = subprocess.run(
             [runner, "install", "--frozen-lockfile"],
             cwd=EXTENSION,
+            env=tool_env(),
             check=False,
         )
         if install.returncode != 0:
@@ -118,6 +174,7 @@ def build_extension(runner: str) -> None:
     build = subprocess.run(
         [runner, "run", "build"],
         cwd=EXTENSION,
+        env=tool_env(),
         check=False,
     )
     if build.returncode != 0:
@@ -130,6 +187,7 @@ def start_logged(runner: str, args: list[str], cwd: Path) -> subprocess.Popen[st
     proc = subprocess.Popen(
         [runner, *args],
         cwd=cwd,
+        env=tool_env(),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
