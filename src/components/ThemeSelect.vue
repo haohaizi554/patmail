@@ -1,6 +1,6 @@
 <script setup lang="ts" generic="T extends string | number">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { highlightAfterKey, placeMenu, showsGroup, type ThemeSelectOption } from './theme-select'
+import { filterSelectOptions, highlightAfterKey, placeMenu, selectNeedsSearch, showsGroup, type ThemeSelectOption } from './theme-select'
 
 interface Option extends ThemeSelectOption { value: T }
 
@@ -23,7 +23,9 @@ const emit = defineEmits<{
 const root = ref<HTMLElement | null>(null)
 const trigger = ref<HTMLButtonElement | null>(null)
 const menu = ref<HTMLElement | null>(null)
+const searchBox = ref<HTMLInputElement | null>(null)
 const opened = ref(false)
+const query = ref('')
 const highlight = ref(-1)
 const portal = ref<HTMLElement | string>('body')
 const menuStyle = ref<Record<string, string>>({})
@@ -33,6 +35,8 @@ const owner = Symbol('theme-select')
 
 const current = computed(() => props.modelValue !== undefined ? props.modelValue : internal.value)
 const selected = computed(() => props.options.find(item => item.value === current.value))
+const searchable = computed(() => selectNeedsSearch(props.options.length))
+const listed = computed(() => searchable.value ? filterSelectOptions(props.options, query.value) : props.options)
 const shown = computed(() => selected.value?.label || (current.value === '' || current.value == null ? props.placeholder : String(current.value)))
 const placeholderShown = computed(() => !selected.value || selected.value.value === '')
 
@@ -82,6 +86,7 @@ function closeOthers(): void {
 function show(): void {
   if (props.disabled || opened.value) return
   portal.value = resolvePortal()
+  query.value = ''
   const index = props.options.findIndex(item => item.value === current.value && item.value !== '')
   highlight.value = index >= 0 ? index : 0
   opened.value = true
@@ -89,6 +94,7 @@ function show(): void {
   emit('open')
   void nextTick(() => {
     updatePosition()
+    if (searchable.value) searchBox.value?.focus()
     scrollHighlight()
   })
 }
@@ -108,7 +114,7 @@ function choose(option: Option): void {
 
 function onKey(event: KeyboardEvent): void {
   if (props.disabled) return
-  const result = highlightAfterKey(highlight.value, props.options.length, event.key, opened.value)
+  const result = highlightAfterKey(highlight.value, listed.value.length, event.key, opened.value)
   if (result.action === 'none') return
   if (result.action === 'open') {
     event.preventDefault()
@@ -123,7 +129,7 @@ function onKey(event: KeyboardEvent): void {
   event.preventDefault()
   highlight.value = result.highlight
   if (result.action === 'select') {
-    const option = props.options[result.highlight]
+    const option = listed.value[result.highlight]
     if (option) choose(option)
     return
   }
@@ -153,6 +159,15 @@ watch(opened, (value) => {
   window.removeEventListener('resize', updatePosition)
   window.removeEventListener('scroll', updatePosition, true)
   window.removeEventListener('theme-select-open', onAnother)
+})
+
+function onSearchKey(event: KeyboardEvent): void {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End' || event.key === 'Enter' || event.key === 'Escape') onKey(event)
+}
+
+watch(query, (value) => {
+  if (!opened.value || !value.trim()) return
+  highlight.value = listed.value.length ? 0 : -1
 })
 
 watch(() => props.modelValue, (value) => {
@@ -189,8 +204,11 @@ onBeforeUnmount(() => {
     </button>
     <Teleport :to="portal">
       <ul v-if="opened" :id="listId" ref="menu" class="theme-select-menu" role="listbox" :style="menuStyle" @mousedown.prevent>
-        <template v-for="(option, index) in options" :key="`${option.group ?? ''}:${String(option.value)}:${index}`">
-          <li v-if="showsGroup(options, index)" class="theme-select-group" role="presentation">{{ option.group }}</li>
+        <li v-if="searchable" class="theme-select-search" role="presentation" @mousedown.stop>
+          <input ref="searchBox" v-model="query" type="search" placeholder="搜索" aria-label="搜索选项" @keydown="onSearchKey" />
+        </li>
+        <template v-for="(option, index) in listed" :key="`${option.group ?? ''}:${String(option.value)}:${index}`">
+          <li v-if="showsGroup(listed, index)" class="theme-select-group" role="presentation">{{ option.group }}</li>
           <li
             :id="optionId(index)"
             role="option"
@@ -200,7 +218,7 @@ onBeforeUnmount(() => {
             @click="choose(option)"
           >{{ option.label }}</li>
         </template>
-        <li v-if="options.length === 0" class="theme-select-empty" role="presentation">没有可选项</li>
+        <li v-if="listed.length === 0" class="theme-select-empty" role="presentation">{{ query.trim() ? '没有匹配的选项' : '没有可选项' }}</li>
       </ul>
     </Teleport>
   </span>

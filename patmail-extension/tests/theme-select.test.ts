@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { highlightAfterKey, placeMenu, showsGroup, textOptions } from '../../src/components/theme-select'
+import { filterSelectOptions, highlightAfterKey, placeMenu, selectNeedsSearch, showsGroup, textOptions } from '../../src/components/theme-select'
 
 describe('theme select', () => {
   it('opens downward and flips upward when the lower space is tight', () => {
@@ -23,6 +23,15 @@ describe('theme select', () => {
     expect(highlightAfterKey(2, 3, 'ArrowDown', true).highlight).toBe(0)
     expect(highlightAfterKey(0, 3, 'Enter', true)).toEqual({ highlight: 0, action: 'select' })
     expect(highlightAfterKey(1, 3, 'Escape', true).action).toBe('close')
+  })
+
+  it('searches only when there are more than ten options', () => {
+    const options = textOptions(['不限', '中国', '美国', '日本', '德国', '法国', '英国', '韩国', '印度', '巴西'])
+    expect(selectNeedsSearch(options.length)).toBe(false)
+    expect(selectNeedsSearch(options.length + 1)).toBe(true)
+    const longer = textOptions([...options.map(item => item.label), '欧洲专利局'])
+    expect(filterSelectOptions(longer, ' 美 ')).toEqual([{ value: '美国', label: '美国' }])
+    expect(filterSelectOptions(longer, '')).toHaveLength(11)
   })
 
   it('shows a group heading when the group changes', () => {

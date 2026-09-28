@@ -19,6 +19,19 @@ export interface MenuPlacement {
   maxHeight: number
 }
 
+/** 选项多于这个数量时，菜单里提供搜索。 */
+export const SELECT_SEARCH_THRESHOLD = 10
+
+export function selectNeedsSearch(count: number): boolean {
+  return count > SELECT_SEARCH_THRESHOLD
+}
+
+export function filterSelectOptions<T extends ThemeSelectOption>(options: T[], query: string): T[] {
+  const text = query.trim().toLowerCase()
+  if (!text) return options
+  return options.filter(item => item.label.toLowerCase().includes(text))
+}
+
 const GAP = 6
 const EDGE = 8
 const MAX_HEIGHT = 280
