@@ -203,6 +203,45 @@ export function formatRecipientList(emails: string[], contacts: Array<{ name: st
   return { value: parts.join(''), blocked: false, reason: '' }
 }
 
+export interface NamedAddress {
+  name: string
+  email: string
+}
+
+function addressToken(piece: string): NamedAddress | { raw: string } | null {
+  const text = piece.trim()
+  if (!text) return null
+  const angle = text.match(/^(.*)<([^<>]+)>$/)
+  if (angle?.[2]?.includes('@')) return { name: angle[1].trim(), email: angle[2].trim() }
+  const paren = text.match(/^(.*)\(([^()]*)\)$/)
+  if (paren?.[2]?.includes('@')) return { name: paren[1].trim(), email: paren[2].trim() }
+  if (text.includes('@') && !/[();]/.test(text)) return { name: '', email: text }
+  return { raw: text }
+}
+
+function addressKey(email: string): string {
+  return email.trim().toLowerCase()
+}
+
+/** 已有地址留在前面。后加的人按邮箱去重，不改写加载发文时预填的内容。 */
+export function appendRecipientField(existing: string, addition: string): string {
+  const tokens: Array<NamedAddress | { raw: string }> = []
+  const seen = new Set<string>()
+  const take = (token: NamedAddress | { raw: string } | null) => {
+    if (!token) return
+    if ('raw' in token) {
+      tokens.push(token)
+      return
+    }
+    const key = addressKey(token.email)
+    if (!key || seen.has(key)) return
+    seen.add(key)
+    tokens.push(token)
+  }
+  for (const piece of `${existing};${addition}`.split(/[;；]/)) take(addressToken(piece))
+  return tokens.map(token => 'raw' in token ? `${token.raw};` : token.name ? `${token.name}(${token.email});` : `${token.email};`).join('')
+}
+
 export function readCustomerContacts(data: unknown): { ok: true; contacts: Array<{ name: string; email: string }> } | { ok: false; message: string } {
   if (!isRecord(data)) return { ok: false, message: '联系人响应无效。' }
   const client = readClientInfo(data.ClientInfo)

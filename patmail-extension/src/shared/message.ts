@@ -10,6 +10,8 @@ import { isEasyConnection, type EasyConnectionContext, type EasyTabCandidate, ty
 import { isDictionaryResult, isFileSearchApiResult, isFileSearchQuery, isHistoryDetailResult, isHistoryListResult, isLimitMonitorApiResult, isLimitMonitorQuery, isMailProcessApiResult, isMailProcessQuery, isSessionResult } from '../api/message-guards'
 import type { LimitMonitorQuery } from '../api/limit-monitor-params'
 import { isProcessOpenTarget, type ProcessListQuery, type ProcessListResult, type ProcessOpenTarget } from '../api/mail-process'
+import type { CaseDemandAsset } from '../mail/easy/case-demand'
+import type { MailContactAsset } from '../mail/easy/mail-contacts'
 import type { AccountReviewerList } from '../workflow/contracts'
 import type { LimitMonitorResult } from '../api/limit-monitor-types'
 import type { DictionaryLoadRequest, DictionarySnapshot } from '../api/dictionaries'
@@ -54,6 +56,12 @@ export const MessageType = {
   OpenEasyFormResult: 'OPEN_EASY_FORM_RESULT',
   ListFlowReviewers: 'LIST_FLOW_REVIEWERS',
   ListFlowReviewersResult: 'LIST_FLOW_REVIEWERS_RESULT',
+  ReadCaseDemands: 'READ_CASE_DEMANDS',
+  CaseDemandResult: 'CASE_DEMAND_RESULT',
+  ReadMailContacts: 'READ_MAIL_CONTACTS',
+  MailContactResult: 'MAIL_CONTACT_RESULT',
+  ReadMailAddresses: 'READ_MAIL_ADDRESSES',
+  MailAddressResult: 'MAIL_ADDRESS_RESULT',
   CancelFileSearch: 'CANCEL_FILE_SEARCH',
   FileSearchCancelled: 'FILE_SEARCH_CANCELLED',
   ListHistoryQueries: 'LIST_HISTORY_QUERIES',
@@ -116,6 +124,9 @@ export type ContentRequest =
   | Response<'LIST_MAIL_PROCESSES', { query: ProcessListQuery }>
   | Response<'OPEN_EASY_FORM', { target: ProcessOpenTarget }>
   | Request<'LIST_FLOW_REVIEWERS'>
+  | Response<'READ_CASE_DEMANDS', { caseId: string }>
+  | Response<'READ_MAIL_CONTACTS', { mailId: string; customerId: string }>
+  | Response<'READ_MAIL_ADDRESSES', { mailId: string }>
   | Response<'LIST_HISTORY_QUERIES', { force: boolean; surface?: 'file' | 'limit' }>
   | Response<'GET_HISTORY_QUERY', { queryId: string; surface?: 'file' | 'limit' }>
   | Response<'LOAD_DICTIONARY', DictionaryLoadRequest>
@@ -255,6 +266,9 @@ export type ContentResponse =
   | Response<'LIST_MAIL_PROCESSES_RESULT', ApiResult<ProcessListResult>>
   | Response<'OPEN_EASY_FORM_RESULT', { ok: boolean; message: string }>
   | Response<'LIST_FLOW_REVIEWERS_RESULT', ApiResult<AccountReviewerList>>
+  | Response<'CASE_DEMAND_RESULT', ApiResult<CaseDemandAsset>>
+  | Response<'MAIL_CONTACT_RESULT', ApiResult<MailContactAsset>>
+  | Response<'MAIL_ADDRESS_RESULT', ApiResult<{ to: string; cc: string; customerId: string; caseVolumes: string[] }>>
   | Response<'FILE_SEARCH_CANCELLED', { ok: true }>
   | Response<'HISTORY_QUERIES_RESULT', ApiResult<HistoryQueryOption[]>>
   | Response<'HISTORY_QUERY_RESULT', ApiResult<HistoryQueryDetail>>
@@ -279,6 +293,61 @@ function isFileSearchFormField(value: unknown): value is FileSearchFormField {
     Array.isArray(value.options) && value.options.length <= 800 && value.options.every(option => isRecord(option) &&
       typeof option.value === 'string' && option.value.length <= 80 && typeof option.label === 'string' && option.label.length <= 160 &&
       (option.parent === undefined || (typeof option.parent === 'string' && option.parent.length <= 80)))
+}
+
+function isCaseDemandAsset(value: unknown): value is CaseDemandAsset {
+  if (!isRecord(value) || !isQueryGuid(String(value.caseId)) || typeof value.text !== 'string' || value.text.length > 400_000) return false
+  if (typeof value.complete !== 'boolean' || typeof value.message !== 'string' || value.message.length > 400) return false
+  if (!Array.isArray(value.rows) || value.rows.length > 500) return false
+  return value.rows.every(row => isRecord(row) &&
+    typeof row.demandId === 'string' && row.demandId.length <= 80 &&
+    typeof row.demandType === 'string' && row.demandType.length <= 20_000 &&
+    typeof row.title === 'string' && row.title.length <= 20_000 &&
+    typeof row.description === 'string' && row.description.length <= 20_000)
+}
+
+function isCaseDemandResult(value: unknown): value is ApiResult<CaseDemandAsset> {
+  if (!isRecord(value)) return false
+  if (value.ok === false) return isRecord(value.error) && typeof value.error.code === 'string' && typeof value.error.message === 'string'
+  return value.ok === true && isCaseDemandAsset(value.data)
+}
+
+function isOptionalGuid(value: unknown): boolean {
+  return typeof value === 'string' && (value === '' || isQueryGuid(value))
+}
+
+function isMailContactAsset(value: unknown): value is MailContactAsset {
+  if (!isRecord(value) || !isOptionalGuid(value.mailId) || !isOptionalGuid(value.customerId)) return false
+  if (typeof value.text !== 'string' || value.text.length > 400_000 || typeof value.complete !== 'boolean') return false
+  if (typeof value.message !== 'string' || value.message.length > 400) return false
+  if (!Array.isArray(value.rows) || value.rows.length > 500) return false
+  const groups = ['recent', 'customer', 'case', 'sales', 'pics', 'agent']
+  const rowOk = value.rows.every(row => isRecord(row) && groups.includes(String(row.group)) &&
+    typeof row.name === 'string' && row.name.length <= 2_000 &&
+    typeof row.email === 'string' && row.email.length <= 2_000 &&
+    typeof row.role === 'string' && row.role.length <= 2_000)
+  if (!rowOk) return false
+  const introducer = value.introducer
+  if (introducer === null) return true
+  if (!isRecord(introducer)) return false
+  return ['name', 'email', 'insideName', 'insideEmail'].every(key => typeof introducer[key] === 'string' && String(introducer[key]).length <= 2_000)
+}
+
+function isMailContactResult(value: unknown): value is ApiResult<MailContactAsset> {
+  if (!isRecord(value)) return false
+  if (value.ok === false) return isRecord(value.error) && typeof value.error.code === 'string' && typeof value.error.message === 'string'
+  return value.ok === true && isMailContactAsset(value.data)
+}
+
+function isMailAddressResult(value: unknown): value is ApiResult<{ to: string; cc: string; customerId: string; caseVolumes: string[] }> {
+  if (!isRecord(value)) return false
+  if (value.ok === false) return isRecord(value.error) && typeof value.error.code === 'string' && typeof value.error.message === 'string'
+  if (value.ok !== true || !isRecord(value.data)) return false
+  const volumes = value.data.caseVolumes
+  return typeof value.data.to === 'string' && value.data.to.length <= 20_000 &&
+    typeof value.data.cc === 'string' && value.data.cc.length <= 20_000 &&
+    isOptionalGuid(value.data.customerId) &&
+    Array.isArray(volumes) && volumes.length <= 100 && volumes.every(item => typeof item === 'string' && item.length <= 80)
 }
 
 function isAccountReviewerResult(value: unknown): value is ApiResult<AccountReviewerList> {
@@ -314,6 +383,12 @@ export function isMessage(value: unknown): value is AppMessage {
     case MessageType.ScanFileSearchForm:
     case MessageType.ListFlowReviewers:
       return value.payload === undefined
+    case MessageType.ReadCaseDemands:
+      return isRecord(value.payload) && isQueryGuid(String(value.payload.caseId)) && Object.keys(value.payload).length === 1
+    case MessageType.ReadMailContacts:
+      return isRecord(value.payload) && isOptionalGuid(value.payload.mailId) && isOptionalGuid(value.payload.customerId) && Object.keys(value.payload).length === 2
+    case MessageType.ReadMailAddresses:
+      return isRecord(value.payload) && isQueryGuid(String(value.payload.mailId)) && Object.keys(value.payload).length === 1
     case MessageType.CreateEasyMail:
       return isConfirmedPreview(value.payload) && Object.keys(value.payload).length === 3
     case MessageType.SaveEasyMail:
@@ -402,6 +477,12 @@ export function isMessage(value: unknown): value is AppMessage {
       return isMailProcessApiResult(value.payload)
     case MessageType.ListFlowReviewersResult:
       return isAccountReviewerResult(value.payload)
+    case MessageType.CaseDemandResult:
+      return isCaseDemandResult(value.payload)
+    case MessageType.MailContactResult:
+      return isMailContactResult(value.payload)
+    case MessageType.MailAddressResult:
+      return isMailAddressResult(value.payload)
     case MessageType.HistoryQueriesResult:
       return isHistoryListResult(value.payload)
     case MessageType.HistoryQueryResult:
@@ -447,6 +528,9 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.SearchLimitMonitor || value.type === MessageType.ListMailProcesses ||
     value.type === MessageType.OpenEasyForm ||
     value.type === MessageType.ListFlowReviewers ||
+    value.type === MessageType.ReadCaseDemands ||
+    value.type === MessageType.ReadMailContacts ||
+    value.type === MessageType.ReadMailAddresses ||
     value.type === MessageType.ListHistoryQueries || value.type === MessageType.GetHistoryQuery ||
     value.type === MessageType.LoadDictionary || value.type === MessageType.ScanFileSearchForm || value.type === MessageType.CreateEasyMail ||
     value.type === MessageType.SaveEasyMail || value.type === MessageType.FindMailExecution ||
@@ -457,7 +541,7 @@ export function isContentRequest(value: unknown): value is ContentRequest {
   )
 }
 
-const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'SEARCH_LIMIT_MONITOR', 'LIST_MAIL_PROCESSES', 'OPEN_EASY_FORM', 'LIST_FLOW_REVIEWERS', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
+const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'SEARCH_LIMIT_MONITOR', 'LIST_MAIL_PROCESSES', 'OPEN_EASY_FORM', 'LIST_FLOW_REVIEWERS', 'READ_CASE_DEMANDS', 'READ_MAIL_CONTACTS', 'READ_MAIL_ADDRESSES', 'GET_PAGE_INFO', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
 
 /** 消息校验和后台派发共用同一份许可，避免新查询只通过前一层、却被后一层截断。 */
 export function isWorkspaceForwardRequest(value: unknown): value is ContentRequest {
@@ -656,7 +740,7 @@ function isWorkflowPreview(value: unknown): value is { executionId: string; node
     typeof value.urgencyId === 'string' && value.nodeId.length <= 80 && value.reviewerId.length <= 80 && value.urgencyId.length <= 80
 }
 
-const DICTIONARY_KINDS = new Set(['basic', 'flow', 'fieldColumn', 'listColumn', 'fileType', 'mailType', 'reviewer', 'picker', 'mailSet'])
+const DICTIONARY_KINDS = new Set(['basic', 'flow', 'fieldColumn', 'listColumn', 'fileType', 'mailType', 'reviewer', 'picker', 'mailSet', 'signature'])
 
 function isDictionaryRequest(value: unknown): value is DictionaryLoadRequest {
   if (!isRecord(value) || (value.force !== true && value.force !== false) || typeof value.kind !== 'string' || !DICTIONARY_KINDS.has(value.kind)) {
@@ -674,6 +758,9 @@ function isDictionaryRequest(value: unknown): value is DictionaryLoadRequest {
     return typeof value.caseTypeId === 'string' &&
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.caseTypeId) &&
       Object.keys(value).length === 3
+  }
+  if (value.kind === 'signature') {
+    return isFlowId(value.mailsetId) && Object.keys(value).length === 3
   }
   return Object.keys(value).length === 2
 }

@@ -11,8 +11,9 @@ import {
 import { DictionaryCache } from './cache'
 import { readDictionaryBody, responseKeyNames } from './guards'
 import { readMailSenders } from '../../customer/mailset'
+import { combineSignatures, readMailboxSignature, readNamedSignatures } from '../../mail/easy/signature-read'
 import type {
-  BasicDataSnapshot, DictionarySnapshot, FieldColumnSnapshot, FileTypeTreeSnapshot, FlowDataSnapshot, ListColumnSnapshot, MailSetSnapshot, MailTypeSnapshot, PickerSnapshot, ReviewerSnapshot
+  BasicDataSnapshot, DictionarySnapshot, FieldColumnSnapshot, FileTypeTreeSnapshot, FlowDataSnapshot, ListColumnSnapshot, MailSetSnapshot, MailTypeSnapshot, PickerSnapshot, ReviewerSnapshot, SignatureSnapshot
 } from './types'
 import { buildPickerCatalog } from './picker-catalog'
 import { readReviewers } from './reviewers'
@@ -174,6 +175,30 @@ export class DictionaryService {
     })
   }
 
+  /** 发文页邮件签名。Getmailset 的 Signature 是这个邮箱预留的那一条；GetSignature 是下拉名单和正文。 */
+  loadSignatures(userKey: string, mailsetId: string, force: boolean, signal?: AbortSignal): Promise<ApiResult<SignatureSnapshot>> {
+    if (!isQueryGuid(mailsetId)) return Promise.resolve(apiError('INVALID_QUERY', '请先选择发件邮箱，再读取签名。'))
+    return this.cache.load(this.cache.signatureKey(userKey, mailsetId), force, async () => {
+      const fields = { mailset_id: mailsetId, log_pagename: 'mail.aspx' }
+      const [namedResponse, mailboxResponse] = await Promise.all([
+        this.transport.post('getSignature', params({ Call: 'GetSignature', ...fields }), signal),
+        this.transport.post('getMailSet', params({ Call: 'Getmailset', ...fields }), signal)
+      ])
+      if (!namedResponse.ok && !mailboxResponse.ok) return namedResponse
+      const namedBody = namedResponse.ok ? readDictionaryBody(namedResponse.data) : null
+      const mailboxBody = mailboxResponse.ok ? readDictionaryBody(mailboxResponse.data) : null
+      if ((!namedBody || !namedBody.ok) && (!mailboxBody || !mailboxBody.ok)) {
+        if (namedBody && !namedBody.ok) return namedBody
+        if (mailboxBody && !mailboxBody.ok) return mailboxBody
+        return apiError('INVALID_RESPONSE', '签名没有从原网站读到。')
+      }
+      const named = namedBody?.ok ? readNamedSignatures(namedBody.data) : []
+      const mailbox = mailboxBody?.ok ? readMailboxSignature(mailboxBody.data) : ''
+      const combined = combineSignatures(named, mailbox)
+      return { ok: true, data: { kind: 'signature', mailsetId, ...combined } }
+    })
+  }
+
   loadReviewers(userKey: string, force: boolean, signal?: AbortSignal): Promise<ApiResult<ReviewerSnapshot>> {
     return this.cache.load(this.cache.reviewerKey(userKey), force, async () => {
       const response = await this.transport.post('treeUser', params({ Call: 'GetTreeUser', log_pagename: PAGE }), signal)
@@ -239,7 +264,8 @@ export class DictionaryService {
     force: boolean,
     caseTypeId = '',
     signal?: AbortSignal,
-    picker: { country?: string; procType?: string } = {}
+    picker: { country?: string; procType?: string } = {},
+    mailsetId = ''
   ): Promise<ApiResult<DictionarySnapshot>> {
     if (kind === 'basic') return this.loadBasic(userKey, force, signal)
     if (kind === 'flow') return this.loadFlow(userKey, force, signal)
@@ -247,6 +273,7 @@ export class DictionaryService {
     if (kind === 'fieldColumn') return this.loadFieldColumns(userKey, force, signal)
     if (kind === 'mailType') return this.loadMailTypes(userKey, force, signal)
     if (kind === 'mailSet') return this.loadMailSets(userKey, force, signal)
+    if (kind === 'signature') return this.loadSignatures(userKey, mailsetId, force, signal)
     if (kind === 'reviewer') return this.loadReviewers(userKey, force, signal)
     if (kind === 'picker') return this.loadPicker(userKey, force, caseTypeId, signal, picker)
     return this.loadListColumns(userKey, force, signal)

@@ -78,8 +78,16 @@ export interface PickerSnapshot {
   warnings: string[]
 }
 
+export interface SignatureSnapshot {
+  kind: 'signature'
+  mailsetId: string
+  reserved: { id: string; name: string; content: string } | null
+  items: Array<{ id: string; name: string; content: string }>
+  note: string
+}
+
 export type DictionarySnapshot =
-  | BasicDataSnapshot | FlowDataSnapshot | FileTypeTreeSnapshot | FieldColumnSnapshot | ListColumnSnapshot | MailTypeSnapshot | ReviewerSnapshot | PickerSnapshot | MailSetSnapshot
+  | BasicDataSnapshot | FlowDataSnapshot | FileTypeTreeSnapshot | FieldColumnSnapshot | ListColumnSnapshot | MailTypeSnapshot | ReviewerSnapshot | PickerSnapshot | MailSetSnapshot | SignatureSnapshot
 
 export interface MailTypeSnapshot {
   kind: 'mailType'
@@ -97,9 +105,10 @@ export interface MailSetSnapshot {
   items: Array<{ id: string; name: string; email: string; label: string }>
 }
 
-export type DictionaryKind = 'basic' | 'flow' | 'fileType' | 'fieldColumn' | 'listColumn' | 'mailType' | 'reviewer' | 'picker' | 'mailSet'
+export type DictionaryKind = 'basic' | 'flow' | 'fileType' | 'fieldColumn' | 'listColumn' | 'mailType' | 'reviewer' | 'picker' | 'mailSet' | 'signature'
 
 export type DictionaryLoadRequest =
   | { kind: 'basic' | 'flow' | 'fieldColumn' | 'listColumn' | 'mailType' | 'reviewer' | 'mailSet'; force: boolean }
   | { kind: 'picker'; force: boolean; caseTypeId?: string; country?: string; procType?: string }
   | { kind: 'fileType'; force: boolean; caseTypeId: string }
+  | { kind: 'signature'; force: boolean; mailsetId: string }

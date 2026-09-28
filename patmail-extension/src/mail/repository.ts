@@ -23,8 +23,14 @@ export function emptyMailRules(ownerId: string): MailRuleBundle {
 function isPolicy(value: unknown): value is CustomerMailPolicy {
   if (!value || typeof value !== 'object') return false
   const item = value as CustomerMailPolicy
-  return typeof item.customerProfileId === 'string' && (item.sendMode === 'merge_by_customer_description' || item.sendMode === 'single_file') &&
-    typeof item.enabled === 'boolean' && typeof item.version === 'number' && typeof item.updatedAt === 'string'
+  if (typeof item.customerProfileId !== 'string' || typeof item.enabled !== 'boolean' || typeof item.version !== 'number' || typeof item.updatedAt !== 'string') return false
+  const surface = item.querySurface === undefined || item.querySurface === 'file' ? 'file' : item.querySurface === 'limit' ? 'limit' : ''
+  if (!surface) return false
+  if (surface === 'limit') {
+    if (item.limitMailStyle !== '1' && item.limitMailStyle !== '2' && item.limitMailStyle !== '3') return false
+  } else if (item.sendMode !== 'merge_by_customer_description' && item.sendMode !== 'single_file') return false
+  if (item.mailTypeId === undefined && item.mailTypeName === undefined) return true
+  return typeof item.mailTypeId === 'string' && isQueryGuid(item.mailTypeId) && typeof item.mailTypeName === 'string' && item.mailTypeName.trim().length > 0
 }
 function isMapping(value: unknown): value is DescriptionMailTypeMapping {
   if (!value || typeof value !== 'object') return false

@@ -1,6 +1,6 @@
 import { isQueryGuid } from '../../query/query-validator'
 import type { MailDraftPreview } from '../types'
-import { SAVE_KEYS, filesMatch, formatRecipientList } from './contracts'
+import { SAVE_KEYS, appendRecipientField, filesMatch, formatRecipientList } from './contracts'
 import type { EasyMailDraft, EasyMailSnapshot, FieldDiff, KnownValue } from './types'
 
 export function diffDigest(diffs: FieldDiff[]): string {
@@ -59,18 +59,23 @@ export function adaptMailDraft(preview: MailDraftPreview, snapshot: EasyMailSnap
   const cc = formatRecipientList(preview.cc, snapshot.contacts)
   if (to.blocked) blockers.push(to.reason)
   if (cc.blocked) blockers.push(cc.reason)
-  fields.mail_to = to.blocked ? '' : to.value
-  fields.mail_cc = cc.blocked ? '' : cc.value
+  const existingTo = snapshot.to.state === 'known' ? snapshot.to.value ?? '' : null
+  const existingCc = snapshot.cc.state === 'known' ? snapshot.cc.value ?? '' : null
+  if (existingTo === null) blockers.push('收件人在 EASY 邮件里还没有核对，不能覆盖。')
+  if (existingCc === null) blockers.push('抄送在 EASY 邮件里还没有核对，不能覆盖。')
+  fields.mail_to = to.blocked || existingTo === null ? '' : appendRecipientField(existingTo, to.value)
+  fields.mail_cc = cc.blocked || existingCc === null ? '' : appendRecipientField(existingCc, cc.value)
+  const toEmpty = !fields.mail_to.trim()
   diffs.push({
     field: 'mail_to', label: '收件人', easyValue: text(snapshot.to) || (snapshot.to.state === 'known' ? '空' : '未知'),
-    planValue: preview.to.join('、') || '空', saveValue: fields.mail_to || (to.blocked ? '不写入' : '空'),
-    source: to.blocked ? 'unknown' : 'patmail', blocksSave: to.blocked || preview.to.length === 0
+    planValue: preview.to.join('、') || '空', saveValue: fields.mail_to || (to.blocked || existingTo === null ? '不写入' : '空'),
+    source: to.blocked || existingTo === null ? 'unknown' : 'patmail', blocksSave: to.blocked || existingTo === null || toEmpty
   })
-  if (preview.to.length === 0) blockers.push('收件人为空。')
+  if (toEmpty && !to.blocked && existingTo !== null) blockers.push('收件人为空。')
   diffs.push({
     field: 'mail_cc', label: '抄送', easyValue: text(snapshot.cc) || (snapshot.cc.state === 'known' ? '空' : '未知'),
-    planValue: preview.cc.join('、') || '空', saveValue: fields.mail_cc || (cc.blocked ? '不写入' : '空'),
-    source: cc.blocked ? 'unknown' : 'patmail', blocksSave: cc.blocked
+    planValue: preview.cc.join('、') || '空', saveValue: fields.mail_cc || (cc.blocked || existingCc === null ? '不写入' : '空'),
+    source: cc.blocked || existingCc === null ? 'unknown' : 'patmail', blocksSave: cc.blocked || existingCc === null
   })
   fields.mail_bcc = preserved('密送', 'mail_bcc', snapshot.bcc, diffs, blockers)
   fields.mail_subject = preview.subject

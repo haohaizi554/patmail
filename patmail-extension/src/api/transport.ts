@@ -6,7 +6,7 @@ export type EasyOperation =
   | 'basicData' | 'flowDirection' | 'fileTypeTree' | 'fieldColumn' | 'listColumn' | 'mailType'
   | 'deptTree' | 'treeUser' | 'treeAgent' | 'fileTempList' | 'deptBranch' | 'applyTags' | 'limitInit' | 'limitCtrlProc'
   | 'mailCustomer' | 'mailInfoInit' | 'getMailInfo' | 'getMailFile' | 'getMailCase'
-  | 'getMailRule' | 'getCustomerContact' | 'getSignature' | 'saveMailInfo' | 'saveMailRelatedFiles'
+  | 'getMailRule' | 'getCustomerContact' | 'getRecentContact' | 'getCaseContact' | 'getSalesContact' | 'getPicsContact' | 'getCaseAgentContact' | 'getSignature' | 'getMailSet' | 'caseDemand' | 'saveMailInfo' | 'saveMailRelatedFiles'
   | 'getFlowInfo' | 'getFlowHistory' | 'getUrgencyList' | 'getFlowSubmit' | 'getFlowLastStatus'
   | 'limitMonitor' | 'mailProcess' | 'processAP' | 'processEF' | 'getIsNewCpc'
 
@@ -40,7 +40,14 @@ const ROUTES: Record<EasyOperation, { path: string; call: string }> = {
   getMailCase: { path: '/AjaxServers/Mail.ashx', call: 'GetMailCase' },
   getMailRule: { path: '/AjaxServers/Mail.ashx', call: 'GetMailRule' },
   getCustomerContact: { path: '/AjaxServers/Mail.ashx', call: 'GetCustomerContact' },
+  getRecentContact: { path: '/AjaxServers/Mail.ashx', call: 'GetRecentContact' },
+  getCaseContact: { path: '/AjaxServers/Mail.ashx', call: 'GetCaseContact' },
+  getSalesContact: { path: '/AjaxServers/Mail.ashx', call: 'GetSalesContact' },
+  getPicsContact: { path: '/AjaxServers/Mail.ashx', call: 'GetPicsContact' },
+  getCaseAgentContact: { path: '/AjaxServers/Mail.ashx', call: 'GetCaseAgentContact' },
+  caseDemand: { path: '/AjaxServers/PatentAction.ashx', call: 'GetDemandBuCaseid' },
   getSignature: { path: '/AjaxServers/Mail.ashx', call: 'GetSignature' },
+  getMailSet: { path: '/AjaxServers/Login.ashx', call: 'Getmailset' },
   saveMailInfo: { path: '/AjaxServers/Mail.ashx', call: 'SaveMailInfo' },
   saveMailRelatedFiles: { path: '/AjaxServers/Mail.ashx', call: 'SaveMailRalteCaseFile' },
   getFlowInfo: { path: '/AjaxServers/Common.ashx', call: 'GetFlowInfo' },

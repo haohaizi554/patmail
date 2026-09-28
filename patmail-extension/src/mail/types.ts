@@ -37,7 +37,15 @@ export interface SelectionSnapshot {
 
 export interface CustomerMailPolicy {
   customerProfileId: string
-  sendMode: SendMode
+  /** 大表查询方式。没有这个字段的旧配置按文件管理。 */
+  querySurface?: 'file' | 'limit'
+  /** 文件管理下的发文方式。期限监控的行可以不填。 */
+  sendMode?: SendMode
+  /** 期限监控下的发文方式。1 同客户合并，2 单个来文，3 同客户第一联系人合并。 */
+  limitMailStyle?: '1' | '2' | '3'
+  /** 旧配置可能把发文类型写在这里。新的发文类型由文件描述决定。 */
+  mailTypeId?: string
+  mailTypeName?: string
   recipientTemplateId?: string
   enabled: boolean
   version: number

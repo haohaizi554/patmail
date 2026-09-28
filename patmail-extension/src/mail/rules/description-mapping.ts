@@ -21,7 +21,7 @@ export function matchMailType(group: MailGroup, mappings: DescriptionMailTypeMap
 
 export function upsertMapping(mappings: DescriptionMailTypeMapping[], next: DescriptionMailTypeMapping): { ok: true; mappings: DescriptionMailTypeMapping[] } | { ok: false; message: string } {
   const key = mappingKey(next)
-  if (!key || !isQueryGuid(next.mailTypeId)) return { ok: false, message: '映射缺少描述或发文类型 ID。' }
+  if (!key || !isQueryGuid(next.mailTypeId)) return { ok: false, message: '请填写文件描述，并选择发文类型。' }
   const clash = mappings.find(item => item.id !== next.id && item.enabled && next.enabled && mappingKey(item) === key && item.mailTypeId !== next.mailTypeId)
   if (clash) return { ok: false, message: '同一文件描述已经对应另一个发文类型。请修改原映射或取消。' }
   const previous = mappings.find(item => item.id === next.id)

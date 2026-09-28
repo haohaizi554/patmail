@@ -26,6 +26,10 @@ import { WorkflowRuntime } from '../workflow/runtime'
 import { WorkflowStore } from '../workflow/store'
 import type { WorkflowView } from '../workflow/types'
 import type { PlanInput } from '../workflow/planner'
+import { loadCaseDemandText, type CaseDemandAsset } from '../mail/easy/case-demand'
+import { listParams, readMailInfo } from '../mail/easy/contracts'
+import { loadMailContactText, type MailContactAsset } from '../mail/easy/mail-contacts'
+import { isQueryGuid } from '../query/query-validator'
 import { EasyMailReadService } from '../mail/easy/read-service'
 import type { ExistingMailDiagnostic } from '../shared/message'
 import { EasyTransport, type EasyOperation, type TransportOptions } from './transport'
@@ -244,7 +248,8 @@ export class EasyRuntime {
     }
     const caseTypeId = request.kind === 'fileType' || request.kind === 'picker' ? request.caseTypeId ?? '' : ''
     const picker = request.kind === 'picker' ? { country: request.country ?? '', procType: request.procType ?? '' } : {}
-    return this.dictionaries.load(request.kind, this.historyUserKey, request.force, caseTypeId, signal, picker).then(result => {
+    const mailsetId = request.kind === 'signature' ? request.mailsetId : ''
+    return this.dictionaries.load(request.kind, this.historyUserKey, request.force, caseTypeId, signal, picker, mailsetId).then(result => {
       if (request.kind === 'listColumn' && result.ok && result.data.kind === 'listColumn' && result.data.colsel) {
         this.listColsel = result.data.colsel
       }
@@ -388,6 +393,63 @@ export class EasyRuntime {
     })()
   }
 
+  /** 发文页要求表原文。只认案件编号，不解释这些句子。 */
+  readCaseDemands(caseId: string, signal?: AbortSignal): Promise<ApiResult<CaseDemandAsset>> {
+    return (async (): Promise<ApiResult<CaseDemandAsset>> => {
+      if (!(await this.confirmAccountRead())) {
+        return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
+      }
+      const result = await loadCaseDemandText(caseId, (params, next) => this.transport.post('caseDemand', params, next), signal)
+      if (!result.ok && result.error.code === 'SESSION_EXPIRED') this.session.expire()
+      return result
+    })()
+  }
+
+  /** 当前发文上已经填好的地址，以及这封信里的文号。 */
+  readMailAddresses(mailId: string): Promise<ApiResult<{ to: string; cc: string; customerId: string; caseVolumes: string[] }>> {
+    return (async (): Promise<ApiResult<{ to: string; cc: string; customerId: string; caseVolumes: string[] }>> => {
+      if (!(await this.confirmAccountRead())) {
+        return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
+      }
+      if (!isQueryGuid(mailId)) return apiError('INVALID_QUERY', '发文编号无效。')
+      const params = new URLSearchParams()
+      params.set('Call', 'GetMailInfo')
+      params.set('mail_id', mailId)
+      params.set('log_pagename', 'mail.aspx')
+      const response = await this.transport.post('getMailInfo', params)
+      if (!response.ok) {
+        if (response.error.code === 'SESSION_EXPIRED') this.session.expire()
+        return response
+      }
+      const row = readMailInfo(response.data, mailId)
+      if (!row.ok) return apiError('INVALID_RESPONSE', row.message)
+      const to = addressField(row.row, 'mail_to')
+      const cc = addressField(row.row, 'mail_cc')
+      if (to === null || cc === null) return apiError('INVALID_RESPONSE', '发文上的收件人或抄送这次没有读到。')
+      const cases = await this.transport.post('getMailCase', listParams('GetMailCase', mailId, 1))
+      if (!cases.ok) {
+        if (cases.error.code === 'SESSION_EXPIRED') this.session.expire()
+        return cases
+      }
+      const caseVolumes = volumesOnMail(cases.data)
+      if (!caseVolumes) return apiError('INVALID_RESPONSE', '这封发文上的文号没有读全。')
+      const customer = addressField(row.row, 'customer_id')
+      return { ok: true, data: { to, cc, customerId: customer && isQueryGuid(customer) ? customer : '', caseVolumes } }
+    })()
+  }
+
+  /** 发文页右侧联系人。最近联系人不需要发文编号，其余分组需要。 */
+  readMailContacts(mailId: string, customerId: string, signal?: AbortSignal): Promise<ApiResult<MailContactAsset>> {
+    return (async (): Promise<ApiResult<MailContactAsset>> => {
+      if (!(await this.confirmAccountRead())) {
+        return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
+      }
+      const result = await loadMailContactText({ mailId, customerId }, (operation, params, next) => this.transport.post(operation, params, next), signal)
+      if (!result.ok && result.error.code === 'SESSION_EXPIRED') this.session.expire()
+      return result
+    })()
+  }
+
   /** 审核人来自当前账号一封进行中发文的 GetFlowInfo + GetFlowSubmit。 */
   listFlowReviewers(): Promise<ApiResult<AccountReviewerList>> {
     return (async (): Promise<ApiResult<AccountReviewerList>> => {
@@ -477,4 +539,28 @@ export class EasyRuntime {
     this.listColsel = null
     this.session.clear()
   }
+}
+
+function addressField(row: Record<string, unknown>, key: string): string | null {
+  if (!Object.prototype.hasOwnProperty.call(row, key)) return null
+  const value = row[key]
+  if (value === null) return ''
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return null
+}
+
+function volumesOnMail(data: unknown): string[] | null {
+  if (!isRecord(data) || data.TableRows === null || !Array.isArray(data.TableRows)) return null
+  const volumes: string[] = []
+  for (const row of data.TableRows) {
+    if (!isRecord(row)) return null
+    const ours = typeof row.case_volume === 'string' ? row.case_volume.trim() : ''
+    const theirs = typeof row.case_volume_customer === 'string' ? row.case_volume_customer.trim() : ''
+    if (ours) volumes.push(ours)
+    if (theirs) volumes.push(theirs)
+  }
+  const raw = data.TableRowsCount
+  const total = typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : data.TableRows.length
+  if (total > data.TableRows.length) return null
+  return volumes
 }

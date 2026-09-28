@@ -131,6 +131,28 @@ describe('发文分组', () => {
     const unnamed = planMailGroups([file('9', '', '专利证书', { customerProfileId: undefined, customerName: '客户A' })], [policy('a')])
     expect(unnamed.groups).toHaveLength(0)
   })
+
+  it('picks the query method from the description mapping when one customer has two', () => {
+    const certificate = guid('cccccccc')
+    const opinion = guid('dddddddd')
+    const policies = [
+      { ...policy('a', 'merge_by_customer_description'), mailTypeId: certificate, mailTypeName: '证书通知' },
+      { ...policy('a', 'single_file'), mailTypeId: opinion, mailTypeName: '审查意见' }
+    ]
+    const mappings = [
+      { ...mapping('专利证书'), mailTypeId: certificate, mailTypeName: '证书通知' },
+      { ...mapping('审查意见'), id: 'map-opinion', mailTypeId: opinion, mailTypeName: '审查意见' }
+    ]
+    const grouped = planMailGroups([
+      file('1', 'a', '专利证书'), file('2', 'a', '专利证书'), file('3', 'a', '审查意见')
+    ], policies, mappings)
+    expect(grouped.groups.find(group => group.descriptionLabel === '专利证书')?.sendMode).toBe('merge_by_customer_description')
+    expect(grouped.groups.find(group => group.descriptionLabel === '专利证书')?.files.map(item => item.fileId)).toEqual(['1', '2'])
+    expect(grouped.groups.find(group => group.descriptionLabel === '审查意见')?.sendMode).toBe('single_file')
+    const unmatched = planMailGroups([file('4', 'a', '其他')], policies, mappings)
+    expect(unmatched.groups).toHaveLength(0)
+    expect(unmatched.skipped[0]?.code).toBe('AMBIGUOUS_POLICY')
+  })
 })
 
 describe('发文类型映射和草稿', () => {

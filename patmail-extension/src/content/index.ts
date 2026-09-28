@@ -176,6 +176,15 @@ const bridge: MessageBridge = {
       case MessageType.ListFlowReviewers:
         return { type: MessageType.ListFlowReviewersResult,
           payload: await easyRuntime.listFlowReviewers() }
+      case MessageType.ReadCaseDemands:
+        return { type: MessageType.CaseDemandResult,
+          payload: await easyRuntime.readCaseDemands(message.payload.caseId, signal) }
+      case MessageType.ReadMailContacts:
+        return { type: MessageType.MailContactResult,
+          payload: await easyRuntime.readMailContacts(message.payload.mailId, message.payload.customerId, signal) }
+      case MessageType.ReadMailAddresses:
+        return { type: MessageType.MailAddressResult,
+          payload: await easyRuntime.readMailAddresses(message.payload.mailId) }
       case MessageType.ListHistoryQueries:
         return { type: MessageType.HistoryQueriesResult,
           payload: await easyRuntime.listHistoryQueries(message.payload.force, signal, message.payload.surface ?? 'file') }

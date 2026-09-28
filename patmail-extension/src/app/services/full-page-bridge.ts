@@ -7,6 +7,8 @@ export function createFullPageBridge(): MessageBridge {
     async request(message): Promise<ContentResponse> {
       const slow = message.type === MessageType.SearchFiles || message.type === MessageType.SearchLimitMonitor
         || message.type === MessageType.ListMailProcesses || message.type === MessageType.ListFlowReviewers
+        || message.type === MessageType.ReadCaseDemands
+        || message.type === MessageType.ReadMailContacts
         || message.type === MessageType.DiagnoseExistingMail
         || message.type === MessageType.LoadDictionary || message.type === MessageType.ScanFileSearchForm
       const response = await sendToBackground({ type: MessageType.Workspace, payload: { action: 'forward', message } }, slow ? 70_000 : 30_000)
