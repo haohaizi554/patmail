@@ -256,7 +256,7 @@ watch(() => [valueOf('case_type'), valueOf('proc_type'), valueOf('country')].joi
     <p v-if="loading" class="hint">正在读取当前账号的期限模板…</p>
     <p v-if="message" class="hint">{{ message }}</p>
     <label>选用模板
-      <ThemeSelect :model-value="selectedId" :options="[{ value: '', label: '请选择' }, ...templates.map(item => ({ value: item.id, label: item.name }))]" @update:model-value="applyTemplate(String($event))" />
+      <ThemeSelect :model-value="selectedId" placeholder="请选择" :options="templates.map(item => ({ value: item.id, label: item.name }))" @update:model-value="applyTemplate(String($event))" />
     </label>
     <div class="query-conditions">
       <div class="section-heading">

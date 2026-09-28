@@ -1,6 +1,6 @@
 import { MessageType, type MessageBridge } from '../shared/message'
 
-export async function fetchMailTypeNodes(bridge: MessageBridge, force: boolean): Promise<{ nodes: Array<{ id: string; name: string }>; message: string }> {
+export async function fetchMailTypeNodes(bridge: MessageBridge, force: boolean): Promise<{ nodes: Array<{ id: string; name: string; parentId: string }>; message: string }> {
   try {
     const response = await bridge.request({ type: MessageType.LoadDictionary, payload: { kind: 'mailType', force } })
     if (response.type === MessageType.Error) return { nodes: [], message: response.payload.message }
@@ -10,7 +10,7 @@ export async function fetchMailTypeNodes(bridge: MessageBridge, force: boolean):
         : '发文类型没有从原网站读到。'
       return { nodes: [], message }
     }
-    return { nodes: response.payload.data.nodes.map(node => ({ id: node.id, name: node.name })), message: '' }
+    return { nodes: response.payload.data.nodes.map(node => ({ id: node.id, name: node.name, parentId: node.parentId })), message: '' }
   } catch {
     return { nodes: [], message: '读取发文类型失败。' }
   }

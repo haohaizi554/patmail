@@ -138,7 +138,7 @@ function search(): void {
         <input :value="fieldText(field.key)" type="text" autocomplete="off" @input="setField(field.key, ($event.target as HTMLInputElement).value)" />
       </label>
       <label v-else-if="field.controlType === 'select'">{{ field.label }}
-        <ThemeSelect :model-value="fieldText(field.key)" :options="[{ value: '', label: '请选择' }, ...selectOptions(field.dictionaryKey, field.dependsOn)]" @open="ensureCore" @update:model-value="setField(field.key, String($event))" />
+        <ThemeSelect :model-value="fieldText(field.key)" placeholder="请选择" :options="selectOptions(field.dictionaryKey, field.dependsOn)" @open="ensureCore" @update:model-value="setField(field.key, String($event))" />
         <span v-if="fieldText(field.key) && displayOf(field.key) === '未识别的历史 ID'" class="hint">未识别的历史 ID</span>
       </label>
       <div v-else-if="field.controlType === 'tree'">

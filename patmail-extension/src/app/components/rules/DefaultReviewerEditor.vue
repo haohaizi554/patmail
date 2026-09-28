@@ -31,11 +31,11 @@ function save(): void {
 <template>
   <section class="card">
     <h2>默认审核人</h2>
-    <p class="hint">名单来自当前账号进行中发文的下一节点。一般选自己，拼发文任务时会直接带上，不用再选一次。</p>
+    <p class="hint">名单来自原网站的人员树，没有进行中的发文也能选。一般选自己，拼发文任务时会直接带上，不用再选一次。</p>
     <p v-if="notice" class="hint">{{ notice }}</p>
     <p v-if="selected" class="hint">当前默认：{{ selected.name }}</p>
     <div class="filters">
-      <ThemeSelect v-model="userId" :options="[{ value: '', label: '选择审核人' }, ...reviewers.map(item => ({ value: item.id, label: label(item) }))]" />
+      <ThemeSelect v-model="userId" placeholder="选择审核人" :options="reviewers.map(item => ({ value: item.id, label: label(item) }))" />
       <button type="button" class="ghost" @click="useSelf">设为当前账号</button>
       <button type="button" class="solid" @click="save">保存默认审核人</button>
     </div>

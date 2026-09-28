@@ -284,7 +284,7 @@ onBeforeUnmount(() => {
             <p class="hint">{{ file.fileDescription || '缺少文件描述' }} · {{ file.customerName || '缺少客户' }} · {{ file.caseVolume || '无文号' }}</p>
           </article>
           <label>绑定到已有客户配置
-            <ThemeSelect v-model="bindProfileId" :options="[{ value: '', label: '选择客户配置' }, ...bindCustomers.map(item => ({ value: item.id, label: item.name }))]" @open="loadBindCustomers" />
+            <ThemeSelect v-model="bindProfileId" placeholder="选择客户配置" :options="bindCustomers.map(item => ({ value: item.id, label: item.name }))" @open="loadBindCustomers" />
           </label>
           <button type="button" class="text-button" :disabled="!bindProfileId" @click="startBind">绑定已选文件</button>
           <article v-for="group in bindReview" :key="group.sourceCustomerName" class="file-card">

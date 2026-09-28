@@ -60,10 +60,7 @@ const formRevision = ref(1)
 const listMessage = ref('')
 const removingId = ref('')
 
-const surfaceOptions = computed(() => [
-  { value: '', label: '请选择查询入口' },
-  ...QUERY_SURFACES.map(item => ({ value: item.id, label: item.label }))
-])
+const surfaceOptions = computed(() => QUERY_SURFACES.map(item => ({ value: item.id, label: item.label })))
 const stylePlaceholder = computed(() => surface.value ? '请选择发文模式' : '先选择查询入口')
 const workflowChoices = computed(() => workflowsFor(surface.value).map(item => ({ value: item.id, label: item.label })))
 const activeWorkflow = computed(() => WORKFLOWS.find(item => item.id === workflow.value) ?? null)
@@ -275,7 +272,7 @@ watch(() => connection.value.operatorId, () => {
       <div class="stack-form">
         <label>客户名称 <input v-model="name" type="text" maxlength="80" /></label>
         <label>查询入口
-          <ThemeSelect :model-value="surface" :options="surfaceOptions" @update:model-value="surface = $event as QuerySurfaceId | ''" />
+          <ThemeSelect :model-value="surface" placeholder="请选择查询入口" :options="surfaceOptions" @update:model-value="surface = $event as QuerySurfaceId | ''" />
         </label>
         <label v-if="workflowChoices.length">工作流
           <ThemeSelect :model-value="workflow" :options="workflowChoices" @update:model-value="workflow = String($event) as WorkflowId" />

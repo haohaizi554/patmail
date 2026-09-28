@@ -151,21 +151,28 @@ watch(() => props.files, () => { drafts.value = [] }, { deep: true })
     <p class="hint">配置归属：{{ scopeLabel }}。本地预览不是 EASY 邮件。选择或规则变化后需要重新生成，旧预览不能拿去创建。</p>
     <p v-if="message" class="hint">{{ message }}</p>
     <label>客户发文方式
-      <ThemeSelect v-model="policyCustomer" :options="[{ value: '', label: '选择已有客户配置' }, ...customers.map(item => ({ value: item.id, label: item.name }))]" />
+      <ThemeSelect v-model="policyCustomer" placeholder="选择已有客户配置" :options="customers.map(item => ({ value: item.id, label: item.name }))" />
     </label>
     <label>方式
       <ThemeSelect v-model="policyMode" :options="[{ value: 'merge_by_customer_description', label: '同客户同文件描述合并' }, { value: 'single_file', label: '单个来文发文' }]" />
     </label>
     <button type="button" class="text-button" @click="save(draft => {
       if (!policyCustomer) return
-      const current = draft.policies.find(item => item.customerProfileId === policyCustomer)
-      const next = { customerProfileId: policyCustomer, sendMode: policyMode, enabled: true, version: (current?.version ?? 0) + 1, updatedAt: new Date().toISOString() }
-      draft.policies = draft.policies.filter(item => item.customerProfileId !== policyCustomer).concat(next)
+      const current = draft.policies.find(item => item.customerProfileId === policyCustomer && item.sendMode === policyMode)
+      const next = {
+        customerProfileId: policyCustomer,
+        sendMode: policyMode,
+        ...(current?.mailTypeId && current.mailTypeName ? { mailTypeId: current.mailTypeId, mailTypeName: current.mailTypeName } : {}),
+        enabled: true,
+        version: (current?.version ?? 0) + 1,
+        updatedAt: new Date().toISOString()
+      }
+      draft.policies = draft.policies.filter(item => !(item.customerProfileId === policyCustomer && item.sendMode === policyMode)).concat(next)
     })">保存发文方式</button>
 
     <label>文件描述原文<input v-model="mapText" type="text" /></label>
     <label>发文类型
-      <ThemeSelect v-model="mapTypeId" :options="[{ value: '', label: '选择发文类型' }, ...mailTypes.map(item => ({ value: item.id, label: item.name }))]" @open="loadMailTypes" />
+      <ThemeSelect v-model="mapTypeId" placeholder="选择发文类型" :options="mailTypes.map(item => ({ value: item.id, label: item.name }))" @open="loadMailTypes" />
     </label>
     <button type="button" class="text-button" @click="save(draft => {
       const mailType = mailTypes.find(item => item.id === mapTypeId)
@@ -189,7 +196,7 @@ watch(() => props.files, () => { drafts.value = [] }, { deep: true })
     </article>
 
     <label>收件人客户
-      <ThemeSelect v-model="recipientCustomer" :options="[{ value: '', label: '选择客户' }, ...customers.map(item => ({ value: item.id, label: item.name }))]" />
+      <ThemeSelect v-model="recipientCustomer" placeholder="选择客户" :options="customers.map(item => ({ value: item.id, label: item.name }))" />
     </label>
     <label>收件人<input v-model="recipientTo" type="text" placeholder="多个邮箱用逗号分隔" /></label>
     <label>抄送<input v-model="recipientCc" type="text" /></label>

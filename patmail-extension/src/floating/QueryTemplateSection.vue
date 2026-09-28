@@ -144,7 +144,7 @@ function formValue(key: string): string {
   return resolved.value.fields[key] ?? ''
 }
 function downloadChoices(key: string): { value: string; label: string }[] {
-  return optionsFor(key).filter(item => !item.value || !item.label.includes('请选择'))
+  return optionsFor(key).filter(item => item.label.replace(/[\s\-—_]/g, '') !== '请选择')
 }
 function setOverride(key: string, value: string): void {
   temporaryActive.value = { ...temporaryActive.value, [key]: true }
@@ -751,10 +751,10 @@ watch(selectedCustomerId, () => {
     <p v-else-if="!loadingHistory && mode === 'customer'" class="empty">当前账号还没有客户配置。</p>
 
     <label v-if="mode === 'history'">选用模板
-      <ThemeSelect v-model="selectedBaseId" :disabled="loadingHistory && historyOptions.length === 0" :options="(loadingHistory && historyOptions.length === 0) ? [{ value: '', label: '正在读取…' }] : [{ value: '', label: '请选择' }, ...historyOptions.map(item => ({ value: item.id, label: item.name, group: 'EASY' })), ...localTemplates.map(item => ({ value: item.id, label: item.name, group: '本地' }))]" @change="startApply(selectedBaseId)" />
+      <ThemeSelect v-model="selectedBaseId" :disabled="loadingHistory && historyOptions.length === 0" :placeholder="loadingHistory && historyOptions.length === 0 ? '正在读取…' : '请选择'" :options="[...historyOptions.map(item => ({ value: item.id, label: item.name, group: 'EASY' })), ...localTemplates.map(item => ({ value: item.id, label: item.name, group: '本地' }))]" @change="startApply(selectedBaseId)" />
     </label>
     <label v-else>客户
-      <ThemeSelect v-model="selectedCustomerId" :options="[{ value: '', label: '请选择' }, ...customers.map(item => ({ value: item.id, label: item.name + (item.enabled ? '' : '（已停用）') }))]" />
+      <ThemeSelect v-model="selectedCustomerId" placeholder="请选择" :options="customers.map(item => ({ value: item.id, label: item.name + (item.enabled ? '' : '（已停用）') }))" />
     </label>
     <p v-if="baseName" class="hint">基础模板：{{ baseName }}<span v-if="selectedLocal"> · 来源：本地</span><span v-else-if="selectedBaseId"> · 来源：EASY · 只读</span><span v-if="selectedLocal?.sourceQueryId"> · 已导入，刷新原网站模板不会覆盖</span></p>
     <p v-if="baseMissing" class="error" role="alert">基础模板不存在或无法解析，不会改用其他模板。</p>
@@ -791,7 +791,7 @@ watch(selectedCustomerId, () => {
       <strong>客户配置</strong>
       <label>客户名称<input v-model="draftName" type="text" maxlength="80" /></label>
       <label>基础模板
-        <ThemeSelect v-model="draftBaseId" :options="[{ value: '', label: '请选择' }, ...baseChoices.map(item => ({ value: item.id, label: `${item.name}（${item.source === 'easy' ? 'EASY' : '本地'}）` }))]" />
+        <ThemeSelect v-model="draftBaseId" placeholder="请选择" :options="baseChoices.map(item => ({ value: item.id, label: `${item.name}（${item.source === 'easy' ? 'EASY' : '本地'}）` }))" />
       </label>
       <label>客户编号（可不填）<input v-model="draftEasyId" type="text" autocomplete="off" /></label>
       <label class="check-line"><input v-model="draftEnabled" type="checkbox" />启用</label>

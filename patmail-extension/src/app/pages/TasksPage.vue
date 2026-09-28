@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, ref, watch } from 'vue'
 import PageHead from '../../../../src/components/PageHead.vue'
+import MailTypeTreeSelect from '../../../../src/components/MailTypeTreeSelect.vue'
 import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
 import { bg } from '../../../../src/assets'
 import type { PatentFile } from '../../api/file-search-types'
@@ -9,6 +10,7 @@ import type { MailSender } from '../../customer/mailset'
 import { summarizePctTask } from '../../customer/pct-sheet'
 import type { CustomerQueryProfile } from '../../customer/types'
 import { assembleMail, fillFromRules } from '../../mail'
+import { appendRecipientField } from '../../mail/easy/contracts'
 import type { AssembledMail } from '../../mail/assemble'
 import type { SelectedPatentFile } from '../../mail/types'
 import { describeItemRecord, describeTaskRecord } from '../record-status'
@@ -23,7 +25,7 @@ const detail = ref<Record<string, unknown> | null>(null)
 const detailMessage = ref('')
 const evidenceMessage = ref('')
 
-const mailTypes = ref<Array<{ id: string; name: string }>>([])
+const mailTypes = ref<Array<{ id: string; name: string; parentId: string }>>([])
 const fileKeyword = ref('')
 const fileHits = ref<PatentFile[]>([])
 const fileMessage = ref('')
@@ -44,6 +46,11 @@ const senderNotice = ref('')
 
 const customer = computed(() => customers.value.find(item => item.id === customerId.value) ?? null)
 const mailTypeName = computed(() => mailTypes.value.find(item => item.id === mailTypeId.value)?.name ?? '')
+const mailTypeOptions = computed(() => mailTypes.value.map(item => ({
+  value: item.id,
+  label: item.name,
+  ...(item.parentId ? { parent: item.parentId } : {})
+})))
 
 async function openTask(taskId: string): Promise<void> {
   const response = await sendToBackground({
@@ -85,9 +92,7 @@ async function loadMailTypes(): Promise<void> {
   if (!bridge || !ready.value) return
   const response = await bridge.request({ type: MessageType.LoadDictionary, payload: { kind: 'mailType', force: false } })
   if (response.type !== MessageType.DictionaryResult || !response.payload.ok || response.payload.data.kind !== 'mailType') return
-  const nodes = response.payload.data.nodes
-  const leaves = nodes.filter(node => !nodes.some(other => other.parentId === node.id))
-  mailTypes.value = (leaves.length ? leaves : nodes).map(node => ({ id: node.id, name: node.name }))
+  mailTypes.value = response.payload.data.nodes.map(node => ({ id: node.id, name: node.name, parentId: node.parentId }))
 }
 
 async function searchFiles(): Promise<void> {
@@ -155,8 +160,11 @@ function applyRules(): void {
     return
   }
   const filled = fillFromRules(current, picked.value, rules.value, connection.value.operatorId)
-  draftTo.value = filled.to
-  draftCc.value = filled.cc
+  const sole = current.pctTask?.rows.length === 1 ? current.pctTask.rows[0] : null
+  const keptTo = sole?.mailTo || (current.pctTask?.rows.length === 1 ? current.pctTask.mailTo : '')
+  const keptCc = sole?.mailCc || (current.pctTask?.rows.length === 1 ? current.pctTask.mailCc : '')
+  draftTo.value = keptTo ? appendRecipientField(keptTo, filled.to) : filled.to
+  draftCc.value = keptCc ? appendRecipientField(keptCc, filled.cc) : filled.cc
   draftSubject.value = filled.subject
   draftBody.value = filled.body
   if (filled.mailTypeId && mailTypes.value.some(item => item.id === filled.mailTypeId)) mailTypeId.value = filled.mailTypeId
@@ -191,7 +199,7 @@ const senderOptions = computed(() => {
 })
 
 function customerOptions(rows: CustomerQueryProfile[]): Array<{ value: string; label: string }> {
-  return [{ value: '', label: '选择客户' }, ...rows.map(item => ({ value: item.id, label: item.name }))]
+  return rows.map(item => ({ value: item.id, label: item.name }))
 }
 
 watch(ready, (ok) => {
@@ -235,8 +243,8 @@ onMounted(() => { if (ready.value) void call({ action: 'load' }) })
       <div class="card-head"><h2>拼一封发文</h2></div>
       <p class="hint">创建任务是把客户、文件、发文类型和已保存规则自己拼起来。这一步只生成预览，还不会提交到 EASY。</p>
       <div class="form-grid">
-        <label>客户<ThemeSelect v-model="customerId" :options="customerOptions(customers)" /></label>
-        <label>发文类型<ThemeSelect v-model="mailTypeId" :options="[{ value: '', label: '选择发文类型' }, ...mailTypes.map(item => ({ value: item.id, label: item.name }))]" /></label>
+        <label>客户<ThemeSelect v-model="customerId" placeholder="选择客户" :options="customerOptions(customers)" /></label>
+        <label>发文类型<MailTypeTreeSelect v-model="mailTypeId" :options="mailTypeOptions" :disabled="mailTypes.length === 0" /></label>
         <label>发件人<ThemeSelect :model-value="mailsetId" placeholder="选择发件邮箱" :options="senderOptions" @update:model-value="chooseSender(String($event))" /></label>
         <label>文件名<input v-model="fileKeyword" placeholder="可按文件名缩小范围" @keydown.enter="searchFiles" /></label>
       </div>

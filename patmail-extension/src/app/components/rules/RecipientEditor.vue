@@ -20,7 +20,7 @@ function submit(): void {
     <h2>收件人</h2>
     <div class="rule-fields">
       <label>客户配置
-        <ThemeSelect v-model="profileId" :options="[{ value: '', label: '选择客户' }, ...customers.map(item => ({ value: item.id, label: item.name }))]" />
+        <ThemeSelect v-model="profileId" placeholder="选择客户" :options="customers.map(item => ({ value: item.id, label: item.name }))" />
       </label>
       <label>模板名称 <input v-model="name" type="text" /></label>
       <label>收件人 <textarea v-model="to" rows="2"></textarea></label>

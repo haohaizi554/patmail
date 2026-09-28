@@ -4,7 +4,8 @@ import { bg } from '../../../../src/assets'
 import { computed, inject, ref, watch } from 'vue'
 import { plainClone } from '../../automation/snapshot'
 import { upsertMapping } from '../../mail'
-import type { MailRuleBundle } from '../../mail/types'
+import type { CustomerMailPolicy, MailRuleBundle, SendMode } from '../../mail/types'
+import type { LimitMailStyle, QuerySurfaceId } from '../../customer/types'
 import { isQueryGuid } from '../../query/query-validator'
 import { scopeFromConnection, type ExpectedAccountScope } from '../../shared/connection'
 import { MessageType, type MessageBridge } from '../../shared/message'
@@ -18,6 +19,9 @@ import BodyRuleEditor from '../components/rules/BodyRuleEditor.vue'
 import DefaultReviewerEditor from '../components/rules/DefaultReviewerEditor.vue'
 import DefaultSenderEditor from '../components/rules/DefaultSenderEditor.vue'
 import { fetchMailSenders } from '../../customer/mailset-load'
+import { fetchMailTypeNodes } from '../../customer/mail-type-load'
+import { fetchMailboxSignature } from '../../mail/signature-load'
+import type { MailSignatureItem } from '../../mail/easy/signature-read'
 
 const bridge = inject<MessageBridge>('bridge')
 const { connection, customers, rules, accountEpoch, call } = useWorkspace()
@@ -30,34 +34,38 @@ const reviewers = ref<Array<{ id: string; name: string }>>([])
 const reviewerNotice = ref('')
 const senders = ref<Array<{ id: string; label: string }>>([])
 const senderNotice = ref('')
+const mailTypes = ref<Array<{ id: string; name: string; parentId: string }>>([])
+const mailTypeNotice = ref('')
+const signatureReserved = ref<MailSignatureItem | null>(null)
+const signatureItems = ref<MailSignatureItem[]>([])
+const signatureNotice = ref('')
 
 watch(rules, (bundle) => {
   draft.value = bundle ? plainClone(bundle) : null
   draftScope.value = scopeFromConnection(connection.value)
 }, { immediate: true })
 watch(accountEpoch, () => { importText.value = '' })
-watch(ready, (ok) => { if (ok) { void loadReviewers(); void loadSenders(false) } }, { immediate: true })
+watch(ready, (ok) => { if (ok) { void loadReviewers(); void loadSenders(false); void loadMailTypes(false); void loadSignatures(false) } }, { immediate: true })
+watch(() => draft.value?.defaultSender?.mailsetId, () => { if (ready.value) void loadSignatures(false) })
 
 async function loadReviewers(): Promise<void> {
   if (!bridge || !ready.value) return
-  const response = await bridge.request({ type: MessageType.ListFlowReviewers })
+  reviewerNotice.value = '正在从原网站读取人员…'
+  const response = await bridge.request({ type: MessageType.LoadDictionary, payload: { kind: 'reviewer', force: false } })
   if (response.type === MessageType.Error) {
     reviewerNotice.value = response.payload.message
     reviewers.value = []
     return
   }
-  if (response.type !== MessageType.ListFlowReviewersResult) {
-    reviewerNotice.value = '审核人名单没有返回。'
-    reviewers.value = []
-    return
-  }
-  if (!response.payload.ok) {
-    reviewerNotice.value = response.payload.error.message
+  if (response.type !== MessageType.DictionaryResult || !response.payload.ok || response.payload.data.kind !== 'reviewer') {
+    reviewerNotice.value = response.type === MessageType.DictionaryResult && !response.payload.ok
+      ? response.payload.error.message
+      : '人员名单没有从原网站读到。'
     reviewers.value = []
     return
   }
   reviewers.value = response.payload.data.reviewers
-  reviewerNotice.value = response.payload.data.message
+  reviewerNotice.value = reviewers.value.length ? '' : '原网站没有返回可选人员。'
 }
 
 async function loadSenders(force: boolean): Promise<void> {
@@ -66,6 +74,30 @@ async function loadSenders(force: boolean): Promise<void> {
   const loaded = await fetchMailSenders(bridge, force)
   senders.value = loaded.items.map(item => ({ id: item.id, label: item.label }))
   senderNotice.value = loaded.message
+}
+
+async function loadSignatures(force: boolean): Promise<void> {
+  const mailsetId = draft.value?.defaultSender?.mailsetId ?? ''
+  if (!bridge || !ready.value) return
+  if (!isQueryGuid(mailsetId)) {
+    signatureReserved.value = null
+    signatureItems.value = []
+    signatureNotice.value = '先保存默认发件人，再读取这个邮箱预留的签名。'
+    return
+  }
+  signatureNotice.value = '正在从原网站读取签名…'
+  const loaded = await fetchMailboxSignature(bridge, mailsetId, force)
+  signatureReserved.value = loaded.data?.reserved ?? null
+  signatureItems.value = loaded.data?.items ?? []
+  signatureNotice.value = loaded.data ? loaded.data.note : loaded.message
+}
+
+async function loadMailTypes(force: boolean): Promise<void> {
+  if (!bridge || !ready.value) return
+  mailTypeNotice.value = '正在从原网站读取发文类型…'
+  const loaded = await fetchMailTypeNodes(bridge, force)
+  mailTypes.value = loaded.nodes.map(node => ({ id: node.id, name: node.name, parentId: node.parentId }))
+  mailTypeNotice.value = mailTypes.value.length ? '' : (loaded.message || '原网站没有返回发文类型。')
 }
 
 async function persist(mutate: (bundle: MailRuleBundle) => void): Promise<void> {
@@ -85,25 +117,65 @@ function addresses(value: string): string[] {
   return value.split(/[\s,;]+/).map(item => item.trim()).filter(Boolean)
 }
 
-async function savePolicy(policy: MailRuleBundle['policies'][number]): Promise<void> {
+async function savePolicy(policy: { customerProfileId: string; querySurface: QuerySurfaceId | ''; sendMode: SendMode | ''; limitMailStyle: LimitMailStyle | '' }): Promise<void> {
+  if (!policy.customerProfileId) { message.value = '请选择客户。'; return }
+  if (policy.querySurface !== 'file' && policy.querySurface !== 'limit') {
+    message.value = '请选择查询方式。'
+    return
+  }
+  if (policy.querySurface === 'file' && policy.sendMode !== 'merge_by_customer_description' && policy.sendMode !== 'single_file') {
+    message.value = '请选择这个查询方式下的发文方式。'
+    return
+  }
+  if (policy.querySurface === 'limit' && policy.limitMailStyle !== '1' && policy.limitMailStyle !== '2' && policy.limitMailStyle !== '3') {
+    message.value = '请选择这个查询方式下的发文方式。'
+    return
+  }
+  const surface = policy.querySurface
   await persist(bundle => {
-    bundle.policies = bundle.policies.filter(item => item.customerProfileId !== policy.customerProfileId).concat(policy)
+    const previous = bundle.policies.find(item => item.customerProfileId === policy.customerProfileId && (item.querySurface ?? 'file') === surface)
+    const saved: CustomerMailPolicy = {
+      customerProfileId: policy.customerProfileId,
+      querySurface: surface,
+      enabled: true,
+      version: (previous?.version ?? 0) + 1,
+      updatedAt: new Date().toISOString(),
+      ...(surface === 'file' ? { sendMode: policy.sendMode as SendMode } : { limitMailStyle: policy.limitMailStyle as LimitMailStyle }),
+      ...(previous?.recipientTemplateId ? { recipientTemplateId: previous.recipientTemplateId } : {})
+    }
+    bundle.policies = bundle.policies
+      .filter(item => !(item.customerProfileId === policy.customerProfileId && (item.querySurface ?? 'file') === surface))
+      .concat(saved)
+  })
+}
+
+async function removePolicy(target: { customerProfileId: string; querySurface: QuerySurfaceId }): Promise<void> {
+  await persist(bundle => {
+    bundle.policies = bundle.policies.filter(item => !(item.customerProfileId === target.customerProfileId && (item.querySurface ?? 'file') === target.querySurface))
   })
 }
 
 async function saveMapping(input: { description: string; mailTypeId: string; mailTypeName: string }): Promise<void> {
   if (!draft.value) return
+  if (!input.description.trim() || !isQueryGuid(input.mailTypeId) || !input.mailTypeName.trim()) {
+    message.value = '请填写文件描述，并从发文类型里选择。'
+    return
+  }
   const result = upsertMapping(draft.value.mappings, {
     id: crypto.randomUUID(),
     fileDescriptionText: input.description,
     mailTypeId: input.mailTypeId,
-    mailTypeName: input.mailTypeName || input.description,
+    mailTypeName: input.mailTypeName,
     enabled: true,
     version: 1,
     updatedAt: new Date().toISOString()
   })
   if (!result.ok) { message.value = result.message; return }
   await persist(bundle => { bundle.mappings = result.mappings })
+}
+
+async function removeMapping(id: string): Promise<void> {
+  await persist(bundle => { bundle.mappings = bundle.mappings.filter(item => item.id !== id) })
 }
 
 async function saveRecipient(input: { profileId: string; name: string; to: string; cc: string }): Promise<void> {
@@ -124,18 +196,18 @@ async function saveRecipient(input: { profileId: string; name: string; to: strin
 }
 
 async function saveSignature(input: { name: string; content: string }): Promise<void> {
-  if (!input.name.trim()) { message.value = '请填写签名名称。'; return }
+  if (!input.name.trim() || !input.content.trim()) { message.value = '请填写签名名称和内容。'; return }
   await persist(bundle => {
-    bundle.signatures = bundle.signatures.concat({
+    bundle.signatures = [{
       id: crypto.randomUUID(),
       operatorId: connection.value.operatorId,
       name: input.name.trim(),
       content: input.content,
       enabled: true,
-      isDefault: bundle.signatures.length === 0,
+      isDefault: true,
       version: 1,
       updatedAt: new Date().toISOString()
-    })
+    }]
   })
 }
 
@@ -183,18 +255,12 @@ async function importRules(): Promise<void> {
   <PageHead title="发文规则与映射配置" desc="配置企业个性化发文规则，让自动化更贴合您的业务场景。" :art="bg('规则配置好，发文更轻松.png')" art-large />
   <section v-if="!ready || !draft" class="card"><p class="empty">尚未确认 EASY 用户，不能读取发文规则。</p></section>
   <div v-else class="rules-page">
-    <section class="card">
-      <h2>发文规则</h2>
-      <p class="hint">当前版本 {{ draft.revision }}。保存走后台规则服务。内容变化后，未发出的旧任务会标记为过期。</p>
-      <p v-if="message" class="hint">{{ message }}</p>
-    </section>
-    <div class="rule-columns">
-      <CustomerPolicyEditor :policies="draft.policies" :customers="customers" @save="savePolicy" />
-      <DescriptionMailTypeEditor :mappings="draft.mappings" @save="saveMapping" />
-    </div>
+    <p v-if="message" class="hint">{{ message }}</p>
+    <CustomerPolicyEditor :policies="draft.policies" :customers="customers" @save="savePolicy" @remove="removePolicy" />
+    <DescriptionMailTypeEditor :mappings="draft.mappings" :mail-types="mailTypes" :notice="mailTypeNotice" @save="saveMapping" @remove="removeMapping" @reload="loadMailTypes(true)" />
     <div class="rule-columns">
       <RecipientEditor :recipients="draft.recipients" :customers="customers" @save="saveRecipient" />
-      <SignatureEditor :signatures="draft.signatures" @save="saveSignature" />
+      <SignatureEditor :signatures="draft.signatures" :reserved="signatureReserved" :items="signatureItems" :notice="signatureNotice" @save="saveSignature" @reload="loadSignatures(true)" />
     </div>
     <div class="rule-columns">
       <DefaultReviewerEditor :reviewers="reviewers" :current-id="connection.operatorId" :selected="draft.defaultReviewer" :notice="reviewerNotice" @save="saveReviewer" />

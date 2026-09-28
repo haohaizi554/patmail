@@ -96,10 +96,10 @@ async function preview(): Promise<void> {
       <li v-for="item in history" :key="item.historyId || item.auditTime">历史 {{ item.nodeName }} · {{ item.auditUserName }} · {{ item.auditType }} · {{ item.auditTime }} · {{ item.remark }}</li>
     </ul>
     <label v-if="nodes.length">下一节点
-      <ThemeSelect v-model="nodeId" :options="[{ value: '', label: '请选择' }, ...nodes.map(node => ({ value: node.nodeId, label: `${node.nodeName || node.nodeCode} · ${node.nodeId}` }))]" />
+      <ThemeSelect v-model="nodeId" placeholder="请选择" :options="nodes.map(node => ({ value: node.nodeId, label: `${node.nodeName || node.nodeCode} · ${node.nodeId}` }))" />
     </label>
     <label v-if="nodeId">审核人
-      <ThemeSelect v-model="reviewerId" :options="[{ value: '', label: '请选择' }, ...reviewers.map(reviewer => ({ value: reviewer.id, label: `${reviewer.name} · ${reviewer.id}` }))]" />
+      <ThemeSelect v-model="reviewerId" placeholder="请选择" :options="reviewers.map(reviewer => ({ value: reviewer.id, label: `${reviewer.name} · ${reviewer.id}` }))" />
     </label>
     <p v-if="nodeId && reviewers.length === 0" class="hint">当前节点没有带 GUID 的候选审核人。</p>
     <label v-if="view?.snapshot?.urgencies.length">缓急
