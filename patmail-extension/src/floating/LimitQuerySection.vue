@@ -9,24 +9,18 @@ import { activateOptionFallback, hydrateOptionFallback, optionFallbackEpoch, rem
 import type { NormalizedDictionary } from '../api/dictionaries'
 import { choicesFromDictionary, describePickerReceipt, LIMIT_PICKER_FIELDS } from '../api/dictionaries/picker-catalog'
 import { hasOptionTree } from '../query/option-tree'
-import { isLimitMonitorInputField, LIMIT_MONITOR_TYPES, type LimitMonitorQuery, type LimitMonitorType } from '../api/limit-monitor-params'
+import { isLimitMonitorInputField, type LimitMonitorQuery } from '../api/limit-monitor-params'
 import { isQueryGuid } from '../query/query-validator'
+import { joinCaseVolumes, splitCaseVolumes } from '../customer/volume-list'
 import { TemplateLoadCoordinator } from '../query/load-coordinator'
 import { MessageType, type MessageBridge } from '../shared/message'
 
-const props = defineProps<{ bridge?: MessageBridge; userId: string; canSearch: boolean }>()
-const emit = defineEmits<{ search: [query: Omit<LimitMonitorQuery, 'pageIndex' | 'pageSize'> & { reset?: boolean }] }>()
+const props = defineProps<{ bridge?: MessageBridge; userId: string; canSearch: boolean; seed?: Record<string, string> | null; seedToken?: number }>()
+const emit = defineEmits<{
+  search: [query: Omit<LimitMonitorQuery, 'pageIndex' | 'pageSize'> & { reset?: boolean; templateId?: string }]
+  draft: [fields: Record<string, string>]
+}>()
 
-const types: { value: LimitMonitorType; label: string }[] = [
-  { value: 'all', label: '全部' },
-  { value: 'pay', label: '缴费' },
-  { value: 'suspend', label: '中止' },
-  { value: 'abandon', label: '放弃' },
-  { value: 'recall', label: '撤回' },
-  { value: 'priority', label: '优先权' },
-  { value: 'fee', label: '费用' }
-]
-const type = ref<LimitMonitorType>('all')
 const values = ref<Record<string, string>>({})
 const templates = ref<HistoryQueryOption[]>([])
 const selectedId = ref('')
@@ -56,6 +50,14 @@ function valueOf(key: string): string {
 function setValue(key: string, value: string): void {
   values.value = { ...values.value, [key]: value }
 }
+function draftFields(): Record<string, string> {
+  const fields: Record<string, string> = {}
+  for (const [key, value] of Object.entries(values.value)) {
+    if (isLimitMonitorInputField(key) && value.trim()) fields[key] = value.trim()
+  }
+  return fields
+}
+watch(values, () => emit('draft', draftFields()))
 function onText(key: string, event: Event): void {
   setValue(key, (event.target as HTMLInputElement).value)
 }
@@ -78,7 +80,7 @@ function choices(key: string): { value: string; label: string; parent?: string }
   const saved = stored ?? pageSelectOptions(LIMIT_OPTION_KEYS[key] ?? key) ?? LIMIT_SELECTS[key] ?? []
   const options = live ?? [...saved]
   const current = valueOf(key)
-  if (current && !options.some(item => item.value === current)) options.unshift({ value: current, label: isQueryGuid(current) ? '已选择' : current })
+  if (current && isQueryGuid(current) && !options.some(item => item.value === current)) options.unshift({ value: current, label: '已选择' })
   return options.filter(item => item.value)
 }
 function treeChoices(key: string): { value: string; label: string; parent?: string }[] {
@@ -145,28 +147,35 @@ async function applyTemplate(id: string): Promise<void> {
 }
 
 function search(): void {
-  if (!props.canSearch || !LIMIT_MONITOR_TYPES.includes(type.value)) return
+  if (!props.canSearch) return
   const fields: Record<string, string> = {}
   for (const [key, value] of Object.entries(values.value)) {
     if (isLimitMonitorInputField(key)) fields[key] = value
   }
+  const volumes = splitCaseVolumes(fields.case_volume ?? '')
+  fields.case_volume = joinCaseVolumes(volumes)
   const ctrl = fields.ctrl_proc?.trim() ?? ''
   const ctrlIds = ctrl.split(',').map(item => item.trim()).filter(Boolean)
   const ctrlReady = ctrlIds.length > 0 && ctrlIds.every(item => isQueryGuid(item))
+  if (ctrl && !ctrlReady) {
+    message.value = '处理事项要先从列表里选中，再查询。'
+    return
+  }
+  if (ctrlReady) fields.ctrl_proc = ctrlIds.join(',')
   emit('search', {
-    type: type.value,
-    caseVolume: fields.case_volume ?? '',
+    type: 'all',
+    caseVolume: fields.case_volume,
     applicationNo: fields.app_no ?? '',
     customerName: fields.customer_name ?? '',
     ...(ctrlReady ? { ctrlProcId: ctrlIds.join(',') } : {}),
-    fields: !ctrl || ctrlReady ? fields : { ...fields, ctrl_proc: '' }
+    fields,
+    ...(selectedId.value ? { templateId: selectedId.value } : {})
   })
 }
 
 function reset(): void {
   values.value = {}
   selectedId.value = ''
-  type.value = 'all'
   emit('search', { type: 'all', caseVolume: '', applicationNo: '', customerName: '', reset: true })
 }
 
@@ -210,6 +219,12 @@ async function loadPickers(force: boolean): Promise<void> {
   }
 }
 
+watch(() => props.seedToken, () => {
+  if (!props.seed) return
+  values.value = { ...props.seed }
+  selectedId.value = ''
+  message.value = '已载入绑定的查询条件。可以再改，改完重新查询。'
+})
 watch(() => props.userId, () => {
   templates.value = []
   values.value = {}
@@ -243,10 +258,6 @@ watch(() => [valueOf('case_type'), valueOf('proc_type'), valueOf('country')].joi
     <label>选用模板
       <ThemeSelect :model-value="selectedId" :options="[{ value: '', label: '请选择' }, ...templates.map(item => ({ value: item.id, label: item.name }))]" @update:model-value="applyTemplate(String($event))" />
     </label>
-    <div class="filters">
-      <button v-for="item in types" :key="item.value" :class="type === item.value ? 'solid tiny' : 'ghost'" type="button" @click="type = item.value">{{ item.label }}</button>
-      <button class="ghost" type="button" disabled title="流程页签使用另一套字段，这里不查询">流程</button>
-    </div>
     <div class="query-conditions">
       <div class="section-heading">
         <strong>查询条件</strong>
@@ -261,12 +272,19 @@ watch(() => [valueOf('case_type'), valueOf('proc_type'), valueOf('country')].joi
         <strong>{{ block.title }}</strong>
         <div class="query-grid">
           <template v-for="(cell, index) in block.cells" :key="block.title + index">
-            <label v-if="cell.kind === 'text'" class="query-cell">
+            <label v-if="cell.kind === 'text'" class="query-cell" :class="{ 'span-all': cell.key === 'case_volume' }">
               <span>{{ cell.label }}</span>
               <span class="limit-input">
-                <input :value="valueOf(cell.key)" type="text" @input="onText(cell.key, $event)" />
+                <textarea v-if="cell.key === 'case_volume'" :value="valueOf(cell.key)" rows="3" placeholder="一个文号，或多个文号用分号、空格、换行隔开" @input="onText(cell.key, $event)" />
+                <input v-else :value="valueOf(cell.key)" type="text" @input="onText(cell.key, $event)" />
                 <label v-for="item in cell.checks ?? []" :key="item.key" class="empty-check"><input :checked="checked(item.key)" type="checkbox" @change="onCheck(item.key, $event)" />{{ item.label }}</label>
               </span>
+            </label>
+            <label v-else-if="cell.kind === 'named' && cell.key === 'ctrl_proc'" class="query-cell">
+              <span>{{ cell.label }}</span>
+              <TreeOptionSelect v-if="treeChoices(cell.key).length" :model-value="valueOf(cell.key)" :options="treeChoices(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
+              <ThemeSelect v-else-if="choices(cell.key).length" :model-value="valueOf(cell.key)" :options="optionsFor(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
+              <span v-else class="hint">先校对字段，再选择处理事项</span>
             </label>
             <label v-else-if="cell.kind === 'named'" class="query-cell">
               <span>{{ cell.label }}</span>

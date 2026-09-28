@@ -104,7 +104,8 @@
 .query-cell { display: grid; grid-template-columns: 6.8em minmax(0, 1fr); gap: 6px; align-items: center; min-width: 0; }
 .query-cell > span:first-child { color: #8a7290; font-size: 12px; text-align: right; }
 .query-cell.span-all { grid-column: 1 / -1; }
-.query-cell input:not([type="checkbox"]) { width: 100%; min-width: 0; min-height: 31px; padding: 5px 8px; border: 1px solid #e9d9e9; border-radius: 8px; background: #fff; color: #4e4056; font-family: inherit; font-size: 12px; }
+.query-cell input:not([type="checkbox"]), .query-cell textarea { width: 100%; min-width: 0; min-height: 31px; padding: 5px 8px; border: 1px solid #e9d9e9; border-radius: 8px; background: #fff; color: #4e4056; font-family: inherit; font-size: 12px; }
+.query-cell textarea { min-height: 72px; resize: vertical; }
 .query-cell .theme-select-trigger { min-width: 0; }
 .date-pair { display: flex; gap: 4px; align-items: center; min-width: 0; }
 .date-pair input { flex: 1; }
@@ -112,7 +113,7 @@
 .empty-check, .check-group label { display: flex; align-items: center; gap: 4px; flex: none; font-size: 12px; color: #65536d; white-space: nowrap; }
 .limit-form .query-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .limit-input { display: flex; gap: 8px; align-items: center; min-width: 0; }
-.limit-input > input { flex: 1; min-width: 0; }
+.limit-input > input, .limit-input > textarea { flex: 1; min-width: 0; }
 .limit-form .filters { display: flex; flex-wrap: wrap; gap: 6px; }
 .limit-form .form-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .check-group { display: flex; flex-wrap: wrap; gap: 6px 12px; }

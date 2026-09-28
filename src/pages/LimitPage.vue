@@ -13,9 +13,11 @@ const props = defineProps({
   connected: { type: Boolean, default: true },
   hideForm: Boolean,
   pageIndex: { type: Number, default: 1 },
-  pageSize: { type: Number, default: 10 }
+  pageSize: { type: Number, default: 10 },
+  selectable: Boolean,
+  selected: { type: Array, default: () => [] }
 })
-const emit = defineEmits(['search', 'page'])
+const emit = defineEmits(['search', 'page', 'select', 'confirm'])
 const ui = inject('ui', null)
 const type = ref('all')
 const caseVolume = ref('')
@@ -34,6 +36,26 @@ const types = [
 const shown = computed(() => props.live ? props.rows : demoRows.value)
 const totalText = computed(() => props.live ? props.total : shown.value.length)
 const totalPages = computed(() => Math.max(1, Math.ceil(totalText.value / props.pageSize)))
+const pageIds = computed(() => shown.value.map(row => row.procId).filter(Boolean))
+const pageAll = computed(() => pageIds.value.length > 0 && pageIds.value.every(id => props.selected.includes(id)))
+
+function toggleRow(id) {
+  if (!id) return
+  const next = props.selected.includes(id) ? props.selected.filter(item => item !== id) : [...props.selected, id]
+  emit('select', next)
+}
+
+function togglePage() {
+  const ids = pageIds.value
+  const next = pageAll.value
+    ? props.selected.filter(id => !ids.includes(id))
+    : [...new Set([...props.selected, ...ids])]
+  emit('select', next)
+}
+
+function confirmSelection() {
+  emit('confirm', [...props.selected])
+}
 
 function goPage(page) {
   if (page < 1 || page > totalPages.value || props.loading) return
@@ -86,6 +108,8 @@ function reset() {
   <section class="card" style="margin-top: 14px">
     <div class="toolbar">
       <span>共 {{ totalText }} 条</span>
+      <button v-if="selectable" class="ghost tiny" type="button" :disabled="!pageIds.length" @click="togglePage">{{ pageAll ? '取消全选' : '全选本页' }}</button>
+      <button v-if="selectable" class="ghost tiny" type="button" :disabled="!selected.length" @click="confirmSelection">确认勾选</button>
       <div v-if="live && totalPages > 1" class="pagination">
         <button class="ghost tiny" type="button" :disabled="pageIndex <= 1 || loading" @click="goPage(pageIndex - 1)">上一页</button>
         <span>{{ pageIndex }} / {{ totalPages }}</span>
@@ -98,15 +122,17 @@ function reset() {
     <table class="grid">
       <thead>
         <tr>
+          <th v-if="selectable"><label class="page-check"><input type="checkbox" :checked="pageAll" :disabled="!pageIds.length" @change="togglePage" />全选</label></th>
           <th>我方文号</th><th>案件名称</th><th>处理事项</th><th>客户</th><th>申请号</th>
           <th>官方期限</th><th>客户期限</th><th>内部期限</th>
         </tr>
       </thead>
       <tbody>
         <tr v-if="!shown.length">
-          <td colspan="8">{{ loading ? '正在读取期限列表…' : (message ? '查询没有完成，上面有原因。' : '没有可显示的期限记录') }}</td>
+          <td :colspan="selectable ? 9 : 8">{{ loading ? '正在读取期限列表…' : (message ? '查询没有完成，上面有原因。' : '没有可显示的期限记录') }}</td>
         </tr>
         <tr v-for="row in shown" :key="row.procId">
+          <td v-if="selectable"><input type="checkbox" :checked="selected.includes(row.procId)" @change="toggleRow(row.procId)" /></td>
           <td>{{ row.caseVolume }}</td>
           <td>{{ row.caseName }}</td>
           <td>{{ row.ctrlProc }}</td>

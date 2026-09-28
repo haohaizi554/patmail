@@ -1,80 +1,66 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, ref, watch } from 'vue'
 import PageHead from '../../../../src/components/PageHead.vue'
 import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
 import { bg } from '../../../../src/assets'
-import type { HistoryQueryOption } from '../../api/query-history'
-import { PAGE_OPTIONS, queryBlocks, type QueryCell, type QuerySection } from '../../query/form-layout'
-import { hiddenFormFields, pageSelectOptions } from '../../query/form-page'
-import { activateOptionFallback, hydrateOptionFallback, optionFallbackEpoch, subscribeOptionFallback } from '../../query/option-fallback'
 import { fieldLabel } from '../../query/field-registry'
 import { isQueryGuid } from '../../query/query-validator'
+import { clonePctTask } from '../../customer/pct-sheet'
+import {
+  PENDING_CUSTOMER_KEY,
+  QUERY_SURFACES,
+  customerMailStyleLabel,
+  isFileMailStyle,
+  isLimitMailStyle,
+  mailStylesFor,
+  querySurfaceOf,
+  summarizeBoundQuery,
+  WORKFLOWS,
+  matchPctMailTypes,
+  workflowsFor
+} from '../../customer/mail-flow'
+import { fetchMailTypeNodes } from '../../customer/mail-type-load'
+import type { MessageBridge } from '../../shared/message'
+import type { FileMailStyle, LimitMailStyle, QuerySurfaceId, WorkflowId } from '../../customer/types'
 import { scopeFromConnection, type ExpectedAccountScope } from '../../shared/connection'
-import { MessageType, type MessageBridge } from '../../shared/message'
 import { useWorkspace } from '../composables/useWorkspace'
 
 const bridge = inject<MessageBridge>('bridge')
-const { connection, customers, templates, accountEpoch, call } = useWorkspace()
+const { connection, customers, call } = useWorkspace()
+const mailNodes = ref<Array<{ id: string; name: string }>>([])
+const mailTypeMessage = ref('正在从原网站读取发文类型…')
+const mailMatch = computed(() => matchPctMailTypes(mailNodes.value))
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
 const name = ref('')
-const templateId = ref('manual')
+const surface = ref<QuerySurfaceId | ''>('')
+const workflow = ref<WorkflowId | ''>('')
+const mailStyle = ref('')
+const reviewChoice = ref('self')
 const enabled = ref(true)
 const editingId = ref('')
 const createdAt = ref('')
 const keptCustomerId = ref('')
-const values = ref<Record<string, string>>({})
-const openExtra = ref<Record<string, boolean>>({})
 const formMessage = ref('')
 const formScope = ref<ExpectedAccountScope | null>(null)
 const formRevision = ref(1)
-const history = ref<HistoryQueryOption[]>([])
-const loadingTemplates = ref(false)
-const templateMessage = ref('')
-const fallbackTick = ref(0)
-const stopFallbackWatch = subscribeOptionFallback(() => { fallbackTick.value = optionFallbackEpoch() })
+const listMessage = ref('')
+const removingId = ref('')
 
-const templateChoices = computed(() => {
-  const local = templates.value.map(item => ({ value: item.id, label: item.name, group: '本机保存的查询' }))
-  const remote = history.value
-    .filter(item => !local.some(row => row.value === item.id))
-    .map(item => ({ value: item.id, label: item.name, group: '账号里的查询' }))
-  return [{ value: 'manual', label: '不套用，只用下面填写的条件' }, ...remote, ...local]
-})
-const formSections = computed(() => queryBlocks(hiddenFormFields()))
-function shownCells(block: QuerySection): QueryCell[] {
-  return openExtra.value[block.title] ? [...block.cells, ...block.extra] : block.cells
-}
-function toggleExtra(title: string): void {
-  openExtra.value = { ...openExtra.value, [title]: !openExtra.value[title] }
-}
+const surfaceOptions = computed(() => [
+  { value: '', label: '请选择查询入口' },
+  ...QUERY_SURFACES.map(item => ({ value: item.id, label: item.label }))
+])
+const stylePlaceholder = computed(() => surface.value ? '请选择发文模式' : '先选择查询入口')
+const workflowChoices = computed(() => workflowsFor(surface.value).map(item => ({ value: item.id, label: item.label })))
+const activeWorkflow = computed(() => WORKFLOWS.find(item => item.id === workflow.value) ?? null)
 
-function templateName(id: string): string {
-  if (!id || id === 'manual') return '自己填写的条件'
-  return history.value.find(item => item.id === id)?.name
-    || templates.value.find(item => item.id === id)?.name
-    || '已选的查询'
-}
-
-function shownValue(key: string, value: string): string {
-  const option = PAGE_OPTIONS[key]?.find(item => item.value === value)
-  if (option) return option.label
-  if (isQueryGuid(value) || value.includes(',')) return '已选择'
-  if (value === 'on') return '是'
-  return value
-}
-
-function describe(overrides: Record<string, string>): string {
-  const parts = Object.entries(overrides)
+function describe(item: { boundQuery?: Record<string, string>; overrides: Record<string, string> }): string {
+  if (item.boundQuery && Object.keys(item.boundQuery).length) return summarizeBoundQuery(item.boundQuery)
+  const parts = Object.entries(item.overrides)
     .filter(([, value]) => value.trim())
-    .map(([key, value]) => `${fieldLabel(key)}：${shownValue(key, value)}`)
-  return parts.length ? parts.join('，') : '没有单独填写'
-}
-
-function cellTouched(cell: QueryCell, source: Record<string, string>): boolean {
-  if (cell.kind === 'download-name') return false
-  if (cell.kind === 'dates') return [cell.start, cell.end, cell.empty].some(key => key && source[key]?.trim())
-  if (cell.kind === 'checks') return cell.items.some(item => source[item.key]?.trim())
-  return Boolean(source[cell.key]?.trim())
+    .slice(0, 3)
+    .map(([key, value]) => `${fieldLabel(key)}：${isQueryGuid(value) ? '已选择' : value}`)
+  return parts.length ? parts.join('，') : '还没绑定'
 }
 
 function edit(id: string): void {
@@ -82,16 +68,13 @@ function edit(id: string): void {
   if (!profile) return
   editingId.value = profile.id
   name.value = profile.name
-  templateId.value = profile.baseTemplateId || 'manual'
+  surface.value = profile.querySurface ?? 'file'
+  workflow.value = profile.workflowId ?? (surface.value === 'limit' ? 'pct-reminder' : '')
+  mailStyle.value = (surface.value === 'limit' ? profile.limitMailStyle : profile.fileMailStyle) ?? ''
+  reviewChoice.value = profile.reviewTarget ?? 'self'
   enabled.value = profile.enabled
   createdAt.value = profile.createdAt
   keptCustomerId.value = profile.easyCustomerId && isQueryGuid(profile.easyCustomerId) ? profile.easyCustomerId : ''
-  values.value = { ...profile.overrides }
-  const nextOpen: Record<string, boolean> = {}
-  for (const block of queryBlocks(hiddenFormFields())) {
-    if (block.extra.some(cell => cellTouched(cell, profile.overrides))) nextOpen[block.title] = true
-  }
-  openExtra.value = nextOpen
   formScope.value = scopeFromConnection(connection.value)
   formRevision.value = profile.revision ?? 1
   formMessage.value = ''
@@ -100,87 +83,77 @@ function edit(id: string): void {
 function cancel(): void {
   editingId.value = ''
   name.value = ''
-  templateId.value = 'manual'
+  surface.value = ''
+  workflow.value = ''
+  mailStyle.value = ''
+  reviewChoice.value = 'self'
   enabled.value = true
   createdAt.value = ''
   keptCustomerId.value = ''
-  values.value = {}
-  openExtra.value = {}
   formScope.value = null
   formMessage.value = ''
 }
 
-function formValue(key: string): string {
-  return values.value[key] ?? ''
-}
-
-function setValue(key: string, value: string): void {
-  values.value = { ...values.value, [key]: value }
-}
-
-function checked(key: string): boolean {
-  const value = formValue(key)
-  return value === 'on' || value === '1' || value === 'true' || value === '是'
-}
-
-function optionsFor(key: string): { value: string; label: string }[] {
-  fallbackTick.value
-  const known = pageSelectOptions(key) ?? PAGE_OPTIONS[key] ?? []
-  const current = formValue(key)
-  const extra = current && !known.some(item => item.value === current)
-    ? [{ value: current, label: isQueryGuid(current) ? '已选择' : current }]
-    : []
-  return [{ value: '', label: '不指定' }, ...extra, ...known]
-}
-
-function collected(): Record<string, string> {
-  const output: Record<string, string> = {}
-  for (const [key, value] of Object.entries(values.value)) {
-    if (value.trim()) output[key] = value.trim()
-  }
-  return output
-}
-
-async function loadTemplates(): Promise<void> {
-  if (!ready.value || !bridge) {
-    templateMessage.value = '登录后才能读取已经保存的查询。'
+async function remove(id: string): Promise<void> {
+  const profile = customers.value.find(item => item.id === id)
+  if (!profile || removingId.value) return
+  if (!window.confirm(`删除客户「${profile.name}」？绑定的查询条件和 PCT 任务会一起删掉。`)) return
+  const scope = scopeFromConnection(connection.value)
+  if (!scope) {
+    listMessage.value = '还没确认当前登录的人，没有删除。'
     return
   }
-  loadingTemplates.value = true
-  templateMessage.value = ''
-  try {
-    const response = await bridge.request({ type: MessageType.ListHistoryQueries, payload: { force: false, surface: 'file' } })
-    if (response.type !== MessageType.HistoryQueriesResult || !response.payload.ok) {
-      history.value = []
-      templateMessage.value = '账号里的查询暂时没读到。可以直接在下面填写条件。'
-      return
-    }
-    history.value = response.payload.data
-    if (response.payload.data.length === 0 && templates.value.length === 0) {
-      templateMessage.value = '还没有保存过查询。可以先到「文件查询模板」存一套，也可以直接在下面填写。'
-    }
-  } catch {
-    history.value = []
-    templateMessage.value = '账号里的查询暂时没读到。可以直接在下面填写条件。'
-  } finally {
-    loadingTemplates.value = false
+  removingId.value = id
+  listMessage.value = ''
+  const result = await call({
+    action: 'deleteCustomer',
+    id: profile.id,
+    expectedScope: scope,
+    expectedRevision: profile.revision ?? 1
+  })
+  removingId.value = ''
+  if (!result?.ok) {
+    listMessage.value = result?.message || '客户没有删除。'
+    return
   }
+  if (editingId.value === id) cancel()
+  if (sessionStorage.getItem(PENDING_CUSTOMER_KEY) === id) sessionStorage.removeItem(PENDING_CUSTOMER_KEY)
+  listMessage.value = `已删除${profile.name}。`
 }
 
-async function save(): Promise<void> {
+function openQuery(id: string, surfaceId: QuerySurfaceId | undefined): void {
+  sessionStorage.setItem(PENDING_CUSTOMER_KEY, id)
+  location.hash = querySurfaceOf(surfaceId).hash
+}
+
+async function save(goAfter: boolean): Promise<void> {
   formMessage.value = ''
-  if (!name.value.trim()) { formMessage.value = '请先填写客户称呼。'; return }
+  if (!name.value.trim()) { formMessage.value = '请先填写客户名称。'; return }
+  if (!surface.value) { formMessage.value = '请选择查询入口。'; return }
+  if (surface.value === 'limit' && workflow.value !== 'pct-reminder') { formMessage.value = '请选择工作流。'; return }
+  const styleMatches = surface.value === 'file' ? isFileMailStyle(mailStyle.value) : isLimitMailStyle(mailStyle.value)
+  if (!styleMatches) { formMessage.value = '请选择这个查询入口对应的发文模式。'; return }
+  const existing = editingId.value ? customers.value.find(item => item.id === editingId.value) : null
   const scope = editingId.value ? formScope.value : scopeFromConnection(connection.value)
   if (!scope) { formMessage.value = '还没确认当前登录的人，没有保存。'; return }
+  const id = editingId.value || `customer-${crypto.randomUUID()}`
   const now = new Date().toISOString()
+  const sameSurface = !existing || (existing.querySurface ?? 'file') === surface.value
   const result = await call({
     action: 'saveCustomer',
     profile: {
-      id: editingId.value || `customer-${crypto.randomUUID()}`,
+      id,
       name: name.value.trim(),
       ...(keptCustomerId.value ? { easyCustomerId: keptCustomerId.value } : {}),
-      baseTemplateId: templateId.value.trim() || 'manual',
-      overrides: collected(),
+      baseTemplateId: sameSurface ? (existing?.baseTemplateId || 'manual') : 'manual',
+      overrides: sameSurface ? (existing?.overrides ?? {}) : {},
+      ...(sameSurface && existing?.boundQuery ? { boundQuery: existing.boundQuery } : {}),
+      ...(sameSurface && surface.value === 'limit' && workflow.value === 'pct-reminder' && existing?.pctTask ? { pctTask: clonePctTask(existing.pctTask) } : {}),
+      querySurface: surface.value,
+      ...(surface.value === 'limit' && workflow.value ? { workflowId: workflow.value } : {}),
+      ...(surface.value === 'limit' ? { limitMailStyle: mailStyle.value as LimitMailStyle } : {}),
+      ...(surface.value === 'file' ? { fileMailStyle: mailStyle.value as FileMailStyle } : {}),
+      ...(surface.value === 'limit' && reviewChoice.value === 'self' ? { reviewTarget: 'self' as const } : {}),
       enabled: enabled.value,
       createdAt: createdAt.value || now,
       updatedAt: now,
@@ -190,108 +163,116 @@ async function save(): Promise<void> {
     ...(editingId.value ? { expectedRevision: formRevision.value } : {})
   })
   if (!result?.ok) {
-    formMessage.value = result?.message || '这套客户配置没有保存。'
+    formMessage.value = result?.message || '客户没有保存。'
+    return
+  }
+  if (goAfter) {
+    const target = surface.value
+    cancel()
+    openQuery(id, target)
     return
   }
   cancel()
-  formMessage.value = '客户配置已保存。'
+  formMessage.value = '客户已保存。查询条件要到对应的查询页里填写，再绑定回来。'
 }
 
-watch(accountEpoch, () => {
+async function loadMailTypes(force: boolean): Promise<void> {
+  if (!bridge || !ready.value) {
+    mailNodes.value = []
+    mailTypeMessage.value = '还没确认当前登录的人，发文类型还没读取。'
+    return
+  }
+  mailTypeMessage.value = '正在从原网站读取发文类型…'
+  const loaded = await fetchMailTypeNodes(bridge, force)
+  mailNodes.value = loaded.nodes
+  mailTypeMessage.value = loaded.message
+}
+
+watch(surface, (next) => {
+  const flows = workflowsFor(next)
+  if (!flows.some(item => item.id === workflow.value)) workflow.value = flows[0]?.id ?? ''
+  if (!mailStylesFor(next).some(item => item.value === mailStyle.value)) mailStyle.value = ''
+})
+watch([workflow, ready], () => {
+  if (workflow.value === 'pct-reminder' && ready.value) void loadMailTypes(false)
+}, { immediate: true })
+watch(() => connection.value.operatorId, () => {
   if (!editingId.value && !name.value) return
   cancel()
   formMessage.value = '登录的账号变了，没保存的内容已清掉。'
 })
-watch(ready, (ok) => { if (ok) void loadTemplates() })
-onMounted(() => { if (ready.value) void loadTemplates() })
-watch(() => connection.value.operatorId, userId => {
-  if (!userId) return
-  activateOptionFallback(userId)
-  void hydrateOptionFallback(userId)
-}, { immediate: true })
-onBeforeUnmount(stopFallbackWatch)
 </script>
 
 <template>
-  <PageHead title="客户管理" desc="给每位客户存一套常用查询。自动发文时选中这位客户，就会按这套条件找文件。" :art="bg('靠近成功的一步.png')" />
+  <PageHead title="客户管理" desc="先记下客户和查询入口。具体条件到对应的查询页里填写，再绑定回来。" :art="bg('靠近成功的一步.png')" />
   <section v-if="!ready" class="card"><p class="empty">还没确认当前登录的人，暂时不能保存客户。</p></section>
   <template v-else>
     <section class="card">
       <h2>已保存的客户</h2>
-      <p class="hint">这里保存的是整套客户配置。之后在发文和自动流程里，直接选这位客户就能用。</p>
-      <p v-if="customers.length === 0" class="empty">还没有保存过客户。在下面填好后保存即可。</p>
+      <p class="hint">期限监控先选工作流。PCT提醒是第一条，表格能决定的项按列走，发文模式和审核在这里选。</p>
+      <p v-if="listMessage" class="hint">{{ listMessage }}</p>
+      <p v-if="customers.length === 0" class="empty">还没有客户。在下面填好名称后保存。</p>
       <table v-else class="grid">
-        <thead><tr><th>客户</th><th>套用的查询</th><th>这位客户单独的条件</th><th>状态</th><th></th></tr></thead>
+        <thead><tr><th>客户</th><th>查询入口</th><th>工作流</th><th>发文模式</th><th>已绑定条件</th><th>状态</th><th></th></tr></thead>
         <tbody>
           <tr v-for="item in customers" :key="item.id">
             <td>{{ item.name }}</td>
-            <td>{{ templateName(item.baseTemplateId) }}</td>
-            <td>{{ describe(item.overrides) }}</td>
+            <td>{{ querySurfaceOf(item.querySurface).label }}</td>
+            <td>{{ WORKFLOWS.find(flow => flow.id === item.workflowId)?.label ?? '—' }}</td>
+            <td>{{ customerMailStyleLabel(item) }}</td>
+            <td>{{ describe(item) }}</td>
             <td>{{ item.enabled ? '启用中' : '已停用' }}</td>
-            <td><button type="button" class="ghost" @click="edit(item.id)">修改</button></td>
+            <td>
+              <button type="button" class="ghost" @click="openQuery(item.id, item.querySurface)">前往查询</button>
+              <button type="button" class="ghost" @click="edit(item.id)">修改</button>
+              <button type="button" class="ghost" :disabled="removingId === item.id" @click="remove(item.id)">{{ removingId === item.id ? '正在删除…' : '删除' }}</button>
+            </td>
           </tr>
         </tbody>
       </table>
     </section>
-    <form class="card" @submit.prevent="save">
-      <h2>{{ editingId ? '修改这套客户配置' : '保存一套客户配置' }}</h2>
+    <form class="card" @submit.prevent="save(false)">
+      <h2>{{ editingId ? '修改客户' : '添加客户' }}</h2>
       <div class="stack-form">
-        <p class="hint">客户称呼用来在发文流程里找到这位客户。下面的条件会和所选查询一起保存。</p>
-        <label>客户称呼 <input v-model="name" type="text" maxlength="80" /></label>
-        <label>套用哪套查询
-          <ThemeSelect v-model="templateId" :disabled="loadingTemplates" :options="templateChoices" />
+        <label>客户名称 <input v-model="name" type="text" maxlength="80" /></label>
+        <label>查询入口
+          <ThemeSelect :model-value="surface" :options="surfaceOptions" @update:model-value="surface = $event as QuerySurfaceId | ''" />
         </label>
-        <p v-if="loadingTemplates" class="hint">正在读取已经保存的查询…</p>
-        <p v-else-if="templateMessage" class="hint">{{ templateMessage }}</p>
-        <button type="button" class="ghost" :disabled="loadingTemplates" @click="loadTemplates">重新读取查询</button>
-      </div>
-      <div class="section-heading">
-        <strong>这位客户自己的查询条件</strong>
-      </div>
-      <p class="hint">留空的项不会单独指定。已经套用的查询仍然生效。</p>
-      <section v-for="block in formSections" :key="block.title" class="query-block">
-        <div class="section-heading">
-          <strong>{{ block.title }}</strong>
-          <button v-if="block.extra.length" type="button" class="text-button" @click="toggleExtra(block.title)">{{ openExtra[block.title] ? '收起' : '展开' }}</button>
-        </div>
-        <div class="query-grid">
-          <template v-for="(cell, index) in shownCells(block)" :key="block.title + index">
-            <label v-if="cell.kind === 'named' && optionsFor(cell.key).length > 1" class="query-cell">
-              <span>{{ cell.label }}</span>
-              <ThemeSelect :model-value="formValue(cell.key)" :options="optionsFor(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
+        <label v-if="workflowChoices.length">工作流
+          <ThemeSelect :model-value="workflow" :options="workflowChoices" @update:model-value="workflow = String($event) as WorkflowId" />
+        </label>
+        <template v-if="activeWorkflow">
+          <p class="hint">{{ activeWorkflow.label }}是第一条封装工作流。表格能决定的项按列走，这里选择表格决定不了的模式。</p>
+          <template v-for="mode in activeWorkflow.modes" :key="mode.id">
+            <label v-if="mode.id === 'mail_style'">{{ mode.label }}
+              <ThemeSelect :model-value="mailStyle" :placeholder="stylePlaceholder" :options="mode.options ?? []" @update:model-value="mailStyle = String($event)" />
             </label>
-            <label v-else-if="cell.kind === 'text' || cell.kind === 'named' || cell.kind === 'files'" :class="cell.kind === 'files' ? 'query-cell span-all' : 'query-cell'">
-              <span>{{ cell.label }}</span>
-              <input v-if="!isQueryGuid(formValue(cell.key)) && !formValue(cell.key).includes(',')" :value="formValue(cell.key)" type="text" @input="setValue(cell.key, ($event.target as HTMLInputElement).value)" />
-              <span v-else class="file-summary">已选择 <button type="button" class="text-button" @click="setValue(cell.key, '')">清除</button></span>
+            <label v-else-if="mode.id === 'review'">{{ mode.label }}
+              <ThemeSelect :model-value="reviewChoice" :options="mode.options ?? []" @update:model-value="reviewChoice = String($event)" />
             </label>
-            <label v-else-if="cell.kind === 'select'" class="query-cell">
-              <span>{{ cell.label }}</span>
-              <ThemeSelect :model-value="formValue(cell.key)" :options="optionsFor(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
-            </label>
-            <template v-else-if="cell.kind === 'download-name'"></template>
-            <div v-else-if="cell.kind === 'dates'" class="query-cell">
-              <span>{{ cell.label }}</span>
-              <span class="date-pair">
-                <input :value="formValue(cell.start)" type="text" placeholder="起" @input="setValue(cell.start, ($event.target as HTMLInputElement).value)" />
-                <em>到</em>
-                <input :value="formValue(cell.end)" type="text" placeholder="止" @input="setValue(cell.end, ($event.target as HTMLInputElement).value)" />
-                <label v-if="cell.empty" class="empty-check"><input :checked="checked(cell.empty)" type="checkbox" @change="setValue(cell.empty, ($event.target as HTMLInputElement).checked ? 'on' : '')" />为空</label>
-              </span>
+            <div v-else-if="mode.id === 'volume'" class="hint">
+              <p><strong>{{ mode.label }}</strong>：{{ mode.decidedBy }}</p>
+              <p v-if="mailTypeMessage">{{ mailTypeMessage }}</p>
+              <template v-else>
+                <p>有客户文号：{{ mailMatch.customerVolume?.name || '原网站这次没有返回这一项' }}</p>
+                <p v-if="mailMatch.ourVolumeOtherCity">{{ mailMatch.ourVolumeOtherCity.name }}</p>
+                <p>只有我方文号：{{ mailMatch.ourVolumeShenzhen?.name || '原网站这次没有返回这一项' }}</p>
+              </template>
+              <button type="button" class="text-button" @click="loadMailTypes(true)">重新读取发文类型</button>
             </div>
-            <div v-else class="query-cell span-all">
-              <span>{{ cell.label }}</span>
-              <span class="check-group">
-                <label v-for="item in cell.items" :key="item.key"><input :checked="checked(item.key)" type="checkbox" @change="setValue(item.key, ($event.target as HTMLInputElement).checked ? 'on' : '')" />{{ item.label }}</label>
-              </span>
-            </div>
+            <p v-else class="hint"><strong>{{ mode.label }}</strong>：{{ mode.decidedBy }}</p>
           </template>
-        </div>
-      </section>
-      <label class="check-line"><input v-model="enabled" type="checkbox" />以后发文时可以使用这位客户</label>
+        </template>
+        <label v-else-if="surface === 'file'">发文模式
+          <ThemeSelect :model-value="mailStyle" :placeholder="stylePlaceholder" :options="mailStylesFor(surface)" @update:model-value="mailStyle = String($event)" />
+        </label>
+        <p v-else-if="!surface" class="hint">先选查询入口。期限监控会带出已封装的工作流。</p>
+        <label class="check-line"><input v-model="enabled" type="checkbox" />以后发文时可以使用这位客户</label>
+      </div>
       <p v-if="formMessage" class="hint">{{ formMessage }}</p>
       <div class="filters">
-        <button class="solid" type="submit">保存这套配置</button>
+        <button class="solid" type="submit">保存</button>
+        <button class="solid" type="button" @click="save(true)">保存并前往查询</button>
         <button v-if="editingId" class="ghost" type="button" @click="cancel">取消</button>
       </div>
     </form>

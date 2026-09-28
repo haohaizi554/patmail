@@ -9,7 +9,7 @@ import type { QueryTemplate } from '../query/query-types'
 import { isEasyConnection, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope } from './connection'
 import { isDictionaryResult, isFileSearchApiResult, isFileSearchQuery, isHistoryDetailResult, isHistoryListResult, isLimitMonitorApiResult, isLimitMonitorQuery, isMailProcessApiResult, isMailProcessQuery, isSessionResult } from '../api/message-guards'
 import type { LimitMonitorQuery } from '../api/limit-monitor-params'
-import type { MailProcessQuery, MailProcessResult } from '../api/mail-process'
+import type { ProcessListQuery, ProcessListResult } from '../api/mail-process'
 import type { AccountReviewerList } from '../workflow/contracts'
 import type { LimitMonitorResult } from '../api/limit-monitor-types'
 import type { DictionaryLoadRequest, DictionarySnapshot } from '../api/dictionaries'
@@ -111,7 +111,7 @@ export type ContentRequest =
   | Request<'CHECK_SESSION'> | Request<'CANCEL_SESSION_CHECK'>
   | Request<'CANCEL_FILE_SEARCH'> | Response<'SEARCH_FILES', { query: FileSearchQuery; continuation?: { querySessionId: string } }>
   | Response<'SEARCH_LIMIT_MONITOR', { query: LimitMonitorQuery }>
-  | Response<'LIST_MAIL_PROCESSES', { query: MailProcessQuery }>
+  | Response<'LIST_MAIL_PROCESSES', { query: ProcessListQuery }>
   | Request<'LIST_FLOW_REVIEWERS'>
   | Response<'LIST_HISTORY_QUERIES', { force: boolean; surface?: 'file' | 'limit' }>
   | Response<'GET_HISTORY_QUERY', { queryId: string; surface?: 'file' | 'limit' }>
@@ -249,7 +249,7 @@ export type ContentResponse =
   | Response<'SESSION_CHECK_CANCELLED', { ok: true }>
   | Response<'SEARCH_FILES_RESULT', ApiResult<FileSearchResult>>
   | Response<'SEARCH_LIMIT_MONITOR_RESULT', ApiResult<LimitMonitorResult>>
-  | Response<'LIST_MAIL_PROCESSES_RESULT', ApiResult<MailProcessResult>>
+  | Response<'LIST_MAIL_PROCESSES_RESULT', ApiResult<ProcessListResult>>
   | Response<'LIST_FLOW_REVIEWERS_RESULT', ApiResult<AccountReviewerList>>
   | Response<'FILE_SEARCH_CANCELLED', { ok: true }>
   | Response<'HISTORY_QUERIES_RESULT', ApiResult<HistoryQueryOption[]>>

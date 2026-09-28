@@ -5,7 +5,7 @@ import type { HistoryQueryDetail, HistoryQueryOption } from './query-history'
 import type { FileSearchResult, PatentFile } from './file-search-types'
 import { isLimitMonitorInputField, isLimitMonitorType, type LimitMonitorQuery } from './limit-monitor-params'
 import type { LimitMonitorResult, LimitMonitorRow } from './limit-monitor-types'
-import type { MailProcessQuery, MailProcessResult, MailProcessRow } from './mail-process'
+import { isProcessKind, PROCESS_SPECS, type ProcessListQuery, type ProcessListResult, type ProcessListRow } from './mail-process'
 import type { SessionSummary } from './session'
 import type { ApiError, ApiResult } from './types'
 
@@ -115,29 +115,35 @@ export function isLimitMonitorApiResult(value: unknown): value is ApiResult<Limi
   return isApiResult(value, isLimitResult)
 }
 
-const MAIL_PROCESS_KEYS = new Set(['searchKey', 'pageIndex', 'pageSize'])
-const MAIL_PROCESS_ROW_KEYS = ['mailId', 'subject', 'mailTo', 'mailType', 'customerName', 'ownerName', 'nodeName', 'updatedAt', 'remark', 'urgency'] as const
+const MAIL_PROCESS_KEYS = new Set(['kind', 'searchKey', 'pageIndex', 'pageSize'])
 
-export function isMailProcessQuery(value: unknown): value is MailProcessQuery {
+export function isMailProcessQuery(value: unknown): value is ProcessListQuery {
   if (!isRecord(value) || Object.keys(value).some(key => !MAIL_PROCESS_KEYS.has(key))) return false
-  return typeof value.searchKey === 'string' && value.searchKey.length <= 200 &&
+  return isProcessKind(value.kind) && typeof value.searchKey === 'string' && value.searchKey.length <= 200 &&
     Number.isSafeInteger(value.pageIndex) && Number(value.pageIndex) >= 1 &&
     Number.isSafeInteger(value.pageSize) && Number(value.pageSize) >= 1 && Number(value.pageSize) <= 100
 }
 
-function isMailProcessRow(value: unknown): value is MailProcessRow {
-  return isRecord(value) && MAIL_PROCESS_ROW_KEYS.every(key => typeof value[key] === 'string')
+function isProcessListRow(value: unknown, kind: ProcessListQuery['kind']): value is ProcessListRow {
+  if (!isRecord(value) || typeof value.id !== 'string' || !isRecord(value.cells)) return false
+  if (Object.keys(value).some(key => key !== 'id' && key !== 'cells')) return false
+  const columns = PROCESS_SPECS[kind].columns
+  const cells = value.cells
+  return Object.keys(cells).length === columns.length && columns.every(column => typeof cells[column.key] === 'string')
 }
 
-function isMailProcessResult(value: unknown): value is MailProcessResult {
-  return isRecord(value) && Array.isArray(value.items) && value.items.every(isMailProcessRow) &&
+function isMailProcessResult(value: unknown): value is ProcessListResult {
+  if (!isRecord(value) || !isProcessKind(value.kind)) return false
+  const kind = value.kind
+  return Array.isArray(value.items) && value.items.every(item => isProcessListRow(item, kind)) &&
     Number.isSafeInteger(value.total) && Number(value.total) >= 0 &&
     Number.isSafeInteger(value.pageIndex) && Number(value.pageIndex) >= 1 &&
     Number.isSafeInteger(value.pageSize) && Number(value.pageSize) >= 1 &&
-    Number.isSafeInteger(value.totalPages) && Number(value.totalPages) >= 0
+    Number.isSafeInteger(value.totalPages) && Number(value.totalPages) >= 0 &&
+    Object.keys(value).every(key => ['kind', 'items', 'total', 'pageIndex', 'pageSize', 'totalPages'].includes(key))
 }
 
-export function isMailProcessApiResult(value: unknown): value is ApiResult<MailProcessResult> {
+export function isMailProcessApiResult(value: unknown): value is ApiResult<ProcessListResult> {
   return isApiResult(value, isMailProcessResult)
 }
 

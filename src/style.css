@@ -201,6 +201,8 @@ img { max-width: 100%; }
 .form-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .composer { display: block; margin-top: 12px; font-size: 13px; font-weight: 700; }
 .composer textarea { width: 100%; min-height: 88px; margin-top: 6px; border: 1px solid #eadff0; border-radius: 10px; padding: 8px 10px; resize: vertical; background: #fff; }
+.page-check { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-weight: 400; }
+.page-check input { width: 16px; height: 16px; margin: 0; }
 .card.inset { margin-top: 12px; box-shadow: none; }
 .form-grid label { font-size: 13px; font-weight: 700; }
 .form-grid input, .form-grid select { display: block; width: 100%; margin-top: 6px; }

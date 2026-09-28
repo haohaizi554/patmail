@@ -12,6 +12,7 @@ import { MessageType, type MessageBridge } from '../shared/message'
 import { useWorkspace } from '../app/composables/useWorkspace'
 
 const props = withDefaults(defineProps<{ pageOrigin?: string; showSession?: boolean }>(), { showSession: true })
+const emit = defineEmits<{ searched: [query: FileSearchQuery] }>()
 const bridge = inject<MessageBridge>('bridge')
 const workspace = useWorkspace()
 const accountOrigin = computed(() => props.pageOrigin || location.origin)
@@ -130,6 +131,7 @@ async function executeSearch(query: FileSearchQuery, run: 'start' | 'continue' =
   }
   const current = ++generation
   lastQuery.value = query
+  emit('searched', query)
   searchState.value = 'loading'
   searchMessage.value = ''
   result.value = null

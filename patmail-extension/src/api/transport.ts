@@ -8,7 +8,7 @@ export type EasyOperation =
   | 'mailCustomer' | 'mailInfoInit' | 'getMailInfo' | 'getMailFile' | 'getMailCase'
   | 'getMailRule' | 'getCustomerContact' | 'getSignature' | 'saveMailInfo' | 'saveMailRelatedFiles'
   | 'getFlowInfo' | 'getFlowHistory' | 'getUrgencyList' | 'getFlowSubmit' | 'getFlowLastStatus'
-  | 'limitMonitor' | 'mailProcess'
+  | 'limitMonitor' | 'mailProcess' | 'processAP' | 'processEF'
 
 export interface TransportOptions {
   fetcher?: typeof fetch
@@ -49,7 +49,9 @@ const ROUTES: Record<EasyOperation, { path: string; call: string }> = {
   getFlowSubmit: { path: '/AjaxServers/Common.ashx', call: 'GetFlowSubmit' },
   getFlowLastStatus: { path: '/AjaxServers/Common.ashx', call: 'GetFlowLastStatus' },
   limitMonitor: { path: '/AjaxServers/Report.ashx', call: 'GetLimitMonitorCaseList' },
-  mailProcess: { path: '/AjaxServers/Common.ashx', call: 'GetProcessByTypeCO' }
+  mailProcess: { path: '/AjaxServers/Common.ashx', call: 'GetProcessByTypeCO' },
+  processAP: { path: '/AjaxServers/Common.ashx', call: 'GetProcessByTypeAP' },
+  processEF: { path: '/AjaxServers/Common.ashx', call: 'GetProcessByTypeEF' }
 }
 
 function loginRedirect(response: Response, origin: string): boolean {
@@ -100,7 +102,7 @@ export class EasyTransport {
   /** 文件查询和期限监控在这套原网站上经常超过 15 秒。测试传入的短超时仍然生效。 */
   private waitMs(operation: EasyOperation): number {
     if (this.timeoutMs < 15_000) return this.timeoutMs
-    if (operation === 'fileSearch' || operation === 'limitMonitor' || operation === 'mailProcess') return 60_000
+    if (operation === 'fileSearch' || operation === 'limitMonitor' || operation === 'mailProcess' || operation === 'processAP' || operation === 'processEF') return 60_000
     return this.timeoutMs
   }
 

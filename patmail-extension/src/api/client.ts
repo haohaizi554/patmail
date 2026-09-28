@@ -5,7 +5,7 @@ import { DictionaryService } from './dictionaries'
 import type { DictionaryLoadRequest, DictionarySnapshot } from './dictionaries'
 import { buildGetSearchFilesFromFields, buildGetSearchFilesParams, type FileSearchQuery } from './file-search-params'
 import { buildLimitMonitorParams, type LimitMonitorQuery } from './limit-monitor-params'
-import { buildMailProcessParams, normalizeMailProcess, type MailProcessQuery, type MailProcessResult } from './mail-process'
+import { buildMailProcessParams, buildProcessListParams, normalizeMailProcess, normalizeProcessList, type ProcessKind, type ProcessListQuery, type ProcessListResult } from './mail-process'
 import { normalizeLimitMonitor } from './limit-monitor-normalizer'
 import type { LimitMonitorResult } from './limit-monitor-types'
 import { HistoryQueryService } from './query-history'
@@ -29,6 +29,12 @@ import { EasyMailReadService } from '../mail/easy/read-service'
 import type { ExistingMailDiagnostic } from '../shared/message'
 import { EasyTransport, type EasyOperation, type TransportOptions } from './transport'
 import { apiError, type ApiResult } from './types'
+
+function processOperation(kind: ProcessKind): EasyOperation {
+  if (kind === 'AP') return 'processAP'
+  if (kind === 'EF') return 'processEF'
+  return 'mailProcess'
+}
 
 export interface RuntimeOptions extends TransportOptions {
   mailStore?: ExecutionStore
@@ -333,16 +339,16 @@ export class EasyRuntime {
     })
   }
 
-  listMailProcesses(query: MailProcessQuery): Promise<ApiResult<MailProcessResult>> {
-    return (async (): Promise<ApiResult<MailProcessResult>> => {
+  listMailProcesses(query: ProcessListQuery): Promise<ApiResult<ProcessListResult>> {
+    return (async (): Promise<ApiResult<ProcessListResult>> => {
       if (!(await this.confirmAccountRead())) {
         return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
       }
-      const params = buildMailProcessParams(query)
+      const params = buildProcessListParams(query)
       if (!params.ok) return params
-      const response = await this.transport.post('mailProcess', params.data)
+      const response = await this.transport.post(processOperation(query.kind), params.data)
       if (!response.ok && response.error.code === 'SESSION_EXPIRED') this.session.expire()
-      return response.ok ? normalizeMailProcess(response.data, query) : response
+      return response.ok ? normalizeProcessList(response.data, query) : response
     })()
   }
 
