@@ -1,15 +1,16 @@
 import type { PageInfo, PageSnapshot } from './types'
 import { isPageInfo, isPageSnapshot, isRecord } from './guards'
-import { EASY_ORIGIN } from '../api/config'
+import { isEasyOrigin } from '../api/config'
 import { isCustomerProfile } from '../customer/guards'
 import type { CustomerQueryProfile } from '../customer/types'
 import type { MailRuleBundle } from '../mail/types'
 import { isQueryGuid, isQueryTemplate } from '../query/query-validator'
 import type { QueryTemplate } from '../query/query-types'
 import { isEasyConnection, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope } from './connection'
-import { isDictionaryResult, isFileSearchApiResult, isFileSearchQuery, isHistoryDetailResult, isHistoryListResult, isLimitMonitorApiResult, isLimitMonitorQuery, isMailProcessApiResult, isMailProcessQuery, isSessionResult } from '../api/message-guards'
+import { isCaseContactResult, isDictionaryResult, isFileSearchApiResult, isFileSearchQuery, isHistoryDetailResult, isHistoryListResult, isHistorySaveResult, isLimitMonitorApiResult, isLimitMonitorQuery, isMailProcessApiResult, isMailProcessQuery, isSessionResult, isVolumeList } from '../api/message-guards'
 import type { LimitMonitorQuery } from '../api/limit-monitor-params'
 import { isProcessOpenTarget, type ProcessListQuery, type ProcessListResult, type ProcessOpenTarget } from '../api/mail-process'
+import type { CaseContactExport } from '../case-contact/query'
 import type { CaseDemandAsset } from '../mail/easy/case-demand'
 import type { MailContactAsset } from '../mail/easy/mail-contacts'
 import type { AccountReviewerList } from '../workflow/contracts'
@@ -51,6 +52,8 @@ export const MessageType = {
   SearchFilesResult: 'SEARCH_FILES_RESULT',
   SearchLimitMonitor: 'SEARCH_LIMIT_MONITOR',
   SearchLimitMonitorResult: 'SEARCH_LIMIT_MONITOR_RESULT',
+  ExportCaseContacts: 'EXPORT_CASE_CONTACTS',
+  ExportCaseContactsResult: 'EXPORT_CASE_CONTACTS_RESULT',
   ListMailProcesses: 'LIST_MAIL_PROCESSES',
   ListMailProcessesResult: 'LIST_MAIL_PROCESSES_RESULT',
   OpenEasyForm: 'OPEN_EASY_FORM',
@@ -69,6 +72,8 @@ export const MessageType = {
   HistoryQueriesResult: 'HISTORY_QUERIES_RESULT',
   GetHistoryQuery: 'GET_HISTORY_QUERY',
   HistoryQueryResult: 'HISTORY_QUERY_RESULT',
+  SaveHistoryQuery: 'SAVE_HISTORY_QUERY',
+  HistoryQuerySaved: 'HISTORY_QUERY_SAVED',
   LoadDictionary: 'LOAD_DICTIONARY',
   ScanFileSearchForm: 'SCAN_FILE_SEARCH_FORM',
   FileSearchFormResult: 'FILE_SEARCH_FORM_RESULT',
@@ -122,6 +127,7 @@ export type ContentRequest =
   | Request<'CHECK_SESSION'> | Request<'CANCEL_SESSION_CHECK'>
   | Request<'CANCEL_FILE_SEARCH'> | Response<'SEARCH_FILES', { query: FileSearchQuery; continuation?: { querySessionId: string } }>
   | Response<'SEARCH_LIMIT_MONITOR', { query: LimitMonitorQuery }>
+  | Response<'EXPORT_CASE_CONTACTS', { volumes: string[] }>
   | Response<'LIST_MAIL_PROCESSES', { query: ProcessListQuery }>
   | Response<'OPEN_EASY_FORM', { target: ProcessOpenTarget }>
   | Request<'LIST_FLOW_REVIEWERS'>
@@ -130,6 +136,7 @@ export type ContentRequest =
   | Response<'READ_MAIL_ADDRESSES', { mailId: string }>
   | Response<'LIST_HISTORY_QUERIES', { force: boolean; surface?: 'file' | 'limit' }>
   | Response<'GET_HISTORY_QUERY', { queryId: string; surface?: 'file' | 'limit' }>
+  | Response<'SAVE_HISTORY_QUERY', { title: string; queryId: string; queryXml: string }>
   | Response<'LOAD_DICTIONARY', DictionaryLoadRequest>
   | Request<'SCAN_FILE_SEARCH_FORM'>
   | Response<'CREATE_EASY_MAIL', { preview: MailDraftPreview; selection: SelectionClaim; confirmed: true }>
@@ -264,6 +271,7 @@ export type ContentResponse =
   | Response<'SESSION_CHECK_CANCELLED', { ok: true }>
   | Response<'SEARCH_FILES_RESULT', ApiResult<FileSearchResult>>
   | Response<'SEARCH_LIMIT_MONITOR_RESULT', ApiResult<LimitMonitorResult>>
+  | Response<'EXPORT_CASE_CONTACTS_RESULT', ApiResult<CaseContactExport>>
   | Response<'LIST_MAIL_PROCESSES_RESULT', ApiResult<ProcessListResult>>
   | Response<'OPEN_EASY_FORM_RESULT', { ok: boolean; message: string }>
   | Response<'LIST_FLOW_REVIEWERS_RESULT', ApiResult<AccountReviewerList>>
@@ -273,6 +281,7 @@ export type ContentResponse =
   | Response<'FILE_SEARCH_CANCELLED', { ok: true }>
   | Response<'HISTORY_QUERIES_RESULT', ApiResult<HistoryQueryOption[]>>
   | Response<'HISTORY_QUERY_RESULT', ApiResult<HistoryQueryDetail>>
+  | Response<'HISTORY_QUERY_SAVED', ApiResult<{ saved: true }>>
   | Response<'DICTIONARY_RESULT', ApiResult<DictionarySnapshot>>
   | Response<'FILE_SEARCH_FORM_RESULT', { fields: FileSearchFormField[] }>
   | Response<'MAIL_EXECUTION_RESULT', { view: MailExecutionView | null }>
@@ -379,6 +388,13 @@ export function isMessage(value: unknown): value is AppMessage {
       return isRecord(value.payload) && typeof value.payload.queryId === 'string' &&
         (value.payload.surface === undefined || value.payload.surface === 'file' || value.payload.surface === 'limit') &&
         Object.keys(value.payload).every(key => key === 'queryId' || key === 'surface')
+    case MessageType.SaveHistoryQuery:
+      return isRecord(value.payload) && typeof value.payload.title === 'string' && value.payload.title.trim().length > 0 &&
+        value.payload.title.length <= 80 && typeof value.payload.queryId === 'string' &&
+        (value.payload.queryId === '' || isQueryGuid(value.payload.queryId)) &&
+        typeof value.payload.queryXml === 'string' && value.payload.queryXml.length <= 200_000 &&
+        value.payload.queryXml.startsWith('<xmlRoot>') && value.payload.queryXml.endsWith('</xmlRoot>') &&
+        !/<!DOCTYPE|<!ENTITY/i.test(value.payload.queryXml) && Object.keys(value.payload).length === 3
     case MessageType.LoadDictionary:
       return isDictionaryRequest(value.payload)
     case MessageType.ScanFileSearchForm:
@@ -452,6 +468,8 @@ export function isMessage(value: unknown): value is AppMessage {
         (Object.keys(value.payload).length === 1 || (Object.keys(value.payload).length === 2 && value.payload.continuation !== undefined))
     case MessageType.SearchLimitMonitor:
       return isRecord(value.payload) && isLimitMonitorQuery(value.payload.query) && Object.keys(value.payload).length === 1
+    case MessageType.ExportCaseContacts:
+      return isRecord(value.payload) && isVolumeList(value.payload.volumes) && Object.keys(value.payload).length === 1
     case MessageType.ListMailProcesses:
       return isRecord(value.payload) && isMailProcessQuery(value.payload.query) && Object.keys(value.payload).length === 1
     case MessageType.OpenEasyForm:
@@ -474,6 +492,8 @@ export function isMessage(value: unknown): value is AppMessage {
       return isFileSearchApiResult(value.payload)
     case MessageType.SearchLimitMonitorResult:
       return isLimitMonitorApiResult(value.payload)
+    case MessageType.ExportCaseContactsResult:
+      return isCaseContactResult(value.payload)
     case MessageType.ListMailProcessesResult:
       return isMailProcessApiResult(value.payload)
     case MessageType.ListFlowReviewersResult:
@@ -488,6 +508,8 @@ export function isMessage(value: unknown): value is AppMessage {
       return isHistoryListResult(value.payload)
     case MessageType.HistoryQueryResult:
       return isHistoryDetailResult(value.payload)
+    case MessageType.HistoryQuerySaved:
+      return isHistorySaveResult(value.payload)
     case MessageType.DictionaryResult:
       return isDictionaryResult(value.payload)
     case MessageType.FileSearchFormResult:
@@ -527,12 +549,14 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.CheckSession || value.type === MessageType.CancelSessionCheck ||
     value.type === MessageType.SearchFiles || value.type === MessageType.CancelFileSearch ||
     value.type === MessageType.SearchLimitMonitor || value.type === MessageType.ListMailProcesses ||
+    value.type === MessageType.ExportCaseContacts ||
     value.type === MessageType.OpenEasyForm ||
     value.type === MessageType.ListFlowReviewers ||
     value.type === MessageType.ReadCaseDemands ||
     value.type === MessageType.ReadMailContacts ||
     value.type === MessageType.ReadMailAddresses ||
     value.type === MessageType.ListHistoryQueries || value.type === MessageType.GetHistoryQuery ||
+    value.type === MessageType.SaveHistoryQuery ||
     value.type === MessageType.LoadDictionary || value.type === MessageType.ScanFileSearchForm || value.type === MessageType.CreateEasyMail ||
     value.type === MessageType.SaveEasyMail || value.type === MessageType.FindMailExecution ||
     value.type === MessageType.InspectEasyMail || value.type === MessageType.ReadWorkflow ||
@@ -542,7 +566,7 @@ export function isContentRequest(value: unknown): value is ContentRequest {
   )
 }
 
-const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'SEARCH_LIMIT_MONITOR', 'LIST_MAIL_PROCESSES', 'OPEN_EASY_FORM', 'LIST_FLOW_REVIEWERS', 'READ_CASE_DEMANDS', 'READ_MAIL_CONTACTS', 'READ_MAIL_ADDRESSES', 'GET_PAGE_INFO', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
+const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'SEARCH_LIMIT_MONITOR', 'EXPORT_CASE_CONTACTS', 'LIST_MAIL_PROCESSES', 'OPEN_EASY_FORM', 'LIST_FLOW_REVIEWERS', 'READ_CASE_DEMANDS', 'READ_MAIL_CONTACTS', 'READ_MAIL_ADDRESSES', 'GET_PAGE_INFO', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'SAVE_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
 const WRITE_FORWARD = new Set(['CREATE_EASY_MAIL', 'SAVE_EASY_MAIL'])
 
 /** 消息校验和后台派发共用同一份许可。创建和保存还要看前端写开关。 */
@@ -559,7 +583,7 @@ function isSearchContinuation(value: unknown): boolean {
 }
 
 function isExpectedScope(value: unknown): value is ExpectedAccountScope {
-  return isRecord(value) && value.easyOrigin === EASY_ORIGIN && typeof value.operatorId === 'string' && isQueryGuid(value.operatorId) &&
+  return isRecord(value) && typeof value.easyOrigin === 'string' && isEasyOrigin(value.easyOrigin) && typeof value.operatorId === 'string' && isQueryGuid(value.operatorId) &&
     typeof value.easyTabId === 'number' && Number.isInteger(value.easyTabId) &&
     typeof value.connectionVersion === 'number' && Number.isInteger(value.connectionVersion) && value.connectionVersion >= 0
 }
@@ -626,7 +650,7 @@ function isCreatedTask(value: unknown): boolean {
 }
 
 function isEasyTab(value: unknown): value is EasyTabCandidate {
-  return isRecord(value) && typeof value.id === 'number' && typeof value.title === 'string' && typeof value.url === 'string' && value.origin === EASY_ORIGIN
+  return isRecord(value) && typeof value.id === 'number' && typeof value.title === 'string' && typeof value.url === 'string' && typeof value.origin === 'string' && isEasyOrigin(value.origin)
 }
 
 function isRuleBundle(value: unknown): value is MailRuleBundle {

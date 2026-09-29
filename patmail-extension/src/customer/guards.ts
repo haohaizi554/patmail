@@ -2,6 +2,7 @@ import { isFileSearchBusinessField } from '../api/file-search-params'
 import { isForbiddenFieldName } from '../query/field-registry'
 import { isQueryGuid } from '../query/query-validator'
 import { isBoundQuery, isFileMailStyle, isLimitMailStyle, isQuerySurface, isWorkflowId } from './mail-flow'
+import { isCustomerSkill } from './skills'
 import type { CustomerQueryProfile, PctTaskDraft, PctTaskRow } from './types'
 
 export function isCustomerProfile(value: unknown): value is CustomerQueryProfile {
@@ -16,13 +17,17 @@ export function isCustomerProfile(value: unknown): value is CustomerQueryProfile
   if (typeof profile.createdAt !== 'string' || typeof profile.updatedAt !== 'string') return false
   if (profile.querySurface !== undefined && !isQuerySurface(profile.querySurface)) return false
   if (profile.workflowId !== undefined && !isWorkflowId(profile.workflowId)) return false
+  if (profile.workflowRemark !== undefined && (typeof profile.workflowRemark !== 'string' || profile.workflowRemark.length > 40)) return false
   if (profile.limitMailStyle !== undefined && !isLimitMailStyle(profile.limitMailStyle)) return false
   if (profile.fileMailStyle !== undefined && !isFileMailStyle(profile.fileMailStyle)) return false
   if (profile.reviewTarget !== undefined && profile.reviewTarget !== 'self') return false
+  if (profile.reviewerId !== undefined && (typeof profile.reviewerId !== 'string' || !isQueryGuid(profile.reviewerId))) return false
+  if (profile.reviewerName !== undefined && (typeof profile.reviewerName !== 'string' || !profile.reviewerName.trim() || profile.reviewerName.length > 80)) return false
   if (profile.mailsetId !== undefined && (typeof profile.mailsetId !== 'string' || !isQueryGuid(profile.mailsetId))) return false
   if (profile.mailsetLabel !== undefined && (typeof profile.mailsetLabel !== 'string' || profile.mailsetLabel.length > 160)) return false
   if (profile.boundQuery !== undefined && !isBoundQuery(profile.boundQuery)) return false
   if (profile.pctTask !== undefined && !isPctTask(profile.pctTask)) return false
+  if (profile.skills !== undefined && (!Array.isArray(profile.skills) || profile.skills.length > 4 || !profile.skills.every(isCustomerSkill))) return false
   if (profile.overrides === null || typeof profile.overrides !== 'object' || Array.isArray(profile.overrides)) return false
   for (const key of Object.keys(profile.overrides as object)) {
     const raw = (profile.overrides as Record<string, unknown>)[key]

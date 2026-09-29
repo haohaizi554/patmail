@@ -3,6 +3,7 @@ import { computed, inject, ref, watch } from 'vue'
 import LimitPage from '../../../../src/pages/LimitPage.vue'
 import LimitQuerySection from '../../floating/LimitQuerySection.vue'
 import BindQueryBar from '../components/BindQueryBar.vue'
+import EmptyGuide from '../components/EmptyGuide.vue'
 import type { LimitMonitorResult, LimitMonitorRow } from '../../api/limit-monitor-types'
 import { isLimitMonitorType, type LimitMonitorQuery } from '../../api/limit-monitor-params'
 import { PENDING_CUSTOMER_KEY, applyBoundQuery, matchPctMailTypes, querySnapshot } from '../../customer/mail-flow'
@@ -348,6 +349,11 @@ function chooseSender(value: string): void {
   mailsetId.value = value
 }
 
+function useDefaultSender(): void {
+  senderTouched.value = false
+  mailsetId.value = workflowMailbox.value?.id || rules.value?.defaultSender?.mailsetId || ''
+}
+
 function writeActive(field: 'mailTo' | 'mailCc', value: string): void {
   const volume = activeVolume.value
   if (!volume) return
@@ -610,12 +616,13 @@ async function createTask(): Promise<void> {
         <p class="hint">传入 xlsx 后，按表格里的处理事项到原网站对上，再用我方文号查询。</p>
         <p v-if="mailTypeMessage" class="hint">{{ mailTypeMessage }}</p>
         <p v-if="pctCustomer" class="hint">当前客户：{{ pctCustomer.name }}<template v-if="pctCustomer.pctTask">。已有任务：{{ summarizePctTask(pctCustomer.pctTask) }}</template></p>
-        <p v-else class="hint">还没有选择 PCT提醒 的客户。</p>
+        <EmptyGuide v-else text="还没有走 PCT提醒 的客户。去客户管理建一个，查询入口选期限监控，工作流选 PCT提醒。" action="去创建客户" hash="/customers" />
         <div class="pct-sheet">
           <div class="pct-sheet-side">
             <label>发件人
-              <ThemeSelect :model-value="mailsetId" placeholder="选择发件邮箱" :options="mailsetOptions" @update:model-value="chooseSender(String($event))" />
+              <ThemeSelect :model-value="mailsetId" placeholder="选择发件邮箱" empty-text="发件邮箱还没读到。点下面的重新读取。" :options="mailsetOptions" @update:model-value="chooseSender(String($event))" />
             </label>
+            <button type="button" class="text-button" @click="useDefaultSender">使用默认</button>
             <div class="sheet-pick">
               <button class="ghost" type="button" :disabled="loading || savingTask" @click="sheetInput?.click()">选择表格</button>
               <span class="name">{{ sheetFileName || '尚未选择' }}</span>
@@ -628,7 +635,7 @@ async function createTask(): Promise<void> {
               <button class="ghost" type="button" :disabled="loading || savingTask" @click="querySheet('batch')">所有文号一起查询</button>
               <button class="ghost" type="button" :disabled="loading || savingTask" @click="querySheet('each')">逐个文号查询</button>
             </div>
-            <p class="hint">没改的话用发文规则里保存的默认发件人。这里改一次，会记在这次任务上，并记住到这个客户。</p>
+            <p class="hint">没改的话用发文映射里保存的默认发件人。这里改一次，会记在这次任务上，并记住到这个客户。</p>
             <p v-if="!senderTouched && !pctCustomer?.mailsetId && workflowMailbox && mailsetId === workflowMailbox.id" class="hint">当前沿用工作流里选的：{{ workflowMailbox.label }}</p>
             <p v-else-if="!senderTouched && !pctCustomer?.mailsetId && rules?.defaultSender && mailsetId === rules.defaultSender.mailsetId" class="hint">当前沿用默认：{{ rules.defaultSender.label }}</p>
             <p v-if="mailsetMessage" class="hint">{{ mailsetMessage }}</p>

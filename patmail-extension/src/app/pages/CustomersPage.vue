@@ -4,6 +4,7 @@ import PageHead from '../../../../src/components/PageHead.vue'
 import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
 import { bg } from '../../../../src/assets'
 import { fieldLabel } from '../../query/field-registry'
+import { caseContactSkills, hasCaseContactSkill, rememberCaseContactCustomer, unlocksCaseContacts } from '../../customer/skills'
 import { isQueryGuid } from '../../query/query-validator'
 import { clonePctTask } from '../../customer/pct-sheet'
 import {
@@ -22,7 +23,7 @@ import {
 import { fetchMailTypeNodes } from '../../customer/mail-type-load'
 import { fetchMailSenders } from '../../customer/mailset-load'
 import type { MailSender } from '../../customer/mailset'
-import type { MessageBridge } from '../../shared/message'
+import { MessageType, type MessageBridge } from '../../shared/message'
 import type { FileMailStyle, LimitMailStyle, QuerySurfaceId, WorkflowId } from '../../customer/types'
 import { scopeFromConnection, type ExpectedAccountScope } from '../../shared/connection'
 import { packagedPctWorkflow, pctRuntimeFrom, workflowSender } from '../../workflow/catalog'
@@ -31,7 +32,8 @@ import { useWorkflowCatalog } from '../composables/useWorkflowCatalog'
 import { useWorkspace } from '../composables/useWorkspace'
 
 const bridge = inject<MessageBridge>('bridge')
-const { connection, customers, call } = useWorkspace()
+const { connection, customers, rules, call } = useWorkspace()
+const contactCustomers = computed(() => customers.value.filter(hasCaseContactSkill))
 const { catalog } = useWorkflowCatalog()
 const mailNodes = ref<Array<{ id: string; name: string }>>([])
 const mailTypeMessage = ref('正在从原网站读取发文类型…')
@@ -54,7 +56,10 @@ const name = ref('')
 const surface = ref<QuerySurfaceId | ''>('')
 const workflow = ref<WorkflowId | ''>('')
 const mailStyle = ref('')
-const reviewChoice = ref('self')
+const workflowRemark = ref('')
+const reviewChoice = ref('')
+const reviewers = ref<Array<{ id: string; name: string }>>([])
+const reviewerMessage = ref('')
 const enabled = ref(true)
 const editingId = ref('')
 const createdAt = ref('')
@@ -70,6 +75,14 @@ const stylePlaceholder = computed(() => surface.value ? '请选择发文模式' 
 const pctDefinition = computed(() => catalog.value.workflows.find(item => item.id === 'pct-reminder') ?? null)
 const pctRuntime = computed(() => pctRuntimeFrom(pctDefinition.value))
 const workflowMailbox = computed(() => workflowSender(pctDefinition.value))
+const defaultSender = computed(() => {
+  const flow = workflowMailbox.value
+  if (flow) return { id: flow.id, label: flow.label }
+  const saved = rules.value?.defaultSender
+  if (saved?.mailsetId) return { id: saved.mailsetId, label: saved.label }
+  return null
+})
+const defaultStyle = computed(() => surface.value === 'file' ? 'merge_by_customer_description' : '1')
 const pctName = computed(() => pctDefinition.value?.label || 'PCT提醒')
 const mailMatch = computed(() => matchPctMailTypes(mailNodes.value, pctRuntime.value))
 
@@ -81,6 +94,68 @@ watch(workflowMailbox, (sender) => {
 function chooseSender(value: string): void {
   senderTouched.value = true
   mailsetId.value = value
+}
+function useDefaultSender(): void {
+  const next = defaultSender.value
+  if (!next) {
+    formMessage.value = '还没有默认发件人。到发文映射里设一个，或在工作流里选好邮箱。'
+    return
+  }
+  senderTouched.value = false
+  mailsetId.value = next.id
+  formMessage.value = ''
+}
+function useDefaultStyle(): void {
+  mailStyle.value = defaultStyle.value
+}
+function samePerson(id: string): boolean {
+  const operator = connection.value.operatorId
+  return Boolean(operator) && id.toLowerCase() === operator.toLowerCase()
+}
+function reviewerLabel(item: { id: string; name: string }): string {
+  return samePerson(item.id) ? `${item.name}（当前账号）` : item.name
+}
+const reviewerOptions = computed(() => {
+  const items = reviewers.value.map(item => ({ value: item.id, label: reviewerLabel(item) }))
+  if (reviewChoice.value && !items.some(item => item.value.toLowerCase() === reviewChoice.value.toLowerCase())) {
+    const saved = customers.value.find(item => item.reviewerId?.toLowerCase() === reviewChoice.value.toLowerCase())
+    items.unshift({ value: reviewChoice.value, label: saved?.reviewerName || '已保存的审核人' })
+  }
+  return items
+})
+const pickedReviewerName = computed(() => reviewers.value.find(item => item.id.toLowerCase() === reviewChoice.value.toLowerCase())?.name
+  || customers.value.find(item => item.reviewerId?.toLowerCase() === reviewChoice.value.toLowerCase())?.reviewerName
+  || '')
+function useDefaultReview(): void {
+  const self = reviewers.value.find(item => samePerson(item.id))
+  if (!self) {
+    formMessage.value = '人员名单里还没有当前登录人。点重新读取审核人。'
+    return
+  }
+  reviewChoice.value = self.id
+  formMessage.value = ''
+}
+async function loadReviewers(force: boolean): Promise<void> {
+  if (!bridge || !ready.value) return
+  reviewerMessage.value = '正在读取审核人…'
+  const response = await bridge.request({ type: MessageType.LoadDictionary, payload: { kind: 'reviewer', force } })
+  if (response.type !== MessageType.DictionaryResult || !response.payload.ok || response.payload.data.kind !== 'reviewer') {
+    reviewers.value = []
+    reviewerMessage.value = response.type === MessageType.DictionaryResult && !response.payload.ok
+      ? response.payload.error.message
+      : '审核人没有读到。'
+    return
+  }
+  reviewers.value = response.payload.data.reviewers
+  reviewerMessage.value = reviewers.value.length ? '' : '原网站没有返回审核人。'
+  if (!reviewChoice.value) {
+    const self = reviewers.value.find(item => samePerson(item.id))
+    if (self) reviewChoice.value = self.id
+  }
+}
+function writeRemark(id: string): void {
+  edit(id)
+  formMessage.value = '在下面的备注里写一句，再点保存。同一客户有多条工作流时靠这句分辨。'
 }
 const workflowChoices = computed(() => workflowsFor(surface.value).map(item => ({
   value: item.id,
@@ -108,7 +183,8 @@ function edit(id: string): void {
   surface.value = profile.querySurface ?? 'file'
   workflow.value = profile.workflowId ?? (surface.value === 'limit' ? 'pct-reminder' : '')
   mailStyle.value = (surface.value === 'limit' ? profile.limitMailStyle : profile.fileMailStyle) ?? ''
-  reviewChoice.value = profile.reviewTarget ?? 'self'
+  workflowRemark.value = profile.workflowRemark ?? ''
+  reviewChoice.value = profile.reviewerId || (profile.reviewTarget === 'self' ? connection.value.operatorId : '') || connection.value.operatorId
   senderTouched.value = true
   mailsetId.value = profile.mailsetId ?? ''
   enabled.value = profile.enabled
@@ -119,13 +195,25 @@ function edit(id: string): void {
   formMessage.value = ''
 }
 
+function saveAnother(): void {
+  if (!workflowRemark.value.trim()) {
+    formMessage.value = '同一客户再存一条时，先写备注，发文任务里才能分辨。'
+    return
+  }
+  editingId.value = ''
+  createdAt.value = ''
+  formRevision.value = 0
+  void save(false)
+}
+
 function cancel(): void {
   editingId.value = ''
   name.value = ''
   surface.value = ''
   workflow.value = ''
+  workflowRemark.value = ''
   mailStyle.value = ''
-  reviewChoice.value = 'self'
+  reviewChoice.value = connection.value.operatorId || ''
   senderTouched.value = false
   mailsetId.value = workflowMailbox.value?.id ?? ''
   enabled.value = true
@@ -172,6 +260,11 @@ function openQuery(id: string, surfaceId: QuerySurfaceId | undefined): void {
   location.hash = querySurfaceOf(surfaceId).hash
 }
 
+function openContacts(id: string): void {
+  rememberCaseContactCustomer(id)
+  location.hash = '/contacts'
+}
+
 async function save(goAfter: boolean): Promise<void> {
   formMessage.value = ''
   if (!name.value.trim()) { formMessage.value = '请先填写客户名称。'; return }
@@ -179,7 +272,11 @@ async function save(goAfter: boolean): Promise<void> {
   if (surface.value === 'limit' && workflow.value !== 'pct-reminder') { formMessage.value = '请选择工作流。'; return }
   const styleMatches = surface.value === 'file' ? isFileMailStyle(mailStyle.value) : isLimitMailStyle(mailStyle.value)
   if (!styleMatches) { formMessage.value = '请选择这个查询入口对应的发文模式。'; return }
+  const remark = workflowRemark.value.trim().slice(0, 40)
+  const twin = customers.value.find(item => item.id !== editingId.value && item.name.trim() === name.value.trim() && (item.workflowId ?? '') === (workflow.value || '') && (item.workflowRemark ?? '') === remark)
+  if (twin) { formMessage.value = '已经有一条一样的客户、工作流和备注。换一句备注再存。'; return }
   const existing = editingId.value ? customers.value.find(item => item.id === editingId.value) : null
+  const skills = caseContactSkills(name.value, existing?.skills)
   const scope = editingId.value ? formScope.value : scopeFromConnection(connection.value)
   if (!scope) { formMessage.value = '还没确认当前登录的人，没有保存。'; return }
   const pickedSender = mailsets.value.find(item => item.id === mailsetId.value)
@@ -199,10 +296,16 @@ async function save(goAfter: boolean): Promise<void> {
       ...(sameSurface && surface.value === 'limit' && workflow.value === 'pct-reminder' && existing?.pctTask ? { pctTask: clonePctTask(existing.pctTask) } : {}),
       querySurface: surface.value,
       ...(surface.value === 'limit' && workflow.value ? { workflowId: workflow.value } : {}),
+      ...(remark ? { workflowRemark: remark } : {}),
       ...(surface.value === 'limit' ? { limitMailStyle: mailStyle.value as LimitMailStyle } : {}),
       ...(surface.value === 'file' ? { fileMailStyle: mailStyle.value as FileMailStyle } : {}),
-      ...(surface.value === 'limit' && reviewChoice.value === 'self' ? { reviewTarget: 'self' as const } : {}),
+      ...(surface.value === 'limit' && isQueryGuid(reviewChoice.value) && pickedReviewerName.value ? {
+        reviewerId: reviewChoice.value,
+        reviewerName: pickedReviewerName.value,
+        ...(samePerson(reviewChoice.value) ? { reviewTarget: 'self' as const } : {})
+      } : {}),
       ...(pickedSender ? { mailsetId: pickedSender.id, mailsetLabel: pickedSender.label } : {}),
+      ...(skills ? { skills } : {}),
       enabled: enabled.value,
       createdAt: createdAt.value || now,
       updatedAt: now,
@@ -258,6 +361,7 @@ watch([workflow, ready], () => {
   if (workflow.value === 'pct-reminder' && ready.value) {
     void loadMailTypes(false)
     void loadMailSets(false)
+    void loadReviewers(false)
   }
 }, { immediate: true })
 watch(() => connection.value.operatorId, () => {
@@ -269,25 +373,32 @@ watch(() => connection.value.operatorId, () => {
 
 <template>
   <PageHead title="客户管理" desc="先记下客户和查询入口。具体条件到对应的查询页里填写，再绑定回来。" :art="bg('靠近成功的一步.png')" />
+  <section v-for="item in contactCustomers" :key="item.id" class="card pcl-card">
+    <h2>{{ item.name }}</h2>
+    <p class="hint">创建这家客户后已打开。按客户案号导出技术负责人和第一发明人邮箱。</p>
+    <button type="button" class="solid" @click="openContacts(item.id)">导出联系人</button>
+  </section>
   <section v-if="!ready" class="card"><p class="empty">还没确认当前登录的人，暂时不能保存客户。</p></section>
   <template v-else>
     <section class="card">
       <h2>已保存的客户</h2>
-      <p class="hint">期限监控先选工作流。{{ pctName }}是第一条，表格能决定的项按列走，发文模式和审核在这里选。</p>
+      <p class="hint">点「绑定查询」到查询页填好条件再绑定回来。点「写备注」在下面写一句，用来区分同一客户的多条工作流。</p>
       <p v-if="listMessage" class="hint">{{ listMessage }}</p>
       <p v-if="customers.length === 0" class="empty">还没有客户。在下面填好名称后保存。</p>
       <table v-else class="grid">
-        <thead><tr><th>客户</th><th>查询入口</th><th>工作流</th><th>发文模式</th><th>已绑定条件</th><th>状态</th><th></th></tr></thead>
+        <thead><tr><th>客户</th><th>查询入口</th><th>工作流</th><th>备注</th><th>发文模式</th><th>记住的查询</th><th>状态</th><th></th></tr></thead>
         <tbody>
           <tr v-for="item in customers" :key="item.id">
             <td>{{ item.name }}</td>
             <td>{{ querySurfaceOf(item.querySurface).label }}</td>
             <td>{{ item.workflowId === 'pct-reminder' ? pctName : (WORKFLOWS.find(flow => flow.id === item.workflowId)?.label ?? '—') }}</td>
+            <td>{{ item.workflowRemark || '—' }}</td>
             <td>{{ customerMailStyleLabel(item) }}</td>
-            <td>{{ describe(item) }}</td>
+            <td :title="describe(item)">{{ describe(item) }}</td>
             <td>{{ item.enabled ? '启用中' : '已停用' }}</td>
             <td>
-              <button type="button" class="ghost" @click="openQuery(item.id, item.querySurface)">前往查询</button>
+              <button type="button" class="ghost" @click="openQuery(item.id, item.querySurface)">绑定查询</button>
+              <button type="button" class="ghost" @click="writeRemark(item.id)">写备注</button>
               <button type="button" class="ghost" @click="edit(item.id)">修改</button>
               <button type="button" class="ghost" :disabled="removingId === item.id" @click="remove(item.id)">{{ removingId === item.id ? '正在删除…' : '删除' }}</button>
             </td>
@@ -299,25 +410,41 @@ watch(() => connection.value.operatorId, () => {
       <h2>{{ editingId ? '修改客户' : '添加客户' }}</h2>
       <div class="stack-form">
         <label>客户名称 <input v-model="name" type="text" maxlength="80" /></label>
+        <p v-if="unlocksCaseContacts(name)" class="hint">保存「鹏城实验室」后，会打开导出联系人。别的客户没有这项。</p>
         <label>查询入口
           <ThemeSelect :model-value="surface" placeholder="请选择查询入口" :options="surfaceOptions" @update:model-value="surface = $event as QuerySurfaceId | ''" />
         </label>
         <label v-if="workflowChoices.length">工作流
           <ThemeSelect :model-value="workflow" :options="workflowChoices" @update:model-value="workflow = String($event) as WorkflowId" />
         </label>
+        <label v-if="workflow">备注
+          <input v-model="workflowRemark" type="text" maxlength="40" placeholder="同一客户有多条时写一句，方便分辨" />
+        </label>
         <template v-if="activeWorkflow">
-          <p class="hint">{{ activeWorkflow.label }}是第一条封装工作流。表格能决定的项按列走，这里选择表格决定不了的模式。</p>
+          <p class="hint">{{ activeWorkflow.label }}里，表格能决定的项按列走。这里选择表格决定不了的模式。</p>
           <template v-for="mode in activeWorkflow.modes" :key="mode.id">
-            <label v-if="mode.id === 'mail_style'">{{ mode.label }}
-              <ThemeSelect :model-value="mailStyle" :placeholder="stylePlaceholder" :options="mode.options ?? []" @update:model-value="mailStyle = String($event)" />
-            </label>
-            <label v-else-if="mode.id === 'review'">{{ mode.label }}
-              <ThemeSelect :model-value="reviewChoice" :options="mode.options ?? []" @update:model-value="reviewChoice = String($event)" />
-            </label>
+            <div v-if="mode.id === 'mail_style'">
+              <label>{{ mode.label }}
+                <ThemeSelect :model-value="mailStyle" :placeholder="stylePlaceholder" :options="mode.options ?? []" @update:model-value="mailStyle = String($event)" />
+              </label>
+              <button type="button" class="text-button" @click="useDefaultStyle">使用默认</button>
+              <p v-if="mailStyle === defaultStyle" class="hint">当前就是默认：同客户合并发文。</p>
+            </div>
+            <div v-else-if="mode.id === 'review'">
+              <label>审核
+                <ThemeSelect :model-value="reviewChoice" placeholder="选择审核人" empty-text="审核人还没读到。点下面的重新读取。" :options="reviewerOptions" @update:model-value="reviewChoice = String($event)" />
+              </label>
+              <button type="button" class="text-button" @click="useDefaultReview">使用默认</button>
+              <p v-if="pickedReviewerName && samePerson(reviewChoice)" class="hint">当前就是默认：{{ pickedReviewerName }}（当前账号）</p>
+              <p v-if="reviewerMessage" class="hint">{{ reviewerMessage }}</p>
+              <button type="button" class="text-button" @click="loadReviewers(true)">重新读取审核人</button>
+            </div>
             <div v-else-if="mode.id === 'from'">
               <label>{{ mode.label }}
-                <ThemeSelect :model-value="mailsetId" placeholder="选择发件邮箱" :options="mailsetOptions" @update:model-value="chooseSender(String($event))" />
+                <ThemeSelect :model-value="mailsetId" placeholder="选择发件邮箱" empty-text="发件邮箱还没读到。点下面的重新读取。" :options="mailsetOptions" @update:model-value="chooseSender(String($event))" />
               </label>
+              <button type="button" class="text-button" @click="useDefaultSender">使用默认</button>
+              <p v-if="defaultSender && mailsetId === defaultSender.id" class="hint">当前就是默认：{{ defaultSender.label }}</p>
               <p v-if="mailsetMessage" class="hint">{{ mailsetMessage }}</p>
               <button type="button" class="text-button" @click="loadMailSets(true)">重新读取发件邮箱</button>
             </div>
@@ -333,9 +460,13 @@ watch(() => connection.value.operatorId, () => {
             <p v-else class="hint"><strong>{{ mode.label }}</strong>：{{ mode.decidedBy }}</p>
           </template>
         </template>
-        <label v-else-if="surface === 'file'">发文模式
-          <ThemeSelect :model-value="mailStyle" :placeholder="stylePlaceholder" :options="mailStylesFor(surface)" @update:model-value="mailStyle = String($event)" />
-        </label>
+        <div v-else-if="surface === 'file'">
+          <label>发文模式
+            <ThemeSelect :model-value="mailStyle" :placeholder="stylePlaceholder" :options="mailStylesFor(surface)" @update:model-value="mailStyle = String($event)" />
+          </label>
+          <button type="button" class="text-button" @click="useDefaultStyle">使用默认</button>
+          <p v-if="mailStyle === defaultStyle" class="hint">当前就是默认：同客户合并发文。</p>
+        </div>
         <p v-else-if="!surface" class="hint">先选查询入口。期限监控会带出已封装的工作流。</p>
       </div>
       <p v-if="formMessage" class="hint">{{ formMessage }}</p>
@@ -343,6 +474,7 @@ watch(() => connection.value.operatorId, () => {
         <label class="check-line"><input v-model="enabled" type="checkbox" />以后发文时可以使用这位客户</label>
         <div class="filters">
           <button class="solid" type="submit">保存</button>
+          <button v-if="editingId && surface === 'limit'" class="ghost" type="button" @click="saveAnother">另存为另一条</button>
           <button class="solid" type="button" @click="save(true)">保存并前往查询</button>
           <button v-if="editingId" class="ghost" type="button" @click="cancel">取消</button>
         </div>

@@ -8,6 +8,7 @@ import type { BindReviewGroup } from '../mail/selection'
 import MailWorkspace from './MailWorkspace.vue'
 import QueryTemplateSection from './QueryTemplateSection.vue'
 import ThemeSelect from '../../../src/components/ThemeSelect.vue'
+import EmptyGuide from '../app/components/EmptyGuide.vue'
 import { MessageType, type MessageBridge } from '../shared/message'
 import { useWorkspace } from '../app/composables/useWorkspace'
 
@@ -35,6 +36,8 @@ const showSelected = ref(false)
 const showMail = ref(false)
 const bindProfileId = ref('')
 const bindCustomers = ref<Array<{ id: string; name: string }>>([])
+const savedCustomers = computed(() => workspace.customers.value.map(item => ({ id: item.id, name: item.name })))
+const bindOptions = computed(() => bindCustomers.value.length ? bindCustomers.value : savedCustomers.value)
 const bindReview = ref<BindReviewGroup[]>([])
 const acceptedSources = ref<Record<string, boolean>>({})
 let generation = 0
@@ -283,8 +286,9 @@ onBeforeUnmount(() => {
             <strong>{{ file.fileName }}</strong>
             <p class="hint">{{ file.fileDescription || '缺少文件描述' }} · {{ file.customerName || '缺少客户' }} · {{ file.caseVolume || '无文号' }}</p>
           </article>
-          <label>绑定到已有客户配置
-            <ThemeSelect v-model="bindProfileId" placeholder="选择客户配置" :options="bindCustomers.map(item => ({ value: item.id, label: item.name }))" @open="loadBindCustomers" />
+          <EmptyGuide v-if="savedCustomers.length === 0" text="还没有客户，选中的文件没法绑定。去客户管理建一个再回来。" action="去创建客户" hash="/customers" />
+          <label v-else>绑定到已有客户配置
+            <ThemeSelect v-model="bindProfileId" placeholder="选择客户配置" :options="bindOptions.map(item => ({ value: item.id, label: item.name }))" @open="loadBindCustomers" />
           </label>
           <button type="button" class="text-button" :disabled="!bindProfileId" @click="startBind">绑定已选文件</button>
           <article v-for="group in bindReview" :key="group.sourceCustomerName" class="file-card">

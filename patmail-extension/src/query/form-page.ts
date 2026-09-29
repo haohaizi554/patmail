@@ -37,6 +37,20 @@ export function pageSelectOptions(key: string, fields: FileSearchFormField[] = f
   })
 }
 
+/** 页面上读到的字段保留原样。树形框不再点开，选项用接口刚返回的完整名单补上。 */
+export function overlayFieldOptions(
+  fields: FileSearchFormField[],
+  optionsFor: (key: string) => { value: string; label: string; parent?: string }[] | null
+): FileSearchFormField[] {
+  return fields.map(field => {
+    if (field.control !== 'select' && field.control !== 'picker') return field
+    const key = formFieldKey(field.id)
+    const live = key ? optionsFor(key) : null
+    if (!live?.length) return field
+    return { ...field, options: live }
+  })
+}
+
 export function mergeFormFields(live: FileSearchFormField[], previous: FileSearchFormField[] = fallbackFields()): FileSearchFormField[] {
   return live.map(field => {
     if (field.options.length) return field

@@ -7,6 +7,7 @@ import { isLimitMonitorInputField, isLimitMonitorType, type LimitMonitorQuery } 
 import type { LimitMonitorResult, LimitMonitorRow } from './limit-monitor-types'
 import { isProcessKind, isProcessOpenTarget, PROCESS_SPECS, type ProcessListQuery, type ProcessListResult, type ProcessListRow } from './mail-process'
 import type { SessionSummary } from './session'
+import type { CaseContactExport } from '../case-contact/query'
 import type { ApiError, ApiResult } from './types'
 
 const QUERY_KEYS = new Set([
@@ -165,6 +166,10 @@ export function isHistoryDetailResult(value: unknown): value is ApiResult<Histor
   return isApiResult(value, isHistoryDetail)
 }
 
+export function isHistorySaveResult(value: unknown): value is ApiResult<{ saved: true }> {
+  return isApiResult(value, (data): data is { saved: true } => isRecord(data) && data.saved === true && Object.keys(data).length === 1)
+}
+
 function isDictionarySnapshot(value: unknown): value is DictionarySnapshot {
   return isRecord(value) && (value.kind === 'basic' || value.kind === 'flow' || value.kind === 'fileType' ||
     value.kind === 'fieldColumn' || value.kind === 'listColumn' || value.kind === 'mailType' || value.kind === 'reviewer' || value.kind === 'picker' || value.kind === 'mailSet' || value.kind === 'signature')
@@ -172,4 +177,32 @@ function isDictionarySnapshot(value: unknown): value is DictionarySnapshot {
 
 export function isDictionaryResult(value: unknown): value is ApiResult<DictionarySnapshot> {
   return isApiResult(value, isDictionarySnapshot)
+}
+
+function isBoundedText(value: unknown, limit: number): value is string {
+  return typeof value === 'string' && value.length <= limit && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value)
+}
+
+function isVolumeToken(value: unknown): value is string {
+  return typeof value === 'string' && value.length >= 1 && value.length <= 80 && !/[\u0000-\u001f<>]/.test(value)
+}
+
+export function isVolumeList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length >= 1 && value.length <= 300 && value.every(isVolumeToken)
+}
+
+function isContactRow(value: unknown): boolean {
+  return isRecord(value) && Object.keys(value).length === 3 &&
+    isVolumeToken(value.volume) && isBoundedText(value.tech, 80) && isBoundedText(value.email, 200)
+}
+
+function isCaseContactExport(value: unknown): value is CaseContactExport {
+  if (!isRecord(value) || Object.keys(value).length !== 3) return false
+  if (!Array.isArray(value.rows) || !Array.isArray(value.unmatched) || !Array.isArray(value.failed)) return false
+  if (value.rows.length > 300 || value.unmatched.length > 300 || value.failed.length > 300) return false
+  return value.rows.every(isContactRow) && value.unmatched.every(isVolumeToken) && value.failed.every(isVolumeToken)
+}
+
+export function isCaseContactResult(value: unknown): value is ApiResult<CaseContactExport> {
+  return isApiResult(value, isCaseContactExport)
 }

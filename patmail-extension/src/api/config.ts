@@ -1,16 +1,24 @@
 import type { FileSearchEnvironment } from './file-search-params'
 
-export const EASY_ORIGIN = 'http://183.36.43.66:88'
+export const EASY_ORIGINS = ['http://183.36.43.66:88', 'https://ip.pcl.ac.cn:81'] as const
 
-/** 业务 API 只信任当前 EASY Origin；本地页面仍可用于独立的 Scanner 验收。 */
+export const EASY_ORIGIN = EASY_ORIGINS[0]
+
+/** 鹏城实验室这一家客户的 EASY。案件联系人导出只对这个地址开放。 */
+export const PCL_ORIGIN = 'https://ip.pcl.ac.cn:81'
+
+export function isEasyOrigin(origin: string): boolean {
+  return (EASY_ORIGINS as readonly string[]).includes(origin)
+}
+
+/** 业务 API 只信任已登记的 EASY Origin；本地页面仍可用于独立的 Scanner 验收。 */
 export function trustedOrigin(pageOrigin: string): string | null {
   try {
-    const url = new URL(pageOrigin)
-    if (url.origin === EASY_ORIGIN) return EASY_ORIGIN
+    const origin = new URL(pageOrigin).origin
+    return isEasyOrigin(origin) ? origin : null
   } catch {
     return null
   }
-  return null
 }
 
 /**

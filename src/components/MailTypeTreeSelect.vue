@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { buildOptionTree, searchOptionTree, type TreeOption } from '../../patmail-extension/src/query/option-tree'
-import { placeMenu, treeMenuWidth } from './theme-select'
+import { menuBoxStyle, placeMenu, treeMenuWidth } from './theme-select'
 import MailTypeTreeNode from './MailTypeTreeNode.vue'
 
 const props = withDefaults(defineProps<{
@@ -9,7 +9,18 @@ const props = withDefaults(defineProps<{
   options: TreeOption[]
   disabled?: boolean
   placeholder?: string
-}>(), { modelValue: '', disabled: false, placeholder: '选择发文类型' })
+  emptyText?: string
+  searchLabel?: string
+  /** 分类节点只负责展开，点名字不会选中。 */
+  leavesOnly?: boolean
+}>(), {
+  modelValue: '',
+  disabled: false,
+  placeholder: '选择发文类型',
+  emptyText: '没有匹配的发文类型。',
+  searchLabel: '搜索发文类型',
+  leavesOnly: false
+})
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 
 const root = ref<HTMLElement | null>(null)
@@ -25,6 +36,10 @@ const manualExpanded = ref<Record<string, boolean>>({})
 const owner = Symbol('mail-type-tree')
 const tree = computed(() => buildOptionTree(props.options.filter(item => item.value)))
 const found = computed(() => applied.value.trim() ? searchOptionTree(tree.value, applied.value) : null)
+
+watch(draft, value => {
+  applied.value = value.trim()
+})
 const expanded = computed(() => found.value ? { ...manualExpanded.value, ...Object.fromEntries([...found.value.expand].map(id => [id, true])) } : manualExpanded.value)
 const summary = computed(() => tree.value.byId.get(props.modelValue)?.label || props.placeholder)
 
@@ -52,12 +67,7 @@ function updatePosition(): void {
     320,
     treeMenuWidth(props.options)
   )
-  menuStyle.value = {
-    top: `${placed.top}px`,
-    left: `${placed.left}px`,
-    width: `${placed.width}px`,
-    maxHeight: `${placed.maxHeight}px`
-  }
+  menuStyle.value = menuBoxStyle(placed)
 }
 
 function ancestorsOf(id: string): Record<string, boolean> {
@@ -90,6 +100,7 @@ function show(): void {
 
 function close(): void {
   opened.value = false
+  draft.value = ''
 }
 
 function search(): void {
@@ -97,6 +108,10 @@ function search(): void {
 }
 
 function pick(id: string): void {
+  if (props.leavesOnly && (tree.value.byId.get(id)?.childIds.length ?? 0) > 0) {
+    expand(id)
+    return
+  }
   emit('update:modelValue', id)
   close()
 }
@@ -156,12 +171,11 @@ onBeforeUnmount(() => {
     <Teleport :to="portal">
       <div v-if="opened" ref="menu" class="theme-select-menu theme-tree-menu" role="tree" :style="menuStyle">
         <div class="theme-tree-search">
-          <input ref="searchBox" v-model="draft" type="search" placeholder="搜索" aria-label="搜索发文类型" @keydown.enter.prevent="search" />
-          <button type="button" class="theme-tree-query" @click="search">查询</button>
+          <input ref="searchBox" v-model="draft" type="search" placeholder="搜索" :aria-label="searchLabel" @keydown.enter.prevent="search" />
         </div>
         <div class="theme-tree-list">
           <MailTypeTreeNode v-for="id in tree.roots" :key="id" :node-id="id" :by-id="tree.byId" :selected="modelValue" :expanded="expanded" :visible="found ? found.visible : null" :trail="[]" @pick="pick" @expand="expand" />
-          <p v-if="found && found.visible.size === 0" class="theme-select-empty">没有匹配的发文类型。</p>
+          <p v-if="found && found.visible.size === 0" class="theme-select-empty">{{ emptyText }}</p>
         </div>
       </div>
     </Teleport>

@@ -35,7 +35,7 @@ function save(): void {
     <p v-if="notice" class="hint">{{ notice }}</p>
     <p v-if="selected" class="hint">当前默认：{{ selected.name }}</p>
     <div class="filters">
-      <ThemeSelect v-model="userId" placeholder="选择审核人" :options="reviewers.map(item => ({ value: item.id, label: label(item) }))" />
+      <ThemeSelect v-model="userId" placeholder="选择审核人" empty-text="人员名单还是空的。点旁边的重新读取。" :options="reviewers.map(item => ({ value: item.id, label: label(item) }))" />
       <button type="button" class="ghost" @click="useSelf">设为当前账号</button>
       <button type="button" class="solid" @click="save">保存默认审核人</button>
       <button type="button" class="text-button" @click="emit('reload')">重新读取人员</button>

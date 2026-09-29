@@ -2,8 +2,8 @@ import { isQueryGuid } from '../../query/query-validator'
 import { isRecord } from '../../shared/guards'
 import { apiError, type ApiResult } from '../types'
 import type { EasyTransport } from '../transport'
-import { normalizeHistoryDetail, normalizeHistoryOptions } from './normalizer'
-import { historyRequest, type HistorySurface } from './surfaces'
+import { normalizeHistoryDetail, normalizeHistoryOptions, normalizeHistorySave } from './normalizer'
+import { historyRequest, historySaveRequest, type HistorySurface } from './surfaces'
 import type { HistoryQueryDetail, HistoryQueryOption } from './types'
 
 const CACHE_MS = 10 * 60_000
@@ -50,5 +50,16 @@ export class HistoryQueryService {
     const name = detail.data.name ?? cachedName
     if (!name) return apiError('INVALID_RESPONSE', '历史模板详情没有标题。')
     return { ok: true, data: { id, name, queryXml: detail.data.queryXml } }
+  }
+
+  async save(userKey: string, surface: HistorySurface, input: { title: string; queryId: string; queryXml: string }, signal?: AbortSignal): Promise<ApiResult<{ saved: true }>> {
+    const title = input.title.trim()
+    if (!title || title.length > 80) return apiError('INVALID_QUERY', '查询模板名称无效。')
+    if (input.queryId && !isQueryGuid(input.queryId)) return apiError('INVALID_QUERY', '要更新的查询模板 ID 无效。')
+    const response = await this.transport.post('historySave', historySaveRequest(surface, title, input.queryId, input.queryXml), signal)
+    if (!response.ok) return response
+    const saved = normalizeHistorySave(response.data)
+    if (saved.ok && this.cache?.userKey === userKey && this.cache.surface === surface) this.cache = null
+    return saved
   }
 }

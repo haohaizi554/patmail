@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import PageHead from '../../../../src/components/PageHead.vue'
 import { bg, icon } from '../../../../src/assets'
 import { useWorkspace } from '../composables/useWorkspace'
+import EmptyGuide from '../components/EmptyGuide.vue'
 import wechatQr from '../assets/wechat-qr.png'
 
 const { connection, customers, tasks, rules } = useWorkspace()
@@ -51,7 +52,7 @@ watch(qrOpen, (open) => {
     </div>
     <section class="card">
       <div class="card-head"><h2><img :src="icon(11)" alt="" />最近任务</h2></div>
-      <p v-if="tasks.length === 0" class="empty">暂无记录</p>
+      <EmptyGuide v-if="tasks.length === 0" text="还没有发文任务。去发文任务里自己拼一封，或按工作流生成。" action="去发文任务" hash="/tasks" />
       <table v-else class="grid">
         <thead><tr><th>客户</th><th>文件</th><th>计划邮件</th><th>状态</th></tr></thead>
         <tbody>

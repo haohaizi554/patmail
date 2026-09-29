@@ -16,6 +16,7 @@ import { MessageType, type MessageBridge } from '../shared/message'
 import { sendToBackground } from '../utils/runtime'
 import { useWorkspace } from '../app/composables/useWorkspace'
 import ThemeSelect from '../../../src/components/ThemeSelect.vue'
+import EmptyGuide from '../app/components/EmptyGuide.vue'
 
 const props = defineProps<{ bridge?: MessageBridge; userId: string; files: SelectedPatentFile[]; pageOrigin?: string }>()
 const accountOrigin = computed(() => props.pageOrigin || location.origin)
@@ -150,7 +151,8 @@ watch(() => props.files, () => { drafts.value = [] }, { deep: true })
     <strong>发文规则</strong>
     <p class="hint">配置归属：{{ scopeLabel }}。本地预览不是 EASY 邮件。选择或规则变化后需要重新生成，旧预览不能拿去创建。</p>
     <p v-if="message" class="hint">{{ message }}</p>
-    <label>客户发文方式
+    <EmptyGuide v-if="customers.length === 0" text="还没有客户，发文方式没法配。去客户管理建一个再回来。" action="去创建客户" hash="/customers" />
+    <label v-else>客户发文方式
       <ThemeSelect v-model="policyCustomer" placeholder="选择已有客户配置" :options="customers.map(item => ({ value: item.id, label: item.name }))" />
     </label>
     <label>方式
@@ -173,7 +175,7 @@ watch(() => props.files, () => { drafts.value = [] }, { deep: true })
 
     <label>文件描述原文<input v-model="mapText" type="text" /></label>
     <label>发文类型
-      <ThemeSelect v-model="mapTypeId" placeholder="选择发文类型" :options="mailTypes.map(item => ({ value: item.id, label: item.name }))" @open="loadMailTypes" />
+      <ThemeSelect v-model="mapTypeId" placeholder="选择发文类型" empty-text="发文类型还没读到。点开会重新读取。" :options="mailTypes.map(item => ({ value: item.id, label: item.name }))" @open="loadMailTypes" />
     </label>
     <button type="button" class="text-button" @click="save(draft => {
       const mailType = mailTypes.find(item => item.id === mapTypeId)
@@ -196,7 +198,8 @@ watch(() => props.files, () => { drafts.value = [] }, { deep: true })
       <button type="button" class="text-button" @click="save(draft => { draft.mappings = draft.mappings.filter(mapping => mapping.id !== item.id) })">删除本地映射</button>
     </article>
 
-    <label>收件人客户
+    <EmptyGuide v-if="customers.length === 0" text="还没有客户，收件人没法配。去客户管理建一个再回来。" action="去创建客户" hash="/customers" />
+    <label v-else>收件人客户
       <ThemeSelect v-model="recipientCustomer" placeholder="选择客户" :options="customers.map(item => ({ value: item.id, label: item.name }))" />
     </label>
     <label>收件人<input v-model="recipientTo" type="text" placeholder="多个邮箱用逗号分隔" /></label>

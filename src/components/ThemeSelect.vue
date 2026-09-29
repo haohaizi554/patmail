@@ -1,6 +1,6 @@
 <script setup lang="ts" generic="T extends string | number">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { filterSelectOptions, highlightAfterKey, menuWidthForLabels, placeMenu, selectNeedsSearch, showsGroup, type ThemeSelectOption } from './theme-select'
+import { filterSelectOptions, highlightAfterKey, menuBoxStyle, menuWidthForLabels, placeMenu, selectNeedsSearch, showsGroup, type ThemeSelectOption } from './theme-select'
 
 interface Option extends ThemeSelectOption { value: T }
 
@@ -9,9 +9,11 @@ const props = withDefaults(defineProps<{
   options: Option[]
   disabled?: boolean
   placeholder?: string
+  emptyText?: string
 }>(), {
   disabled: false,
-  placeholder: '请选择'
+  placeholder: '请选择',
+  emptyText: ''
 })
 
 const emit = defineEmits<{
@@ -38,7 +40,7 @@ const selected = computed(() => props.options.find(item => item.value === curren
 const searchable = computed(() => selectNeedsSearch(props.options.length))
 const listed = computed(() => searchable.value ? filterSelectOptions(props.options, query.value) : props.options)
 const shown = computed(() => selected.value?.label || (current.value === '' || current.value == null ? props.placeholder : String(current.value)))
-const placeholderShown = computed(() => !selected.value || selected.value.value === '')
+const placeholderShown = computed(() => !selected.value)
 
 function optionId(index: number): string {
   return `${listId}-${index}`
@@ -76,12 +78,7 @@ function updatePosition(): void {
     240,
     menuWidthForLabels(labels)
   )
-  menuStyle.value = {
-    top: `${placed.top}px`,
-    left: `${placed.left}px`,
-    width: `${placed.width}px`,
-    maxHeight: `${placed.maxHeight}px`
-  }
+  menuStyle.value = menuBoxStyle(placed)
 }
 
 function scrollHighlight(): void {
@@ -234,7 +231,7 @@ onBeforeUnmount(() => {
             <span class="theme-select-label">{{ option.label }}</span>
           </li>
         </template>
-        <li v-if="listed.length === 0" class="theme-select-empty" role="presentation">{{ query.trim() ? '没有匹配的选项' : '没有可选项' }}</li>
+        <li v-if="listed.length === 0" class="theme-select-empty" role="presentation">{{ query.trim() ? '没有匹配的选项' : (emptyText || '没有可选项') }}</li>
       </ul>
     </Teleport>
   </span>

@@ -6,6 +6,21 @@ export function isHistorySurface(value: unknown): value is HistorySurface {
   return value === 'file' || value === 'limit'
 }
 
+export function historySaveRequest(surface: HistorySurface, title: string, queryId: string, queryXml: string): URLSearchParams {
+  const limit = surface === 'limit'
+  return new URLSearchParams({
+    Call: 'SearchQueryHisSave',
+    is_proc: 'false',
+    is_out_save: 'false',
+    is_query_save: 'true',
+    query_save_title: title,
+    query_id: queryId,
+    query_xml: queryXml,
+    out_xml: '',
+    query_type: limit ? 'LimitMonitor\u2014liall' : 'FileSearch'
+  })
+}
+
 export function historyRequest(surface: HistorySurface, queryId: string): URLSearchParams {
   const limit = surface === 'limit'
   return new URLSearchParams({

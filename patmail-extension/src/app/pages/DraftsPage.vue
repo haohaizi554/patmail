@@ -6,6 +6,7 @@ import { describeDraftState, describeTaskRecord } from '../record-status'
 import { MessageType } from '../../shared/message'
 import { sendToBackground } from '../../utils/runtime'
 import { useWorkspace } from '../composables/useWorkspace'
+import EmptyGuide from '../components/EmptyGuide.vue'
 
 const { connection, tasks } = useWorkspace()
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
@@ -49,7 +50,8 @@ async function openDraft(taskId: string): Promise<void> {
   <section class="card">
     <h2>邮件草稿</h2>
     <p class="hint">本地草稿来自已保存的发文计划。这里不会把任务完成当成邮件已经发出。</p>
-    <p v-if="!ready || drafts.length === 0" class="empty">暂无草稿</p>
+    <p v-if="!ready" class="empty">还没确认当前登录的人，草稿先不显示。</p>
+    <EmptyGuide v-else-if="drafts.length === 0" text="还没有草稿。去发文任务里拼一封，计划保存之后会出现在这里。" action="去发文任务" hash="/tasks" />
     <table v-else class="grid">
       <thead><tr><th>客户</th><th>预计邮件</th><th>状态</th><th></th></tr></thead>
       <tbody>

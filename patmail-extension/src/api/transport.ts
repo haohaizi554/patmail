@@ -2,13 +2,14 @@ import { trustedOrigin } from './config'
 import { apiError, type ApiResult } from './types'
 
 export type EasyOperation =
-  | 'session' | 'fileSearch' | 'historyQuery'
+  | 'session' | 'fileSearch' | 'historyQuery' | 'historySave'
   | 'basicData' | 'flowDirection' | 'fileTypeTree' | 'fieldColumn' | 'listColumn' | 'mailType'
   | 'deptTree' | 'treeUser' | 'treeAgent' | 'fileTempList' | 'deptBranch' | 'applyTags' | 'limitInit' | 'limitCtrlProc'
   | 'mailCustomer' | 'mailInfoInit' | 'getMailInfo' | 'getMailFile' | 'getMailCase'
   | 'getMailRule' | 'getCustomerContact' | 'getRecentContact' | 'getCaseContact' | 'getSalesContact' | 'getPicsContact' | 'getCaseAgentContact' | 'getSignature' | 'getMailSet' | 'mailSignatureList' | 'signatureSet' | 'caseDemand' | 'saveMailInfo' | 'saveMailRelatedFiles'
   | 'getFlowInfo' | 'getFlowHistory' | 'getUrgencyList' | 'getFlowSubmit' | 'getFlowLastStatus'
   | 'limitMonitor' | 'mailProcess' | 'processAP' | 'processEF' | 'getIsNewCpc'
+  | 'agencySearchCase' | 'agencyCaseInfo' | 'patentCaseData'
 
 export interface TransportOptions {
   fetcher?: typeof fetch
@@ -19,6 +20,7 @@ const ROUTES: Record<EasyOperation, { path: string; call: string }> = {
   session: { path: '/AjaxServers/Login.ashx', call: 'GetUserModel' },
   fileSearch: { path: '/AjaxServers/CaseInfo.ashx', call: 'GetSearchFiles' },
   historyQuery: { path: '/AjaxServers/CaseInfo.ashx', call: 'SearchQueryHisList' },
+  historySave: { path: '/AjaxServers/CaseInfo.ashx', call: 'SearchQueryHisSave' },
   basicData: { path: '/AjaxServers/CaseInfo.ashx', call: 'IPGetBasicData' },
   flowDirection: { path: '/AjaxServers/CaseInfo.ashx', call: 'GetFlowdirection' },
   fileTypeTree: { path: '/AjaxServers/Common.ashx', call: 'LoadFileTypeByCaseType' },
@@ -61,7 +63,10 @@ const ROUTES: Record<EasyOperation, { path: string; call: string }> = {
   mailProcess: { path: '/AjaxServers/Common.ashx', call: 'GetProcessByTypeCO' },
   processAP: { path: '/AjaxServers/Common.ashx', call: 'GetProcessByTypeAP' },
   processEF: { path: '/AjaxServers/Common.ashx', call: 'GetProcessByTypeEF' },
-  getIsNewCpc: { path: '/AjaxServers/CaseInfo.ashx', call: 'GetIsNewCPC' }
+  getIsNewCpc: { path: '/AjaxServers/CaseInfo.ashx', call: 'GetIsNewCPC' },
+  agencySearchCase: { path: '/AjaxServers/AgencyAction.ashx', call: 'AgencySearchCase' },
+  agencyCaseInfo: { path: '/AjaxServers/AgencyAction.ashx', call: 'GetCaseInfo' },
+  patentCaseData: { path: '/AjaxServers/PatentAction.ashx', call: 'GetPatentData' }
 }
 
 function loginRedirect(response: Response, origin: string): boolean {
@@ -98,7 +103,7 @@ export class EasyTransport {
 
   /** 只读请求遇到网关 502/503 时再试。写请求不重试，避免一次 502 后面又创建出第二封。 */
   async post(operation: EasyOperation, params: URLSearchParams, signal?: AbortSignal): Promise<ApiResult<unknown>> {
-    const retryable = operation !== 'mailCustomer' && operation !== 'saveMailInfo' && operation !== 'saveMailRelatedFiles'
+    const retryable = operation !== 'mailCustomer' && operation !== 'saveMailInfo' && operation !== 'saveMailRelatedFiles' && operation !== 'historySave'
     let result = await this.postOnce(operation, params, signal)
     for (let attempt = 1; retryable && !result.ok && (result.error.status === 502 || result.error.status === 503) && attempt < 3; attempt += 1) {
       if (signal?.aborted) return apiError('REQUEST_ABORTED', '请求已取消。')
@@ -112,7 +117,7 @@ export class EasyTransport {
   /** 文件查询和期限监控在这套原网站上经常超过 15 秒。测试传入的短超时仍然生效。 */
   private waitMs(operation: EasyOperation): number {
     if (this.timeoutMs < 15_000) return this.timeoutMs
-    if (operation === 'fileSearch' || operation === 'limitMonitor' || operation === 'mailProcess' || operation === 'processAP' || operation === 'processEF') return 60_000
+    if (operation === 'fileSearch' || operation === 'limitMonitor' || operation === 'mailProcess' || operation === 'processAP' || operation === 'processEF' || operation === 'agencySearchCase') return 60_000
     return this.timeoutMs
   }
 
@@ -136,7 +141,7 @@ export class EasyTransport {
     try {
       const response = await this.fetcher(this.origin + route.path, {
         method: 'POST',
-        credentials: 'same-origin',
+        credentials: 'include',
         redirect: 'follow',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',

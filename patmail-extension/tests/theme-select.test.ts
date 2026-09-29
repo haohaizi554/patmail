@@ -4,11 +4,13 @@ import { filterSelectOptions, highlightAfterKey, menuWidthForLabels, placeMenu, 
 describe('theme select', () => {
   it('opens downward and flips upward when the lower space is tight', () => {
     const down = placeMenu({ top: 100, bottom: 136, left: 20, width: 220 }, { width: 800, height: 600 })
+    expect(down.edge).toBe('top')
     expect(down.top).toBe(142)
     expect(down.left).toBe(20)
     expect(down.width).toBe(220)
     const up = placeMenu({ top: 540, bottom: 576, left: 20, width: 220 }, { width: 800, height: 600 })
-    expect(up.top).toBeLessThan(540)
+    expect(up.edge).toBe('bottom')
+    expect(up.bottom).toBeLessThan(80)
     expect(up.maxHeight).toBeGreaterThan(80)
   })
 

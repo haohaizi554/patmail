@@ -10,7 +10,19 @@ import {
   workflowFromSkills,
   workflowSender
 } from '../src/workflow/catalog'
-import { mailTypeChoiceOptions, senderChoiceOptions } from '../src/workflow/choices'
+import {
+  loginReviewLabel,
+  mailStyleChoiceOptions,
+  mailTypeChoiceOptions,
+  mailTypeTreeOptions,
+  procTreeOptions,
+  rememberedSenderLabel,
+  reviewerChoiceOptions,
+  selectedStyleValue,
+  senderChoiceOptions,
+  shownReviewerId,
+  styleLabelFor
+} from '../src/workflow/choices'
 
 const nodes = [
   { id: '71d067a3-d1a3-4d4b-87f9-38ea9d96bf70', name: '提醒申请PCT（贵方案号）-深圳市' },
@@ -88,8 +100,12 @@ describe('PCT 工作流目录', () => {
       'start', 'read-sheet', 'check-name', 'match-letter', 'send-style', 'people', 'sender', 'review', 'lookup'
     ])
     const style = flow.steps.find(step => step.id === 'mail-style')
+    expect(style?.params.find(param => param.id === 'style_1_label')).toMatchObject({ value: '同客户合并发文' })
+    expect(style?.params.find(param => param.id === 'style_1_label')?.hidden).toBeUndefined()
     expect(style?.params.find(param => param.id === 'style_1_value')).toMatchObject({ value: '1', hidden: true })
+    expect(style?.params.find(param => param.id === 'style_2_label')).toMatchObject({ hidden: true })
     expect(style?.params.find(param => param.id === 'style_2_value')).toMatchObject({ value: '2', hidden: true })
+    expect(style?.params.find(param => param.id === 'style_3_label')).toMatchObject({ hidden: true })
     expect(style?.params.find(param => param.id === 'style_3_value')).toMatchObject({ value: '3', hidden: true })
     expect(flow.steps.find(step => step.id === 'review')?.params.find(param => param.id === 'review_value')).toMatchObject({ value: 'self', hidden: true })
     const visible = [
@@ -142,6 +158,16 @@ describe('PCT 工作流目录', () => {
       currentName: ''
     })
     expect(options[0]?.label).toBe('按名字里的词来对')
+    const tree = mailTypeTreeOptions({
+      nodes: [
+        { id: 'root', name: '全部邮件', parentId: '' },
+        { id: nodes[0]?.id ?? '', name: nodes[0]?.name ?? '', parentId: 'root' }
+      ],
+      currentId: 'gone',
+      currentName: '上次选的信'
+    })
+    expect(tree.find(item => item.value === nodes[0]?.id)?.parent).toBe('root')
+    expect(tree.find(item => item.value === 'gone')?.label).toBe('上次选的信')
     expect(options.find(item => item.value === nodes[0]?.id)?.group).toBe('已经配好的')
     expect(options.filter(item => item.value === nodes[0]?.id)).toHaveLength(1)
     const remembered = '71d067a3-d1a3-4d4b-87f9-38ea9d96bf70'
@@ -151,6 +177,43 @@ describe('PCT 工作流目录', () => {
       currentId: '',
       currentName: ''
     })
+    expect(senders[0]?.label).toBe(rememberedSenderLabel('所务'))
+    expect(loginReviewLabel('郑声语')).toBe('交给郑声语')
+    expect(loginReviewLabel('')).toBe('还没读到当前登录人')
+    const procs = procTreeOptions([
+      { id: 'patent', label: '专利', parentId: '' },
+      { id: 'remind', label: '提醒申请PCT', parentId: 'patent' },
+      { id: 'fee', label: '缴费', parentId: 'patent' },
+      { id: 'group', label: '缴费', parentId: '' }
+    ], '提醒申请PCT')
+    expect(procs.options.find(item => item.value === 'remind')?.parent).toBe('patent')
+    expect(procs.selectedId).toBe('remind')
+    expect(procTreeOptions([
+      { id: 'root', label: '分类' },
+      { id: 'a', label: '缴费', parentId: 'root' },
+      { id: 'b', label: '缴费', parentId: 'root' }
+    ], '缴费').selectedId.startsWith('saved:')).toBe(true)
+    expect(procTreeOptions([
+      { id: 'a', label: '缴费' },
+      { id: 'b', label: '提醒申请PCT', parentId: 'a' }
+    ], '缴费').selectedId.startsWith('saved:')).toBe(true)
+    expect(mailStyleChoiceOptions().map(item => item.label)).toEqual(['同客户合并发文', '单个来文发文', '同客户第一联系人合并发文'])
+    expect(selectedStyleValue('随便写的', '2')).toBe('2')
+    expect(styleLabelFor('3')).toBe('同客户第一联系人合并发文')
+    expect(selectedStyleValue('单个来文发文', '')).toBe('2')
+    const people = reviewerChoiceOptions({
+      reviewers: [{ id: '11111111-1111-4111-8111-111111111111', name: '郑声语' }, { id: '22222222-2222-4222-8222-222222222222', name: '吴晨晨' }],
+      currentId: '11111111-1111-4111-8111-111111111111',
+      currentName: '郑声语',
+      selectedId: '11111111-1111-4111-8111-111111111111',
+      selectedName: '郑声语'
+    })
+    expect(people[0]?.label).toBe('郑声语（当前账号）')
+    expect(shownReviewerId({
+      stored: 'self',
+      currentId: '11111111-1111-4111-8111-111111111111',
+      reviewers: [{ id: '11111111-1111-4111-8111-111111111111' }]
+    })).toBe('11111111-1111-4111-8111-111111111111')
     expect(senders.filter(item => item.badge === '已记住')).toHaveLength(1)
     expect(senders.filter(item => item.value === remembered)).toHaveLength(1)
   })

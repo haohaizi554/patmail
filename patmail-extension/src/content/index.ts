@@ -4,7 +4,7 @@ import { sendToBackground } from '../utils/runtime'
 import { injectPanel } from './injector'
 import { readPageInfo, scanPage } from './scanner'
 import { EasyRuntime } from '../api/client'
-import { scanFileSearchForm, warmFileSearchTrees } from '../query/scan-file-search-form.mjs'
+import { scanFileSearchForm } from '../query/scan-file-search-form.mjs'
 import { LiveEasyAcceptanceRunner } from '../automation/acceptance-runner'
 import { hydrateWriteSwitch, watchWriteSwitch } from '../settings/write-switch'
 
@@ -27,47 +27,9 @@ async function waitForCaseTypes(doc: Document): Promise<void> {
   }
 }
 
-function scanThroughPageScript(doc: Document): Promise<FileSearchFormField[]> {
-  const view = doc.defaultView
-  if (!view) return Promise.resolve(scanFileSearchForm(doc).fields)
-  const page = view
-  const marker = `patmail-form-${Date.now()}`
-  return new Promise(resolve => {
-    const timer = page.setTimeout(() => {
-      page.removeEventListener('message', onMessage)
-      resolve(scanFileSearchForm(doc).fields)
-    }, 70000)
-    function onMessage(event: MessageEvent): void {
-      if (event.origin !== page.location.origin || !event.data || event.data.marker !== marker || !Array.isArray(event.data.fields)) return
-      page.clearTimeout(timer)
-      page.removeEventListener('message', onMessage)
-      resolve(event.data.fields as FileSearchFormField[])
-    }
-    view.addEventListener('message', onMessage)
-    const script = doc.createElement('script')
-    script.textContent = `(async function () {
-      const warm = ${warmFileSearchTrees.toString()};
-      const scan = ${scanFileSearchForm.toString()};
-      try {
-        await warm(document);
-        window.postMessage({ marker: ${JSON.stringify(marker)}, fields: scan(document).fields }, location.origin);
-      } catch (error) {
-        window.postMessage({ marker: ${JSON.stringify(marker)}, fields: [] }, location.origin);
-      }
-    })()`
-    doc.documentElement.appendChild(script)
-    script.remove()
-  })
-}
-
 async function scanDocument(doc: Document): Promise<FileSearchFormField[]> {
   await waitForCaseTypes(doc)
-  const view = doc.defaultView as (Window & { jQuery?: unknown }) | null
-  if (view?.jQuery) {
-    await warmFileSearchTrees(doc)
-    return scanFileSearchForm(doc).fields
-  }
-  return scanThroughPageScript(doc)
+  return scanFileSearchForm(doc).fields
 }
 
 function openEasyTab(tabId: string, title: string, path: string): Promise<{ ok: boolean; message: string }> {
@@ -172,6 +134,9 @@ const bridge: MessageBridge = {
       case MessageType.SearchLimitMonitor:
         return { type: MessageType.SearchLimitMonitorResult,
           payload: await easyRuntime.searchLimitMonitor(message.payload.query) }
+      case MessageType.ExportCaseContacts:
+        return { type: MessageType.ExportCaseContactsResult,
+          payload: await easyRuntime.exportCaseContacts(message.payload.volumes) }
       case MessageType.ListMailProcesses:
         return { type: MessageType.ListMailProcessesResult,
           payload: await easyRuntime.listMailProcesses(message.payload.query) }
@@ -195,6 +160,9 @@ const bridge: MessageBridge = {
       case MessageType.GetHistoryQuery:
         return { type: MessageType.HistoryQueryResult,
           payload: await easyRuntime.getHistoryQuery(message.payload.queryId, signal, message.payload.surface ?? 'file') }
+      case MessageType.SaveHistoryQuery:
+        return { type: MessageType.HistoryQuerySaved,
+          payload: await easyRuntime.saveHistoryQuery(message.payload.title, message.payload.queryId, message.payload.queryXml, signal) }
       case MessageType.ScanFileSearchForm:
         return { type: MessageType.FileSearchFormResult, payload: { fields: await readFileSearchForm() } }
       case MessageType.LoadDictionary:

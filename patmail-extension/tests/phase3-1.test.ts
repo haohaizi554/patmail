@@ -81,6 +81,20 @@ describe('Phase 3.1 连接、规则与任务来源', () => {
     expect(connection.context.sessionStatus).toBe('authenticated')
   })
 
+  it('把鹏城实验室站点当成可绑定的 EASY 页面', () => {
+    const pcl = 'https://ip.pcl.ac.cn:81'
+    const connection = new EasyConnectionController()
+    expect(connection.list([{ id: 9, url: `${pcl}/index.aspx`, title: '鹏城' }])).toEqual([
+      { id: 9, title: '鹏城', url: `${pcl}/index.aspx`, origin: pcl }
+    ])
+    expect(connection.beginBind({ id: 9, url: `${pcl}/index.aspx` })).toEqual({ ok: true })
+    expect(connection.context.easyOrigin).toBe(pcl)
+    const restored = new EasyConnectionController()
+    restored.restoreCandidate({ easyOrigin: pcl, easyTabId: 9, lastOperatorId: userA, connectionVersion: 3 })
+    expect(restored.context.easyOrigin).toBe(pcl)
+    expect(restored.context.sessionStatus).toBe('pending')
+  })
+
   it('keeps customer overrides and rejects a stale rule bundle', async () => {
     const area = memoryArea()
     const saved = await saveCustomerAccount(area, origin, userA, profile())

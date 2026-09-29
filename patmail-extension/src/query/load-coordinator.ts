@@ -15,6 +15,10 @@ export class TemplateLoadCoordinator {
     return !this.disposed && id === this.serial
   }
 
+  peek(): number {
+    return this.serial
+  }
+
   dispose(): void {
     this.disposed = true
     this.serial += 1

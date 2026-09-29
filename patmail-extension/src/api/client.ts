@@ -32,6 +32,8 @@ import { loadMailContactText, type MailContactAsset } from '../mail/easy/mail-co
 import { isQueryGuid } from '../query/query-validator'
 import { EasyMailReadService } from '../mail/easy/read-service'
 import type { ExistingMailDiagnostic } from '../shared/message'
+import { loadCaseContacts } from '../case-contact/load'
+import type { CaseContactExport } from '../case-contact/query'
 import { EasyTransport, type EasyOperation, type TransportOptions } from './transport'
 import { apiError, type ApiResult } from './types'
 
@@ -266,6 +268,11 @@ export class EasyRuntime {
     return this.history.detail(this.historyUserKey, surface, queryId, signal)
   }
 
+  async saveHistoryQuery(title: string, queryId: string, queryXml: string, signal?: AbortSignal): Promise<ApiResult<{ saved: true }>> {
+    await this.confirmAccountRead()
+    return this.history.save(this.historyUserKey, 'file', { title, queryId, queryXml }, signal)
+  }
+
   private async mailUser(): Promise<{ ok: true; userId: string } | { ok: false; message: string }> {
     const session = await this.checkSession()
     if (!session.ok || session.data.status !== 'authenticated' || !session.data.userId) {
@@ -490,6 +497,27 @@ export class EasyRuntime {
           message: reviewers.length ? '' : '下一节点没有带姓名的审核人。'
         }
       }
+    })()
+  }
+
+  exportCaseContacts(volumes: string[]): Promise<ApiResult<CaseContactExport>> {
+    return (async (): Promise<ApiResult<CaseContactExport>> => {
+      if (!(await this.confirmAccountRead())) {
+        return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
+      }
+      const session = await this.checkSession()
+      if (!session.ok || session.data.status !== 'authenticated' || !session.data.userId) {
+        return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
+      }
+      const result = await loadCaseContacts(this.transport, session.data.userId, volumes)
+      if (!result.ok && result.error.code === 'SESSION_EXPIRED') {
+        const again = await this.checkSession()
+        if (again.ok && again.data.status === 'authenticated') {
+          return apiError('BUSINESS_ERROR', '当前账号已登录。案件查询没有被原网站接受，请刷新鹏城实验室页面后再试一次。')
+        }
+        this.session.expire()
+      }
+      return result
     })()
   }
 

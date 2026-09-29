@@ -89,7 +89,7 @@ describe('full-page query message chain', () => {
       } })
       const searches = requests.filter(request => request.body.get('Call') === 'GetLimitMonitorCaseList')
       expect(searches).toHaveLength(1)
-      expect(searches[0]).toMatchObject({ url: `${origin}/AjaxServers/Report.ashx`, method: 'POST', credentials: 'same-origin' })
+      expect(searches[0]).toMatchObject({ url: `${origin}/AjaxServers/Report.ashx`, method: 'POST', credentials: 'include' })
       expect(searches[0]!.body.get('customer_name')).toBe('广汽丰田')
       expect(searches[0]!.body.get('is_first')).toBe('false')
       expect(searches[0]!.body.get('type')).toBe('all')

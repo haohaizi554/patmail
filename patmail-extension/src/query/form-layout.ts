@@ -89,7 +89,7 @@ const checks: CheckCell = {
   ]
 }
 
-function cellKeys(cell: QueryCell): string[] {
+export function cellKeys(cell: QueryCell): string[] {
   if (cell.kind === 'download-name') return ['filetemp']
   if (cell.kind === 'dates') return [cell.start, cell.end, cell.empty].filter((key): key is string => Boolean(key))
   if (cell.kind === 'checks') return cell.items.map(item => item.key)
@@ -98,6 +98,11 @@ function cellKeys(cell: QueryCell): string[] {
 
 function visibleCells(cells: QueryCell[], hidden: ReadonlySet<string>): QueryCell[] {
   return cells.filter(cell => cellKeys(cell).some(key => !hidden.has(key)))
+}
+
+/** 第一屏就展示的条件。往下滚到的其余字段不在这里。 */
+export function primaryQueryKeys(): ReadonlySet<string> {
+  return new Set(QUERY_BLOCKS.filter(block => !block.more).flatMap(block => block.cells.flatMap(cellKeys)))
 }
 
 /** 常用条件一直显示。更多条件挂在同一段下面，案件和文件各自展开。 */

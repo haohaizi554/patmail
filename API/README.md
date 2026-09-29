@@ -22,6 +22,7 @@ Content-Type：`application/x-www-form-urlencoded; charset=UTF-8`
 | [08-流程审批.md](08-流程审批.md) | GetFlowInfo / GetFlowHistory / GetUrgencyList / GetFlowSubmit / FlowSubmit |
 | [09-期限监控.md](09-期限监控.md) | LimitMonitorInit / GetLimitMonitorCaseList / LimitMailCustomer |
 | [10-邮件签名.md](10-邮件签名.md) | GetMailSignatureSettingList / GetSignatureset / GetSignature / Getmailset |
+| [11-客户要求.md](11-客户要求.md) | 客户资料页 GetCustomerlist / GetCustomerDemand，不发文 |
 
 ## 接口清单
 
@@ -69,3 +70,9 @@ Content-Type：`application/x-www-form-urlencoded; charset=UTF-8`
 | 签名页代理机构 | CaseInfo.ashx | GetAencyList | 请求和长度已核对，响应正文未保存 |
 | 发文页签名下拉 | Mail.ashx | GetSignature | 请求和字段名已核对，响应正文未保存 |
 | 邮箱预留签名 | Login.ashx | Getmailset | 页面参数已核对，这次抓包没有这条请求 |
+| 客户列表 | Customer.ashx | GetCustomerlist | 请求已核对，响应正文未保存 |
+| 能否打开客户 | Customer.ashx | AllowShowCustomer | 请求和长度已核对，调用点不在 customer.js，响应正文未保存 |
+| 客户资料 | Customer.ashx | GetCustomerInfo | 请求已核对，页面读取字段已对照脚本，响应正文未保存 |
+| 客户联系人表 | Customer.ashx | GetCustomerContact | 请求已核对。与邮件页 Mail.ashx 的同名 Call 不是一个接口 |
+| 客户要求 | Customer.ashx | GetCustomerDemand | 请求和列已核对，响应正文未保存 |
+| 客户要求详情 | Customer.ashx | GetDemandInfo | 页面字段已核对，这次抓包没有这条请求 |

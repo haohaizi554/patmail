@@ -549,11 +549,16 @@ async function ensureEasySession(host: WorkspaceHost): Promise<EasyTabCandidate[
       console.log('[patmail-bg] bound tab found, reading session', boundId)
       await readBoundSession(host)
       console.log('[patmail-bg] after readBoundSession', host.connection.context.sessionStatus, host.connection.context.operatorId)
-      return tabs
+      const status = host.connection.context.sessionStatus
+      if (status === 'authenticated') return tabs
+      if (status !== 'expired' && status !== 'unauthenticated') return tabs
+      host.connection.detach(boundId)
+      remember(host)
+    } else {
+      console.log('[patmail-bg] bound tab missing, detach', boundId)
+      host.connection.detach(boundId)
+      remember(host)
     }
-    console.log('[patmail-bg] bound tab missing, detach', boundId)
-    host.connection.detach(boundId)
-    remember(host)
   }
   const version = host.connection.context.connectionVersion
   const seen: { tab: EasyTabCandidate; observation: SessionObservation }[] = []

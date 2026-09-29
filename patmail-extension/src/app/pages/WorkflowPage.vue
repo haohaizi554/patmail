@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
+import Bunny from '../../../../src/components/Bunny.vue'
+import MailTypeTreeSelect from '../../../../src/components/MailTypeTreeSelect.vue'
 import PageHead from '../../../../src/components/PageHead.vue'
 import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
 import { bg } from '../../../../src/assets'
@@ -12,6 +14,7 @@ import {
   isExtraParam,
   nextExtraId,
   paramWarning,
+  pctRuntimeFrom,
   workflowFromSkills,
   type WorkflowCatalog,
   type WorkflowDefinition,
@@ -19,7 +22,22 @@ import {
   type WorkflowStep
 } from '../../workflow/catalog'
 import { loadWorkflowCatalog, saveWorkflowCatalog } from '../../workflow/catalog-store'
-import { mailTypeChoiceOptions, procChoiceOptions, senderChoiceOptions, type ChoiceOption } from '../../workflow/choices'
+import {
+  isStyleLabelParam,
+  mailStyleChoiceOptions,
+  mailTypeTreeOptions,
+  procTreeOptions,
+  reviewerChoiceOptions,
+  selectedStyleValue,
+  senderChoiceOptions,
+  shownReviewerId,
+  styleLabelFor,
+  styleValueParamId,
+  type ChoiceOption
+} from '../../workflow/choices'
+import { matchPctMailTypes, QUERY_SURFACES } from '../../customer/mail-flow'
+import { useWorkspace } from '../composables/useWorkspace'
+import type { TreeOption } from '../../query/option-tree'
 import { SKILLS, skillById, skillTint } from '../../workflow/skills'
 import { useWorkflowChoices } from '../composables/useWorkflowChoices'
 import { confirmDialog } from '../dialog'
@@ -37,7 +55,10 @@ const oceanNotice = ref('')
 const newName = ref('')
 const picked = ref<string[]>([])
 const creating = ref(false)
-const { rules, mailTypes, senders, procs, notice: choiceNotice, load: loadChoices } = useWorkflowChoices()
+const { rules, mailTypes, senders, procs, reviewers, notice: choiceNotice, load: loadChoices } = useWorkflowChoices()
+const { connection } = useWorkspace()
+const WORD_PARAMS = new Set(['type_keyword', 'customer_keyword', 'our_keyword', 'city_keyword', 'other_city_keyword'])
+const LISTED_CHOICES = new Set(['sender_mailset', 'surface_label'])
 let silence = false
 
 const ID_CHOICES = new Set(['customer_type_id', 'our_type_id', 'sender_mailset'])
@@ -68,12 +89,60 @@ watch(screen, (value) => {
 })
 
 const selected = computed(() => draft.value?.steps.find(step => step.id === selectedId.value) ?? null)
-const visibleParams = computed(() => selected.value?.params.filter(param => !param.hidden) ?? [])
-const stepHasChoice = computed(() => visibleParams.value.some(param => isIdChoice(param.id) || param.id === 'proc_label'))
+const visibleParams = computed(() => selected.value?.params.filter(param => !param.hidden && !WORD_PARAMS.has(param.id)) ?? [])
+const matchedMail = computed(() => matchPctMailTypes(mailTypes.value, draft.value ? pctRuntimeFrom(draft.value) : undefined))
+const stepHasChoice = computed(() => visibleParams.value.some(param => isIdChoice(param.id) || param.id === 'proc_label' || param.id === 'review_label'))
+
+const LEGACY_STYLE_LABELS: Record<string, string> = {
+  '合成一封': '同客户合并发文',
+  '一件一封': '单个来文发文',
+  '按第一联系人合成': '同客户第一联系人合并发文'
+}
+const STYLE_FIELD_LABEL = '发文方式'
+const STYLE_NAME_LABELS = new Set([
+  '同客户合并发文',
+  '单个来文发文',
+  '同客户第一联系人合并发文',
+  ...Object.keys(LEGACY_STYLE_LABELS)
+])
+const LEGACY_STYLE_DETAILS = new Set([
+  '具体用哪一种，在客户里选。这里改的是你看到的名字。',
+  '客户里选的就是下面这几种。每一种的名字直接写出来。'
+])
+const PCT_STYLE_DETAIL = '这一条用同客户合并发文。同一客户的几件合成一封。'
+
+function spellStyleNames(flow: WorkflowDefinition): boolean {
+  let changed = false
+  for (const step of flow.steps) {
+    if ((step.skillId === 'send-style' || step.id === 'mail-style') && LEGACY_STYLE_DETAILS.has(step.detail.trim())) {
+      step.detail = PCT_STYLE_DETAIL
+      changed = true
+    }
+    for (const param of step.params) {
+      if (!isStyleLabelParam(param.id)) continue
+      if (!param.hidden && STYLE_NAME_LABELS.has(param.label.trim()) && param.label !== STYLE_FIELD_LABEL) {
+        param.label = STYLE_FIELD_LABEL
+        changed = true
+      }
+      if (!param.hidden && param.help.trim() === '客户看到这个名字。') {
+        param.help = '从名单里点一种。'
+        changed = true
+      }
+      const stored = step.params.find(item => item.id === styleValueParamId(param.id))?.value ?? ''
+      const official = styleLabelFor(selectedStyleValue(param.value, stored))
+      if (official && param.value !== official) {
+        param.value = official
+        changed = true
+      }
+    }
+  }
+  return changed
+}
 
 function openFlow(flow: WorkflowDefinition): void {
   const next = cloneWorkflow(flow)
-  replaceDraft(next, false)
+  const changed = spellStyleNames(next)
+  replaceDraft(next, changed)
   selectedId.value = next.steps[0]?.id ?? ''
   notice.value = ''
   screen.value = 'flow'
@@ -146,7 +215,7 @@ async function save(): Promise<void> {
     }
     notice.value = savedId === 'pct-reminder'
       ? '已保存。读表格和对信的种类，会按这里的写法走。'
-      : '已保存。这条先记在这里，客户里现在自动用的仍是第一条 PCT提醒。'
+      : '已保存。这条先记在这里，客户里现在自动用的仍是 PCT提醒。'
   } finally {
     saving.value = false
   }
@@ -236,8 +305,30 @@ function isIdChoice(id: string): boolean {
   return ID_CHOICES.has(id)
 }
 
+function isMailTypeParam(id: string): boolean {
+  return id === 'customer_type_id' || id === 'our_type_id'
+}
+
+function isListedChoice(id: string): boolean {
+  return LISTED_CHOICES.has(id)
+}
+
 function showsText(id: string): boolean {
-  return !isIdChoice(id)
+  return !isIdChoice(id) && !isListedChoice(id) && id !== 'review_label' && id !== 'proc_label' && !isStyleLabelParam(id)
+}
+
+function shownTypeId(param: WorkflowParam): string {
+  if (param.value.trim()) return param.value
+  if (param.id === 'customer_type_id') return matchedMail.value.customerVolume?.id ?? ''
+  if (param.id === 'our_type_id') return matchedMail.value.ourVolumeShenzhen?.id ?? ''
+  return ''
+}
+
+function surfaceOptions(current: string): ChoiceOption[] {
+  const options = QUERY_SURFACES.map(item => ({ value: item.label, label: item.label }))
+  const saved = current.trim()
+  if (saved && !options.some(item => item.value === saved)) options.unshift({ value: saved, label: saved })
+  return options
 }
 
 function hiddenName(id: string): string {
@@ -245,21 +336,82 @@ function hiddenName(id: string): string {
   return selected.value?.params.find(item => item.id === key)?.value ?? ''
 }
 
-function optionsFor(param: WorkflowParam): ChoiceOption[] {
-  if (param.id === 'proc_label') return procs.value.length ? procChoiceOptions(procs.value, param.value) : []
-  if (param.id === 'customer_type_id' || param.id === 'our_type_id') {
-    return mailTypeChoiceOptions({
-      nodes: mailTypes.value,
-      mappings: (rules.value?.mappings ?? []).map(item => ({
-        enabled: item.enabled,
-        mailTypeId: item.mailTypeId,
-        mailTypeName: item.mailTypeName,
-        fileDescriptionText: item.fileDescriptionText
-      })),
-      currentId: param.value,
-      currentName: hiddenName(param.id)
-    })
+function treeOptionsFor(param: WorkflowParam): TreeOption[] {
+  return mailTypeTreeOptions({
+    nodes: mailTypes.value,
+    currentId: param.value,
+    currentName: hiddenName(param.id)
+  })
+}
+
+function procTreeFor(param: WorkflowParam): { options: TreeOption[]; selectedId: string } {
+  return procTreeOptions(procs.value, param.value)
+}
+
+function hiddenStyle(labelId: string): string {
+  const key = styleValueParamId(labelId)
+  return selected.value?.params.find(item => item.id === key)?.value ?? ''
+}
+
+function shownStyle(param: WorkflowParam): string {
+  return selectedStyleValue(param.value, hiddenStyle(param.id))
+}
+
+function styleOptionsFor(param: WorkflowParam): ChoiceOption[] {
+  const options = mailStyleChoiceOptions()
+  const current = shownStyle(param)
+  if (current && !options.some(item => item.value === current)) {
+    options.unshift({ value: current, label: param.value.trim() || styleLabelFor(current) || current })
   }
+  return options
+}
+
+function chooseStyle(param: WorkflowParam, code: string): void {
+  const label = styleLabelFor(code) || styleOptionsFor(param).find(item => item.value === code)?.label || ''
+  if (!label || !selected.value) return
+  param.value = label
+  const hidden = selected.value.params.find(item => item.id === styleValueParamId(param.id))
+  if (hidden) hidden.value = code
+}
+
+function reviewerOptions(): ChoiceOption[] {
+  const stored = hiddenReview()
+  const selectedId = shownReviewerId({
+    stored,
+    currentId: connection.value.operatorId,
+    reviewers: reviewers.value
+  })
+  const selectedName = stored && stored !== 'self'
+    ? reviewers.value.find(item => item.id.toLowerCase() === stored.toLowerCase())?.name || reviewLabel()
+    : connection.value.displayName
+  return reviewerChoiceOptions({
+    reviewers: reviewers.value,
+    currentId: connection.value.operatorId,
+    currentName: connection.value.displayName,
+    selectedId,
+    selectedName
+  })
+}
+
+function hiddenReview(): string {
+  return selected.value?.params.find(item => item.id === 'review_value')?.value ?? ''
+}
+
+function reviewLabel(): string {
+  return selected.value?.params.find(item => item.id === 'review_label')?.value ?? ''
+}
+
+function shownReviewer(): string {
+  return shownReviewerId({
+    stored: hiddenReview(),
+    currentId: connection.value.operatorId,
+    reviewers: reviewers.value
+  })
+}
+
+function optionsFor(param: WorkflowParam): ChoiceOption[] {
+  if (isMailTypeParam(param.id) || param.id === 'proc_label' || isStyleLabelParam(param.id) || param.id === 'review_label') return []
+  if (param.id === 'surface_label') return surfaceOptions(param.value)
   if (param.id === 'sender_mailset') {
     const remembered = rules.value?.defaultSender
     return senderChoiceOptions({
@@ -298,19 +450,53 @@ function chooseChoice(param: WorkflowParam, value: string): void {
     || rules.value?.mappings.find(item => item.mailTypeId === value)?.mailTypeName
     || hidden.value
 }
+
+function chooseProc(param: WorkflowParam, id: string): void {
+  if (!id || id.startsWith('saved:')) return
+  const node = procs.value.find(item => item.id === id)
+  if (!node) return
+  const parents = new Set(procs.value.map(item => item.parentId).filter((item): item is string => Boolean(item)))
+  if (parents.has(node.id)) return
+  param.value = node.label
+}
+
+function chooseReviewer(param: WorkflowParam, id: string): void {
+  const person = reviewers.value.find(item => item.id.toLowerCase() === id.toLowerCase())
+  const name = person?.name.trim()
+    || (id.toLowerCase() === connection.value.operatorId.trim().toLowerCase() ? connection.value.displayName.trim() : '')
+  if (!name || !selected.value) return
+  param.value = name
+  const hidden = selected.value.params.find(item => item.id === 'review_value')
+  if (!hidden) return
+  const self = connection.value.operatorId.trim()
+  hidden.value = self && id.toLowerCase() === self.toLowerCase() ? 'self' : id
+}
 </script>
 
 <template>
+  <header v-if="screen === 'flow' && draft" class="page-head flow-head">
+    <Bunny />
+    <div class="flow-head-fields">
+      <button type="button" class="flow-text" @click="backToSea">回到海边</button>
+      <label>名字
+        <input v-model="draft.label" type="text" maxlength="40" />
+      </label>
+      <label>这句话怎么介绍
+        <input v-model="draft.summary" type="text" maxlength="400" />
+      </label>
+    </div>
+    <img class="page-art" :src="bg('专注每一次发文，让知识更有力量.png')" alt="" />
+  </header>
   <PageHead
-    :title="screen === 'flow' ? (draft?.label || '工作流') : '工作流'"
-    :desc="screen === 'ocean' ? '从知识海洋里挑几件会做的事，串成一条你自己的。' : screen === 'flow' ? '点左边的一步，右边就能改。' : '先挑一条，点开再看每一步。'"
+    v-else
+    title="工作流"
+    :desc="screen === 'ocean' ? '从知识海洋里挑几件会做的事，串成一条你自己的。' : '先挑一条，点开再看每一步。'"
     :art="bg('专注每一次发文，让知识更有力量.png')"
   />
 
   <section v-if="screen === 'sea'" class="sea">
     <article v-for="flow in catalog.workflows" :key="flow.id" class="sea-card">
       <button type="button" class="sea-open" @click="openFlow(flow)">
-        <span v-if="flow.id === 'pct-reminder'" class="sea-badge">第一条</span>
         <b>{{ flow.label }}</b>
         <small>{{ flow.summary }}</small>
         <em>{{ flow.steps.length }} 步</em>
@@ -325,7 +511,7 @@ function chooseChoice(param: WorkflowParam, value: string): void {
 
   <section v-else-if="screen === 'ocean'" class="card ocean">
     <button type="button" class="flow-text" @click="screen = 'sea'">回到海边</button>
-    <p class="hint">现在会自己跑起来的，仍是第一条 PCT提醒。新加的会按你排的步骤保存下来。</p>
+    <p class="hint">现在会自己跑起来的，仍是 PCT提醒。新加的会按你排的步骤保存下来。</p>
     <div class="skill-sea">
       <button
         v-for="skill in SKILLS"
@@ -350,10 +536,6 @@ function chooseChoice(param: WorkflowParam, value: string): void {
   </section>
 
   <template v-else-if="draft">
-    <div class="flow-back">
-      <button type="button" class="flow-text" @click="backToSea">回到海边</button>
-      <span v-if="draft.id === 'pct-reminder'" class="sea-badge">第一条</span>
-    </div>
     <div class="flow-board">
       <div class="mermaid">
         <template v-for="(step, index) in draft.steps" :key="step.id">
@@ -367,8 +549,6 @@ function chooseChoice(param: WorkflowParam, value: string): void {
         <p v-if="draft.steps.length === 0" class="hint">还没有步骤。在右边挑一件事加上。</p>
       </div>
       <section class="card flow-editor">
-        <label>名字 <input v-model="draft.label" type="text" maxlength="40" /></label>
-        <label>这句话怎么介绍 <textarea v-model="draft.summary" maxlength="400" /></label>
         <template v-if="selected">
           <h2>{{ selected.title }}</h2>
           <label>这一步叫什么 <input v-model="selected.title" type="text" maxlength="40" /></label>
@@ -378,12 +558,49 @@ function chooseChoice(param: WorkflowParam, value: string): void {
           <div v-for="param in visibleParams" :key="param.id" class="flow-param">
             <input v-model="param.label" type="text" maxlength="40" aria-label="叫什么" placeholder="叫什么" />
             <div class="flow-value">
+              <template v-if="isMailTypeParam(param.id)">
+                <MailTypeTreeSelect
+                  :model-value="shownTypeId(param)"
+                  :options="treeOptionsFor(param)"
+                  :disabled="mailTypes.length === 0"
+                  placeholder="点一种发文类型"
+                  @update:model-value="chooseChoice(param, String($event))"
+                />
+              </template>
+              <MailTypeTreeSelect
+                v-else-if="param.id === 'proc_label'"
+                :model-value="procTreeFor(param).selectedId"
+                :options="procTreeFor(param).options"
+                :disabled="procs.length === 0"
+                leaves-only
+                placeholder="从事项里点一个具体的"
+                empty-text="没有匹配的事项。"
+                search-label="搜索事项"
+                @update:model-value="chooseProc(param, String($event))"
+              />
               <ThemeSelect
-                v-if="optionsFor(param).length"
+                v-else-if="isStyleLabelParam(param.id)"
+                :model-value="shownStyle(param)"
+                :options="styleOptionsFor(param)"
+                placeholder="点一种发文方式"
+                empty-text="发文方式还没读到。"
+                @update:model-value="chooseStyle(param, String($event))"
+              />
+              <ThemeSelect
+                v-else-if="param.id === 'review_label'"
+                :model-value="shownReviewer()"
+                :options="reviewerOptions()"
+                placeholder="点一个审核人"
+                empty-text="审核人还没读到。点上面重新读取。"
+                @update:model-value="chooseReviewer(param, String($event))"
+              />
+              <ThemeSelect
+                v-else-if="isListedChoice(param.id)"
                 :model-value="param.value"
                 :options="optionsFor(param)"
-                :placeholder="param.id === 'proc_label' ? '从事项名单里点' : '点一个'"
-                @update:model-value="chooseChoice(param, String($event))"
+                placeholder="点一个"
+                empty-text="还没有可点的项。"
+                @update:model-value="param.id === 'surface_label' ? param.value = String($event) : chooseChoice(param, String($event))"
               />
               <input v-if="showsText(param.id)" v-model="param.value" type="text" maxlength="200" aria-label="写成" placeholder="写成" />
               <button v-if="isExtraParam(param.id)" type="button" class="flow-text" @click="removeNote(selected, param.id)">拿掉</button>

@@ -18,9 +18,12 @@ export interface MenuAnchor {
 
 export interface MenuPlacement {
   top: number
+  /** 向上展开时，菜单底边贴着触发器，避免空盒子把选项顶到页面上方。 */
+  bottom: number
   left: number
   width: number
   maxHeight: number
+  edge: 'top' | 'bottom'
 }
 
 /** 选项多于这个数量时，菜单里提供搜索。 */
@@ -95,8 +98,25 @@ export function placeMenu(anchor: MenuAnchor, viewport: { width: number; height:
   const above = Math.max(0, anchor.top - GAP - EDGE)
   const openUp = below < Math.min(preferredHeight, 160) && above > below
   const maxHeight = Math.max(80, Math.min(MAX_HEIGHT, openUp ? above : below || above || 80))
-  const top = openUp ? Math.max(EDGE, anchor.top - GAP - maxHeight) : anchor.bottom + GAP
-  return { top, left, width, maxHeight }
+  if (openUp) return { top: 0, bottom: viewport.height - anchor.top + GAP, left, width, maxHeight, edge: 'bottom' }
+  return { top: anchor.bottom + GAP, bottom: 0, left, width, maxHeight, edge: 'top' }
+}
+
+/** 向上展开时用 bottom，选项少的时候菜单贴着触发器，不会飘到页面顶部。 */
+export function menuBoxStyle(placed: MenuPlacement): Record<string, string> {
+  const box: Record<string, string> = {
+    left: `${placed.left}px`,
+    width: `${placed.width}px`,
+    maxHeight: `${placed.maxHeight}px`
+  }
+  if (placed.edge === 'bottom') {
+    box.bottom = `${placed.bottom}px`
+    box.top = 'auto'
+  } else {
+    box.top = `${placed.top}px`
+    box.bottom = 'auto'
+  }
+  return box
 }
 
 export function showsGroup(options: ThemeSelectOption[], index: number): boolean {

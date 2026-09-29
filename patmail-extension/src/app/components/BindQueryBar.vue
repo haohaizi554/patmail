@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
+import EmptyGuide from './EmptyGuide.vue'
 import { applyBoundQuery, PENDING_CUSTOMER_KEY, querySnapshot, summarizeBoundQuery } from '../../customer/mail-flow'
 import type { QuerySurfaceId } from '../../customer/types'
 import { scopeFromConnection } from '../../shared/connection'
@@ -75,7 +76,7 @@ async function bind(): Promise<void> {
     <div class="section-heading">
       <strong>把这次查询留给客户</strong>
     </div>
-    <p v-if="customers.length === 0" class="empty">还没有客户。先到客户管理填写名称，选好查询入口再过来。</p>
+    <EmptyGuide v-if="customers.length === 0" text="还没有客户。去客户管理填写名称，选好查询入口，再回来绑定。" action="去创建客户" hash="/customers" />
     <template v-else>
       <label>绑定给
         <ThemeSelect v-model="picked" :options="choices" />

@@ -37,7 +37,7 @@ describe('EASY 受限传输', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0].url).toBe('http://183.36.43.66:88/AjaxServers/Login.ashx')
     expect(calls[0].init).toMatchObject({
-      method: 'POST', credentials: 'same-origin', redirect: 'follow',
+      method: 'POST', credentials: 'include', redirect: 'follow',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest' }
     })
     expect(new URLSearchParams(String(calls[0].init.body)).get('log_pagename')).toBe('')

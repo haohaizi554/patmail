@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { buildOptionTree, searchOptionTree, type TreeOption } from '../../patmail-extension/src/query/option-tree'
-import { placeMenu, treeMenuWidth } from './theme-select'
+import { menuBoxStyle, placeMenu, treeMenuWidth } from './theme-select'
 import TreeOptionNode from './TreeOptionNode.vue'
 
 const props = withDefaults(defineProps<{
@@ -57,12 +57,7 @@ function updatePosition(): void {
     320,
     treeMenuWidth(props.options)
   )
-  menuStyle.value = {
-    top: `${placed.top}px`,
-    left: `${placed.left}px`,
-    width: `${placed.width}px`,
-    maxHeight: `${placed.maxHeight}px`
-  }
+  menuStyle.value = menuBoxStyle(placed)
 }
 
 function show(): void {

@@ -6,9 +6,12 @@ import type { HistoryQueryOption } from '../api/query-history'
 import type { CustomerQueryProfile } from '../customer/types'
 import { fieldGroup, fieldLabel, parseQueryXml, resolveQueryTemplate } from '../query'
 import { PAGE_OPTIONS, queryBlocks, type QueryCell, type QuerySection } from '../query/form-layout'
-import { describeFormCheck, fallbackFields, formFieldKey, hiddenFormFields, mergeFormFields, pageSelectOptions } from '../query/form-page'
+import { cellsFromLiveFields } from '../query/live-fields'
+import { buildQueryXml } from '../query/query-xml'
+import { describeFormCheck, fallbackFields, formFieldKey, hiddenFormFields, mergeFormFields, overlayFieldOptions, pageSelectOptions } from '../query/form-page'
 import { activateOptionFallback, FILE_BASIC_OPTION_FIELDS, FILE_FLOW_OPTION_FIELDS, hydrateOptionFallback, optionFallbackEpoch, rememberDictionaries, rememberFormFields, savedChoices, subscribeOptionFallback } from '../query/option-fallback'
 import FileTypePicker from './FileTypePicker.vue'
+import EmptyGuide from '../app/components/EmptyGuide.vue'
 import { peekHistoryList, readHistoryList, saveHistoryList } from '../query/history-list-cache'
 import { TemplateLoadCoordinator } from '../query/load-coordinator'
 import { optionsForCaseType, resolveFileDescriptionDisplay, resolveInternalIdDisplay } from '../schema'
@@ -52,6 +55,17 @@ const temporary = ref<Record<string, string>>({})
 const temporaryActive = ref<Record<string, boolean>>({})
 const openExtra = ref<Record<string, boolean>>({})
 const pageFields = ref<FileSearchFormField[] | undefined>(undefined)
+const hotExtra = ref<{ case: QueryCell[]; file: QueryCell[] } | null>(null)
+const hotLoaded = ref(false)
+const hotLoading = ref(false)
+const hotNote = ref('')
+const hotSentinel = ref<HTMLElement | null>(null)
+const saveName = ref('')
+const saveNameDirty = ref(false)
+const savingTemplate = ref(false)
+let hotObserver: IntersectionObserver | null = null
+let hotFlight: Promise<void> | null = null
+let hotAbort: AbortController | null = null
 const fallbackTick = ref(0)
 const stopFallbackWatch = subscribeOptionFallback(() => { fallbackTick.value = optionFallbackEpoch() })
 const pageHidden = computed(() => hiddenFormFields(pageFields.value))
@@ -84,15 +98,42 @@ const workspace = useWorkspace()
 onBeforeUnmount(() => {
   loads.dispose()
   stopFallbackWatch()
+  hotObserver?.disconnect()
+  hotAbort?.abort()
 })
+watch(hotSentinel, node => {
+  hotObserver?.disconnect()
+  hotObserver = null
+  if (!node || typeof IntersectionObserver === 'undefined') return
+  hotObserver = new IntersectionObserver(entries => {
+    if (entries.some(entry => entry.isIntersecting)) void ensureHotFields(true)
+  }, { rootMargin: '160px' })
+  hotObserver.observe(node)
+})
+watch(baseName, name => {
+  if (!saveNameDirty.value) saveName.value = name
+})
+watch(selectedBaseId, () => { saveNameDirty.value = false })
 
 const businessFields = FILE_SEARCH_REQUEST_FIELDS.filter(field => !FILE_SEARCH_SYSTEM_FIELDS.has(field))
-const formSections = computed(() => queryBlocks(pageHidden.value))
+const formSections = computed(() => queryBlocks(pageHidden.value).map(block => {
+  const live = block.title === '案件条件' ? hotExtra.value?.case : hotExtra.value?.file
+  return live?.length ? { ...block, extra: live } : block
+}))
 function shownCells(block: QuerySection): QueryCell[] {
   return openExtra.value[block.title] ? [...block.cells, ...block.extra] : block.cells
 }
+function openAllExtra(): void {
+  const copy = { ...openExtra.value }
+  for (const block of formSections.value) {
+    if (block.extra.length) copy[block.title] = true
+  }
+  openExtra.value = copy
+}
 function toggleExtra(title: string): void {
-  openExtra.value = { ...openExtra.value, [title]: !openExtra.value[title] }
+  const opening = !openExtra.value[title]
+  openExtra.value = { ...openExtra.value, [title]: opening }
+  if (opening) void ensureHotFields(false)
 }
 function extraFilled(block: QuerySection, fields: Record<string, string>): boolean {
   return block.extra.some(cell => {
@@ -185,6 +226,18 @@ function namedShown(key: string): string {
   if (temporaryActive.value[key]) return temporary.value[key] ?? ''
   const value = formValue(key)
   return value ? storedLabel(key, value) : ''
+}
+function dictionaryOptions(key: string): { value: string; label: string; parent?: string }[] | null {
+  if (key === 'filetype' && fileTypeNodes.value.length) {
+    return fileTypeNodes.value.map(node => ({
+      value: node.id,
+      label: node.name,
+      ...(node.parentId ? { parent: node.parentId } : {})
+    }))
+  }
+  const dictionary = dictionaryFor(key)
+  if (!dictionary || dictionary.dictionary.options.length === 0) return null
+  return liveChoices(dictionary)
 }
 function liveChoices(dictionary: { name: string; dictionary: NormalizedDictionary }): { value: string; label: string; parent?: string }[] {
   const rows = dictionary.dictionary.options.filter(item => !item.disabled)
@@ -639,33 +692,202 @@ async function deleteCustomer(): Promise<void> {
   await reloadLocal()
 }
 
+function filledDisplay(): Record<string, string> {
+  const labels: Record<string, string> = {}
+  for (const [key, value] of Object.entries(resolved.value.fields)) {
+    if (!value.trim()) continue
+    const option = optionsFor(key).find(item => item.value === value)
+    const label = option?.label || displayValues.value[key] || ''
+    if (label.trim() && label.trim() !== value.trim()) labels[key] = label.trim()
+  }
+  return labels
+}
+function siteQueryId(name: string): string {
+  const linked = selectedLocal.value?.sourceQueryId
+  if (linked && isQueryGuid(linked)) return linked
+  const easy = historyOptions.value.find(item => item.id === selectedBaseId.value)
+  return easy && easy.name === name && isQueryGuid(easy.id) ? easy.id : ''
+}
+async function ensureHotFields(openAfter: boolean): Promise<void> {
+  if (hotLoaded.value) {
+    if (openAfter) openAllExtra()
+    return
+  }
+  if (hotFlight) return hotFlight
+  hotFlight = runHotFields(openAfter).finally(() => { hotFlight = null })
+  return hotFlight
+}
+async function runHotFields(openAfter: boolean): Promise<void> {
+  if (!props.bridge) {
+    hotLoaded.value = true
+    hotNote.value = '没有连上原网站，下面仍用本地记录的查询字段。'
+    if (openAfter) openAllExtra()
+    return
+  }
+  hotAbort?.abort()
+  const ticket = hotAbort = new AbortController()
+  const loadId = loads.peek()
+  hotLoading.value = true
+  hotNote.value = '正在从原网站读取下面的查询字段…'
+  try {
+    const [response] = await Promise.all([
+      props.bridge.request({ type: MessageType.ScanFileSearchForm }, ticket.signal),
+      loadDictionaries(loadId, ticket.signal, true)
+    ])
+    if (hotAbort !== ticket || !loads.isCurrent(loadId)) return
+    if (response.type !== MessageType.FileSearchFormResult) {
+      hotNote.value = response.type === MessageType.Error ? response.payload.message : '没有读到原网站的查询字段。'
+      return
+    }
+    const checked = overlayFieldOptions(response.payload.fields, dictionaryOptions)
+    const fields = checked.length ? mergeFormFields(checked, fallbackFields()) : undefined
+    if (fields) pageFields.value = fields
+    if (props.userId) rememberFormFields(props.userId, checked.map(field => ({ ...field, id: formFieldKey(field.id) })))
+    const live = cellsFromLiveFields(fields ?? checked)
+    const count = live.case.length + live.file.length
+    if (count) hotExtra.value = live
+    hotLoaded.value = true
+    hotNote.value = count
+      ? `已从原网站载入 ${count} 个其余查询字段。`
+      : '原网站没有更多可见的查询字段，下面仍用本地记录。'
+    if (openAfter) openAllExtra()
+  } catch {
+    hotNote.value = '读取原网站查询字段失败，可以再往下滚一次。'
+  } finally {
+    hotLoading.value = false
+  }
+}
+async function saveBoth(): Promise<void> {
+  if (savingTemplate.value) return
+  const name = saveName.value.trim()
+  if (!name) {
+    storageMessage.value = '请填写模板名称。'
+    return
+  }
+  const fields: Record<string, string> = {}
+  for (const [key, value] of Object.entries(resolved.value.fields)) {
+    if (value.trim()) fields[key] = value
+  }
+  if (!hasExplicitFileSearchFilter(fields)) {
+    storageMessage.value = '先填写至少一项查询条件，再保存。'
+    return
+  }
+  const scope = liveScope()
+  if (!scope) return
+  const labels = filledDisplay()
+  const current = selectedLocal.value
+  const now = new Date().toISOString()
+  const template: QueryTemplate = current ? {
+    ...current,
+    name,
+    fields,
+    displayValues: labels,
+    updatedAt: now
+  } : {
+    id: `local-${crypto.randomUUID()}`,
+    name,
+    source: 'local',
+    queryType: 'FileSearch',
+    fields,
+    displayValues: labels,
+    unknownFields: { ...unknownFields.value },
+    version: 1,
+    createdAt: now,
+    updatedAt: now
+  }
+  savingTemplate.value = true
+  storageMessage.value = '正在保存到本地…'
+  try {
+    const result = await workspace.call({
+      action: 'saveQueryTemplate',
+      template,
+      expectedScope: scope,
+      expectedVersion: current ? current.version : null
+    })
+    if (!result?.ok) {
+      storageMessage.value = result?.message || '本地没有保存。'
+      return
+    }
+    const stored = result.templates.find(item => item.id === template.id && item.source === 'local')
+    if (!props.bridge) {
+      storageMessage.value = '已保存在本地。当前没有连上原网站，网站上的模板没有写入。'
+      await reloadLocal()
+      if (stored) await applyBase(stored.id)
+      return
+    }
+    storageMessage.value = '本地已保存，正在写入原网站…'
+    const before = new Set(historyOptions.value.map(item => item.id))
+    const queryId = siteQueryId(name)
+    const response = await props.bridge.request({
+      type: MessageType.SaveHistoryQuery,
+      payload: {
+        title: name,
+        queryId,
+        queryXml: buildQueryXml(fields, labels, template.unknownFields ?? {})
+      }
+    })
+    if (response.type !== MessageType.HistoryQuerySaved || !response.payload.ok) {
+      const reason = response.type === MessageType.HistoryQuerySaved && !response.payload.ok
+        ? response.payload.error.message
+        : response.type === MessageType.Error ? response.payload.message : '原网站没有返回保存结果。'
+      storageMessage.value = `已保存在本地。原网站没有写入：${reason}`
+      await reloadLocal()
+      if (stored) await applyBase(stored.id)
+      return
+    }
+    try { await loadHistory(true) } catch { /* 网站已写入，列表刷新失败时仍保留本地模板。 */ }
+    const created = historyOptions.value.find(item => item.name === name && !before.has(item.id))
+    const linkedId = queryId || created?.id || ''
+    if (stored && linkedId && isQueryGuid(linkedId) && stored.sourceQueryId !== linkedId) {
+      const again = liveScope()
+      if (again) {
+        await workspace.call({
+          action: 'saveQueryTemplate',
+          expectedScope: again,
+          expectedVersion: stored.version,
+          template: { ...stored, sourceQueryId: linkedId, updatedAt: new Date().toISOString() }
+        })
+      }
+    }
+    storageMessage.value = queryId ? '已更新本地模板，并写回原网站上的同名模板。' : '已保存在本地，并在原网站新建了这份查询模板。'
+    await reloadLocal()
+    const picked = localTemplates.value.find(item => item.id === template.id)
+    if (picked) await applyBase(picked.id)
+  } finally {
+    savingTemplate.value = false
+  }
+}
 async function checkAgainstPage(): Promise<void> {
   if (!props.bridge) {
     checkMessage.value = '先连接原网站，才能对照查询页。'
     return
   }
   checkingForm.value = true
-  checkMessage.value = '正在向原网站读取下拉，并打开文件查询页核对字段…'
+  checkMessage.value = '正在读取查询页上的字段，并向原网站要下拉…'
   try {
     const ticket = loads.begin()
+    const caseTypeId = formValue('case_type').trim()
     const [response] = await Promise.all([
       props.bridge.request({ type: MessageType.ScanFileSearchForm }, ticket.signal),
-      loadDictionaries(ticket.id, ticket.signal, true)
+      loadDictionaries(ticket.id, ticket.signal, true),
+      /^[0-9a-f-]{36}$/i.test(caseTypeId) ? loadFileTypes(caseTypeId) : Promise.resolve()
     ])
+    if (!loads.isCurrent(ticket.id)) return
     if (response.type !== MessageType.FileSearchFormResult) {
       checkMessage.value = response.type === MessageType.Error ? response.payload.message : '没有读到原网站的查询表。'
       return
     }
     const previous = fallbackFields()
-    const fields = response.payload.fields.length ? mergeFormFields(response.payload.fields, previous) : undefined
+    const checked = overlayFieldOptions(response.payload.fields, dictionaryOptions)
+    const fields = checked.length ? mergeFormFields(checked, previous) : undefined
     if (fields) pageFields.value = fields
     if (props.userId) {
-      rememberFormFields(props.userId, response.payload.fields.map(field => ({ ...field, id: formFieldKey(field.id) })))
+      rememberFormFields(props.userId, checked.map(field => ({ ...field, id: formFieldKey(field.id) })))
       rememberDictionaries(props.userId, FILE_FLOW_OPTION_FIELDS, flowDictionaries.value)
       rememberDictionaries(props.userId, FILE_BASIC_OPTION_FIELDS, basicDictionaries.value)
       rememberDictionaries(props.userId, FILE_PICKER_FIELDS, pickers.value)
     }
-    const lines = describeFormCheck(fields ?? response.payload.fields, previous)
+    const lines = describeFormCheck(fields ?? checked, previous)
     if (pickerWarnings.value.length) lines.push(pickerWarnings.value[0])
     checkMessage.value = lines.join('')
   } catch {
@@ -695,6 +917,11 @@ watch(() => [props.userId, props.mode] as const, () => {
   resetBase()
   selectedBaseId.value = ''
   openExtra.value = {}
+  hotExtra.value = null
+  hotLoaded.value = false
+  hotNote.value = ''
+  saveNameDirty.value = false
+  hotAbort?.abort()
   void reloadLocal()
   if (!props.userId) return
   activateOptionFallback(props.userId)
@@ -748,13 +975,15 @@ watch(selectedCustomerId, () => {
         </button>
       </li>
     </ul>
-    <p v-else-if="!loadingHistory && mode === 'customer'" class="empty">当前账号还没有客户配置。</p>
+    <p v-else-if="!loadingHistory && mode === 'customer' && manage" class="empty">还没有客户。点下面的新增客户。</p>
 
-    <label v-if="mode === 'history'">选用模板
-      <ThemeSelect v-model="selectedBaseId" :disabled="loadingHistory && historyOptions.length === 0" :placeholder="loadingHistory && historyOptions.length === 0 ? '正在读取…' : '请选择'" :options="[...historyOptions.map(item => ({ value: item.id, label: item.name, group: 'EASY' })), ...localTemplates.map(item => ({ value: item.id, label: item.name, group: '本地' }))]" @change="startApply(selectedBaseId)" />
+    <EmptyGuide v-if="mode === 'history' && !manage && !loadingHistory && historyOptions.length === 0 && localTemplates.length === 0" text="还没有查询模板。去文件查询模板新建一个，再回来选用。" action="去建模板" hash="/templates" />
+    <label v-else-if="mode === 'history'">选用模板
+      <ThemeSelect v-model="selectedBaseId" :disabled="loadingHistory && historyOptions.length === 0" :placeholder="loadingHistory && historyOptions.length === 0 ? '正在读取…' : '请选择'" empty-text="还没有模板。点下面的新建本地模板，或点上面的重新读取。" :options="[...historyOptions.map(item => ({ value: item.id, label: item.name, group: 'EASY' })), ...localTemplates.map(item => ({ value: item.id, label: item.name, group: '本地' }))]" @change="startApply(selectedBaseId)" />
     </label>
+    <EmptyGuide v-else-if="!manage && customers.length === 0" text="还没有客户。去客户管理建一个，再回来选用。" action="去创建客户" hash="/customers" />
     <label v-else>客户
-      <ThemeSelect v-model="selectedCustomerId" placeholder="请选择" :options="customers.map(item => ({ value: item.id, label: item.name + (item.enabled ? '' : '（已停用）') }))" />
+      <ThemeSelect v-model="selectedCustomerId" placeholder="请选择" empty-text="还没有客户。点下面的新增客户。" :options="customers.map(item => ({ value: item.id, label: item.name + (item.enabled ? '' : '（已停用）') }))" />
     </label>
     <p v-if="baseName" class="hint">基础模板：{{ baseName }}<span v-if="selectedLocal"> · 来源：本地</span><span v-else-if="selectedBaseId"> · 来源：EASY · 只读</span><span v-if="selectedLocal?.sourceQueryId"> · 已导入，刷新原网站模板不会覆盖</span></p>
     <p v-if="baseMissing" class="error" role="alert">基础模板不存在或无法解析，不会改用其他模板。</p>
@@ -807,11 +1036,16 @@ watch(selectedCustomerId, () => {
     <div class="query-conditions">
       <div class="section-heading">
         <strong>查询条件</strong>
+        <span v-if="manage" class="inline-actions">
+          <label>模板名称<input v-model="saveName" type="text" maxlength="80" @input="saveNameDirty = true" /></label>
+          <button type="button" class="search-submit" :disabled="savingTemplate" @click="saveBoth">{{ savingTemplate ? '正在保存…' : '保存到本地和网站' }}</button>
+        </span>
         <span class="inline-actions">
           <button type="button" class="text-button" :disabled="checkingForm" @click="checkAgainstPage">校对最新字段</button>
           <button type="button" class="text-button" @click="restoreTemplate">恢复模板</button>
         </span>
       </div>
+      <p class="hint">往下滚动会从原网站读取其余查询字段。保存会同时写入本机和原网站的查询模板。</p>
       <p v-if="dictionaryNote" class="hint">{{ dictionaryNote }}</p>
       <p v-if="mode === 'customer' && selectedCustomer" class="hint">当前客户：{{ selectedCustomer.name }}</p>
       <section v-for="block in formSections" :key="block.title" class="query-block">
@@ -881,6 +1115,7 @@ watch(selectedCustomerId, () => {
           </template>
         </div>
       </section>
+      <p ref="hotSentinel" class="hint">{{ hotLoading ? '正在从原网站读取下面的查询字段…' : hotNote || '继续往下，读取原网站上其余的查询字段。' }}</p>
       <p v-if="checkMessage" class="hint">{{ checkMessage }}</p>
       <p v-if="resolved.warnings.length" class="hint">{{ resolved.warnings[0] }}</p>
     </div>

@@ -18,6 +18,9 @@ import { CustomerQueryService } from '../src/customer/service'
 import { BundleCustomerRepository } from '../src/customer/repository'
 import { resolveQueryTemplate } from '../src/query/merge'
 import { parseQueryXml, MAX_QUERY_XML_CHARS, MAX_QUERY_XML_NODES } from '../src/query/xml-parser'
+import { buildQueryXml } from '../src/query/query-xml'
+import { cellsFromLiveFields } from '../src/query/live-fields'
+import { historySaveRequest, normalizeHistorySave } from '../src/api/query-history'
 import { BundleTemplateRepository } from '../src/query/repository'
 import { MemoryBundleRepository, readBundle } from '../src/storage/query-bundle'
 
@@ -225,6 +228,49 @@ describe('历史模板传输', () => {
     await service.list('user', 'file', true)
     expect(dataOf(await service.detail('user', 'file', guid))).toMatchObject({ name: '缓存标题', queryXml: xml })
     expect(codeOf(await service.detail('user', 'file', 'not-a-guid'))).toBe('INVALID_QUERY')
+  })
+
+  it('saves a query template with SearchQueryHisSave and does not invent an id', async () => {
+    const xml = buildQueryXml(
+      { customer_name_vague: '宁德时代', fileclass: 'general', post_s: '2025-09-15' },
+      { fileclass: '所有文件' }
+    )
+    expect(xml).toContain('<customer_name_vague>宁德时代</customer_name_vague>')
+    expect(xml).toContain('<selfileclass>general</selfileclass>')
+    expect(xml).toContain('<selfileclass_text>所有文件</selfileclass_text>')
+    expect(xml).toContain('<txtpost_s>2025-09-15</txtpost_s>')
+    const parsed = parseQueryXml(xml)
+    expect(parsed.ok && parsed.data.fields.fileclass).toBe('general')
+    expect(dataOf(normalizeHistorySave({ ClientInfo: { IsLogin: true, Status: true, Result: true } }))).toEqual({ saved: true })
+    expect(codeOf(normalizeHistorySave({ ClientInfo: { IsLogin: true, Status: true, Result: false, Message: '没有保存' } }))).toBe('BUSINESS_ERROR')
+    let body = ''
+    const service = new HistoryQueryService(new EasyTransport('http://183.36.43.66:88', {
+      fetcher: async (_url, init) => {
+        body = String(init?.body)
+        return new Response(JSON.stringify({ ClientInfo: { IsLogin: true, Status: true, Result: true } }), { status: 200 })
+      }
+    }))
+    expect(dataOf(await service.save('user', 'file', { title: '我的查询条件', queryId: '', queryXml: xml }))).toEqual({ saved: true })
+    const sent = new URLSearchParams(body)
+    expect(sent.get('Call')).toBe('SearchQueryHisSave')
+    expect(sent.get('is_query_save')).toBe('true')
+    expect(sent.get('is_out_save')).toBe('false')
+    expect(sent.get('query_save_title')).toBe('我的查询条件')
+    expect(sent.get('query_id')).toBe('')
+    expect(sent.get('query_type')).toBe('FileSearch')
+    expect(historySaveRequest('limit', '期限', '', '<xmlRoot></xmlRoot>').get('query_type')).toBe('LimitMonitor\u2014liall')
+  })
+
+  it('loads only the fields that sit below the first screen', () => {
+    const live = cellsFromLiveFields([
+      { id: 'case_volume', label: '我方文号', section: 'case', advanced: false, control: 'text', visible: true, hiddenBy: [], options: [] },
+      { id: 'applicant', label: '申请人', section: 'case', advanced: true, control: 'text', visible: true, hiddenBy: [], options: [] },
+      { id: 'agency_id', label: '代理机构', section: 'case', advanced: true, control: 'picker', visible: true, hiddenBy: [], options: [] },
+      { id: 'hidden_case', label: '藏起来', section: 'case', advanced: true, control: 'text', visible: false, hiddenBy: ['tr'], options: [] },
+      { id: 'file_remark', label: '文件备注', section: 'file', advanced: true, control: 'text', visible: true, hiddenBy: [], options: [] }
+    ])
+    expect(live.case.map(item => item.kind === 'text' || item.kind === 'named' ? item.key : '')).toEqual(['applicant', 'agency_id'])
+    expect(live.file.map(item => item.kind === 'text' ? item.key : '')).toEqual(['file_remark'])
   })
 
   it('asks the limit page for its own templates', () => {

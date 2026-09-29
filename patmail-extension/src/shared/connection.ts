@@ -1,4 +1,4 @@
-import { EASY_ORIGIN } from '../api/config'
+import { EASY_ORIGIN, isEasyOrigin } from '../api/config'
 import { isConfirmedOperator } from '../automation/operator'
 import { isRecord } from './guards'
 
@@ -71,7 +71,7 @@ export function emptyConnection(): EasyConnectionContext {
 export function isEasyConnection(value: unknown): value is EasyConnectionContext {
   if (!isRecord(value)) return false
   const status = value.sessionStatus
-  return value.easyOrigin === EASY_ORIGIN &&
+  return typeof value.easyOrigin === 'string' && isEasyOrigin(value.easyOrigin) &&
     (value.easyTabId === null || (typeof value.easyTabId === 'number' && Number.isInteger(value.easyTabId))) &&
     typeof value.operatorId === 'string' && value.operatorId.length <= 80 &&
     typeof value.lastOperatorId === 'string' && value.lastOperatorId.length <= 80 &&
@@ -83,7 +83,8 @@ export function isEasyConnection(value: unknown): value is EasyConnectionContext
 export function tabOrigin(url: string | undefined): string | null {
   if (!url) return null
   try {
-    return new URL(url).origin === EASY_ORIGIN ? EASY_ORIGIN : null
+    const origin = new URL(url).origin
+    return isEasyOrigin(origin) ? origin : null
   } catch {
     return null
   }
@@ -143,6 +144,7 @@ export class EasyConnectionController {
     const connectionVersion = this.context.connectionVersion + 1
     this.context = {
       ...emptyConnection(),
+      easyOrigin: origin,
       easyTabId: tab.id,
       lastOperatorId: this.context.lastOperatorId,
       connectionVersion,
@@ -192,13 +194,26 @@ export class EasyConnectionController {
   observeNavigation(tabId: number, url: string | undefined): void {
     if (this.context.easyTabId !== tabId || !url) return
     const connectionVersion = this.context.connectionVersion + 1
-    if (!tabOrigin(url)) {
+    const origin = tabOrigin(url)
+    if (!origin) {
       this.context = {
         ...emptyConnection(),
         lastOperatorId: this.context.lastOperatorId,
         connectionVersion,
         sessionStatus: 'error',
         message: '绑定页面已经离开 EASY 站点。'
+      }
+      return
+    }
+    if (origin !== this.context.easyOrigin) {
+      this.context = {
+        ...this.context,
+        easyOrigin: origin,
+        operatorId: '',
+        displayName: '',
+        connectionVersion,
+        sessionStatus: 'pending',
+        message: '标签页已换到另一个 EASY 站点，请重新检测会话。'
       }
       return
     }
@@ -217,13 +232,14 @@ export class EasyConnectionController {
   /** 重启后只恢复候选标签页。authenticated 必须等重新检测会话后才成立。 */
   restoreCandidate(raw: unknown): void {
     if (this.context.connectionVersion > 0 || this.context.easyTabId != null) return
-    if (!isRecord(raw) || raw.easyOrigin !== EASY_ORIGIN) return
+    if (!isRecord(raw) || typeof raw.easyOrigin !== 'string' || !isEasyOrigin(raw.easyOrigin)) return
     const tabId = raw.easyTabId
     if (tabId != null && (typeof tabId !== 'number' || !Number.isInteger(tabId))) return
     const lastOperatorId = typeof raw.lastOperatorId === 'string' ? raw.lastOperatorId : ''
     const connectionVersion = typeof raw.connectionVersion === 'number' && Number.isInteger(raw.connectionVersion) ? raw.connectionVersion : 0
     this.context = {
       ...emptyConnection(),
+      easyOrigin: raw.easyOrigin,
       easyTabId: tabId ?? null,
       lastOperatorId,
       connectionVersion,

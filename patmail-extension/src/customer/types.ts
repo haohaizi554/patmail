@@ -41,6 +41,9 @@ export interface PctTaskDraft {
 /** 已封装的工作流。PCT提醒是第一条。 */
 export type WorkflowId = 'pct-reminder'
 
+/** 创建指定客户后默认带上的能力。案件联系人导出目前只给鹏城实验室。 */
+export type CustomerSkillId = 'case-contacts'
+
 export interface CustomerQueryProfile {
   id: string
   name: string
@@ -51,19 +54,26 @@ export interface CustomerQueryProfile {
   querySurface?: QuerySurfaceId
   /** 这条客户走哪条已封装工作流。 */
   workflowId?: WorkflowId
+  /** 同一客户有多条工作流时，用这句话区分。 */
+  workflowRemark?: string
   /** 期限监控弹层里三种可见发文模式。只在查询入口是期限监控时使用。 */
   limitMailStyle?: LimitMailStyle
   /** 文件管理弹层里的发文模式。只在查询入口是文件查询时使用。 */
   fileMailStyle?: FileMailStyle
   /** 查询页最后一次提交的字段，不是操作步骤。 */
   boundQuery?: Record<string, string>
-  /** PCT 提醒提交给当前登录人审核。 */
+  /** PCT 提醒提交给当前登录人审核。选了别人时不写这一项。 */
   reviewTarget?: ReviewTarget
+  /** 从人员名单里选中的审核人。 */
+  reviewerId?: string
+  reviewerName?: string
   /** 从原站发件人列表选中的邮箱。 */
   mailsetId?: string
   mailsetLabel?: string
   /** 由 PCT 表格创建的任务。不会向 EASY 提交发文。 */
   pctTask?: PctTaskDraft
+  /** 创建这家客户时默认打开的能力。没有这项的客户不出现对应入口。 */
+  skills?: CustomerSkillId[]
   enabled: boolean
   /** 缺省视为 1。保存时必须带上读取到的版本，避免后写覆盖先写。 */
   revision?: number

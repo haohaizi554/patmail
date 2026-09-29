@@ -36,6 +36,12 @@ export function xmlNodeToApiField(nodeName: string): FileSearchRequestField | nu
   return isFileSearchBusinessField(nodeName) ? nodeName as FileSearchRequestField : null
 }
 
+/** 保存回网站时，节点名用页面控件 id，不是 GetSearchFiles 参数名。 */
+export function apiFieldToXmlNode(field: string): string {
+  const found = Object.entries(XML_NODE_TO_API).find(([, apiField]) => apiField === field)
+  return found?.[0] ?? field
+}
+
 export interface XmlNodeClass {
   kind: 'value' | 'display' | 'unknown'
   apiField?: FileSearchRequestField

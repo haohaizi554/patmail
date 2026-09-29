@@ -14,6 +14,7 @@ import RecordsPage from './pages/RecordsPage.vue'
 import AcceptancePage from './pages/AcceptancePage.vue'
 import SettingsPage from './pages/SettingsPage.vue'
 import LimitsPage from './pages/LimitsPage.vue'
+import CaseContactsPage from './pages/CaseContactsPage.vue'
 import Shell from '../../../src/components/Shell.vue'
 import AppDialog from './components/AppDialog.vue'
 
@@ -22,15 +23,15 @@ const nav = [
   { name: '文件管理', path: 'file', hash: '/files' },
   { name: '期限监控', path: 'limit', hash: '/limits' },
   { name: '客户管理', path: 'users', hash: '/customers' },
-  { name: '发文规则与映射配置', path: 'rule', hash: '/rules' },
+  { name: '发文映射', path: 'rule', hash: '/rules' },
   { name: '发文任务', path: 'task', hash: '/tasks' },
   { name: '发文记录', path: 'record', hash: '/records' },
   { name: '文件查询模板', path: 'chart', hash: '/templates' },
   { name: '邮件草稿', path: 'task', hash: '/drafts' },
   { name: '工作流', path: 'rule', hash: '/workflow' }
 ]
-const hiddenRoutes = new Set(['/acceptance', '/settings'])
-const pages = { '/': HomePage, '/files': FilesPage, '/limits': LimitsPage, '/customers': CustomersPage, '/templates': TemplatesPage, '/rules': RulesPage, '/tasks': TasksPage, '/drafts': DraftsPage, '/workflow': WorkflowPage, '/records': RecordsPage, '/acceptance': AcceptancePage, '/settings': SettingsPage }
+const hiddenRoutes = new Set(['/acceptance', '/settings', '/contacts'])
+const pages = { '/': HomePage, '/files': FilesPage, '/limits': LimitsPage, '/customers': CustomersPage, '/contacts': CaseContactsPage, '/templates': TemplatesPage, '/rules': RulesPage, '/tasks': TasksPage, '/drafts': DraftsPage, '/workflow': WorkflowPage, '/records': RecordsPage, '/acceptance': AcceptancePage, '/settings': SettingsPage }
 
 function readRoute(): string {
   const path = location.hash.replace(/^#/, '') || '/'
@@ -45,7 +46,7 @@ function workspaceScroller(): HTMLElement | null {
   return document.querySelector('.workspace')
 }
 const search = ref('')
-const pageName = computed(() => route.value === '/settings' ? '系统设置' : nav.find(item => item.hash === route.value)?.name ?? '首页')
+const pageName = computed(() => route.value === '/settings' ? '系统设置' : route.value === '/contacts' ? '鹏城实验室' : nav.find(item => item.hash === route.value)?.name ?? '首页')
 const page = computed(() => pages[route.value as keyof typeof pages] ?? HomePage)
 const profileName = computed(() => workspace.connection.value.displayName || '未登录')
 const profileDept = computed(() => workspace.connection.value.sessionStatus === 'authenticated' ? 'EASY 已连接' : '尚未连接')

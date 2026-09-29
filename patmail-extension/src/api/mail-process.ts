@@ -1,5 +1,5 @@
 import { isQueryGuid } from '../query/query-validator'
-import { EASY_ORIGIN } from './config'
+import { isEasyOrigin } from './config'
 import { businessMessage, isRecord, readClientInfo } from './response-guards'
 import { apiError, type ApiResult } from './types'
 
@@ -261,7 +261,7 @@ function openTarget(kind: ProcessKind, row: Record<string, unknown>): ProcessOpe
 
 /** 原站发文页。objid 是邮件编号。单独打开这个地址不会走首页页签，记录页不再使用。 */
 export function mailPageUrl(origin: string, mailId: string, guid = globalThis.crypto.randomUUID()): string | null {
-  if (origin !== EASY_ORIGIN || !isQueryGuid(mailId) || !isQueryGuid(guid)) return null
+  if (!isEasyOrigin(origin) || !isQueryGuid(mailId) || !isQueryGuid(guid)) return null
   const url = new URL('/Forms/mail/mail.aspx', origin)
   url.searchParams.set('objid', mailId)
   url.searchParams.set('guid', guid)

@@ -10,7 +10,6 @@ import { isQueryGuid } from '../../query/query-validator'
 import { scopeFromConnection, type ExpectedAccountScope } from '../../shared/connection'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useWorkspace } from '../composables/useWorkspace'
-import CustomerPolicyEditor from '../components/rules/CustomerPolicyEditor.vue'
 import DescriptionMailTypeEditor from '../components/rules/DescriptionMailTypeEditor.vue'
 import RecipientEditor from '../components/rules/RecipientEditor.vue'
 import SignatureEditor from '../components/rules/SignatureEditor.vue'
@@ -30,6 +29,8 @@ const ready = computed(() => connection.value.sessionStatus === 'authenticated')
 const draft = ref<MailRuleBundle | null>(null)
 const draftScope = ref<ExpectedAccountScope | null>(null)
 const message = ref('')
+const savingText = ref(false)
+const textStatus = ref('')
 const importText = ref('')
 const reviewers = ref<Array<{ id: string; name: string }>>([])
 const reviewerNotice = ref('')
@@ -238,11 +239,22 @@ async function saveSender(input: { mailsetId: string; label: string }): Promise<
 }
 
 async function saveText(): Promise<void> {
-  await persist(bundle => {
-    if (!draft.value) return
-    bundle.subject = { ...draft.value.subject, version: draft.value.subject.version + 1 }
-    bundle.body = { ...draft.value.body, version: draft.value.body.version + 1 }
-  })
+  if (savingText.value) return
+  savingText.value = true
+  textStatus.value = ''
+  try {
+    await persist(bundle => {
+      if (!draft.value) return
+      bundle.subject = { ...draft.value.subject, version: (draft.value.subject.version || 0) + 1 }
+      bundle.body = { ...draft.value.body, version: (draft.value.body.version || 0) + 1 }
+    })
+    textStatus.value = message.value.includes('已保存') ? '标题和正文已保存。' : (message.value || '标题和正文没有保存。')
+  } catch (error) {
+    textStatus.value = error instanceof Error ? error.message : '标题和正文没有保存。'
+    message.value = textStatus.value
+  } finally {
+    savingText.value = false
+  }
 }
 
 async function importRules(): Promise<void> {
@@ -269,11 +281,10 @@ async function importRules(): Promise<void> {
 </script>
 
 <template>
-  <PageHead title="发文规则与映射配置" desc="配置企业个性化发文规则，让自动化更贴合您的业务场景。" :art="bg('规则配置好，发文更轻松.png')" art-large />
-  <section v-if="!ready || !draft" class="card"><p class="empty">尚未确认 EASY 用户，不能读取发文规则。</p></section>
+  <PageHead title="发文映射" desc="文件描述对上发文类型，并记下收件人、签名、标题和正文。" :art="bg('规则配置好，发文更轻松.png')" art-large />
+  <section v-if="!ready || !draft" class="card"><p class="empty">尚未确认当前登录的人，不能读取发文映射。</p></section>
   <div v-else class="rules-page">
     <p v-if="message" class="hint">{{ message }}</p>
-    <CustomerPolicyEditor :policies="draft.policies" :customers="customers" @save="savePolicy" @remove="removePolicy" />
     <DescriptionMailTypeEditor :mappings="draft.mappings" :mail-types="mailTypes" :notice="mailTypeNotice" @save="saveMapping" @remove="removeMapping" @reload="loadMailTypes(true)" />
     <div class="rule-columns">
       <RecipientEditor :recipients="draft.recipients" :customers="customers" @save="saveRecipient" />
@@ -290,7 +301,8 @@ async function importRules(): Promise<void> {
         <SubjectRuleEditor v-model="draft.subject" />
         <BodyRuleEditor v-model="draft.body" />
       </div>
-      <button class="solid" type="submit">保存标题和正文</button>
+      <button class="solid" type="submit" :disabled="savingText">{{ savingText ? '正在保存…' : '保存标题和正文' }}</button>
+      <p v-if="textStatus" class="save-status" role="status">{{ textStatus }}</p>
     </form>
     <form class="card stack-form" @submit.prevent="importRules">
       <h2>配置导入</h2>

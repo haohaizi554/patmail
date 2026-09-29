@@ -32,6 +32,19 @@ export function normalizeHistoryOptions(data: unknown): ApiResult<HistoryQueryOp
   return { ok: true, data: options }
 }
 
+/** 保存成功看 ClientInfo。Result 明确为 false 就是没写上，不从响应里猜新的模板 ID。 */
+export function normalizeHistorySave(data: unknown): ApiResult<{ saved: true }> {
+  if (!isRecord(data)) return apiError('INVALID_RESPONSE', '保存查询模板的响应不是对象。')
+  const client = readClientInfo(data.ClientInfo)
+  if (!client.ok) return client
+  if (client.data.IsLogin === false) return apiError('SESSION_EXPIRED', 'EASY 登录状态已失效，请在原网站重新登录。')
+  if (client.data.Result === false || client.data.Status === false) {
+    return apiError('BUSINESS_ERROR', businessMessage(client.data))
+  }
+  if (client.data.Result === true || client.data.Status === true) return { ok: true, data: { saved: true } }
+  return apiError('INVALID_RESPONSE', '保存查询模板的响应没有成功标记。', undefined)
+}
+
 export function normalizeHistoryDetail(data: unknown, queryId: string): ApiResult<{ id: string; queryXml: string; name?: string }> {
   if (!isRecord(data)) return apiError('INVALID_RESPONSE', '历史模板详情不是对象。')
   const auth = authFailure(data)

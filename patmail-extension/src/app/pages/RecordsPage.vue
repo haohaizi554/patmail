@@ -6,6 +6,7 @@ import { PROCESS_SPECS, type ProcessKind, type ProcessListRow } from '../../api/
 import { describeTaskRecord } from '../record-status'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useWorkspace } from '../composables/useWorkspace'
+import EmptyGuide from '../components/EmptyGuide.vue'
 
 const bridge = inject<MessageBridge>('bridge')
 const { connection, tasks } = useWorkspace()
@@ -205,7 +206,7 @@ watch(ready, (ok) => {
     <p v-else-if="message" class="hint">{{ message }}</p>
     <p v-if="staleBackground" class="hint">三个页签都会带上流程类型。正在运行的后台还是移动列表之前的版本，所以会整条拒绝。</p>
     <button v-if="staleBackground" type="button" class="solid" @click="reloadExtension">重新加载扩展</button>
-    <p v-else-if="!loading && rows.length === 0" class="empty">暂无记录</p>
+    <p v-else-if="!loading && rows.length === 0" class="empty">这次没有查到待办。换个条件再查，或点刷新。</p>
     <table v-if="ready && rows.length" class="grid">
       <thead>
         <tr>
@@ -232,7 +233,8 @@ watch(ready, (ok) => {
   <section class="card">
     <h2>本地任务记录</h2>
     <p class="hint">记录从已保存任务推导。没有发送核验时，不会显示已成功发送。</p>
-    <p v-if="!ready || tasks.length === 0" class="empty">暂无记录</p>
+    <p v-if="!ready" class="empty">还没确认当前登录的人，本地记录先不显示。</p>
+    <EmptyGuide v-else-if="tasks.length === 0" text="还没有本地发文任务。去发文任务里拼一封之后，记录会出现在这里。" action="去发文任务" hash="/tasks" />
     <table v-else class="grid">
       <thead><tr><th>时间</th><th>客户</th><th>状态</th><th>说明</th></tr></thead>
       <tbody>

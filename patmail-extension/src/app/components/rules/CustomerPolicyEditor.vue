@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import ThemeSelect from '../../../../../src/components/ThemeSelect.vue'
+import EmptyGuide from '../EmptyGuide.vue'
 import { FILE_MAIL_STYLES, LIMIT_MAIL_STYLES } from '../../../customer/mail-flow'
 import type { CustomerQueryProfile, LimitMailStyle, QuerySurfaceId } from '../../../customer/types'
 import { NEW_POLICY_SET, policyRemark, policySetKey } from '../../../mail/rules/customer-policy'
@@ -157,7 +158,12 @@ watch(() => props.policies, (list) => {
         <tr v-if="rows.length === 0">
           <td colspan="4" class="mapping-empty">还没有发文方式。先选查询方式，再选这个方式下的发文方式。</td>
         </tr>
-        <tr class="mapping-add">
+        <tr v-if="customers.length === 0" class="mapping-add">
+          <td colspan="4">
+            <EmptyGuide text="还没有客户，发文方式没法配。去客户管理建一个再回来。" action="去创建客户" hash="/customers" />
+          </td>
+        </tr>
+        <tr v-else class="mapping-add">
           <td>
             <ThemeSelect v-model="profileId" placeholder="选择客户" :options="customers.map(item => ({ value: item.id, label: item.name }))" />
           </td>

@@ -6,7 +6,7 @@ import DebugViewer from './DebugViewer.vue'
 import FileSearchPanel from './FileSearchPanel.vue'
 import { copySnapshot } from './copySnapshot'
 import { usePanelDrag } from './usePanelDrag'
-import { EASY_ORIGIN, trustedOrigin } from '../api/config'
+import { isEasyOrigin, trustedOrigin } from '../api/config'
 import { sendToBackground } from '../utils/runtime'
 
 const bridge = inject<MessageBridge>('bridge')
@@ -84,7 +84,7 @@ async function loadPageInfo(): Promise<void> {
     }
     url.value = message.payload.url
     title.value = message.payload.title
-    if (new URL(message.payload.url).origin === EASY_ORIGIN) activeTab.value = 'files'
+    if (isEasyOrigin(new URL(message.payload.url).origin)) activeTab.value = 'files'
   } catch (error) {
     errorText.value = `读取页面信息失败：${failureText(error)}`
   } finally {

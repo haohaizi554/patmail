@@ -36,7 +36,7 @@ label > .theme-select,
 .theme-select-trigger.is-open .theme-select-chevron { transform: rotate(180deg); }
 #theme-select-portal { pointer-events: none; }
 .theme-select-menu {
-  position: fixed; z-index: 40; margin: 0; padding: 6px; overflow-x: hidden; overflow-y: auto; list-style: none;
+  position: fixed; z-index: 70; margin: 0; padding: 6px; overflow-x: hidden; overflow-y: auto; list-style: none;
   border: 1px solid #eadff0; border-radius: 12px; background: #fff; color: var(--text, #243056);
   box-shadow: 0 12px 32px #ffd0e266; pointer-events: auto;
   font: 13px/1.4 "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
@@ -50,6 +50,7 @@ label > .theme-select,
 .theme-select-menu [role="option"].is-tone-diy { background: #f6f5ff; }
 .theme-select-menu [role="option"].is-active { background: #fff0f6; }
 .theme-select-menu [role="option"].is-selected { background: #ffe4ef; color: #ff3f86; font-weight: 700; }
+.theme-select-menu [role="option"].is-disabled { opacity: .45; cursor: not-allowed; }
 .theme-select-menu [role="option"].is-tone-diy.is-selected { background: #e4e0ff; color: #4338ca; }
 .theme-select-empty { padding: 8px 10px; color: var(--sub, #8d97b0); }
 .theme-tree-menu { display: flex; flex-direction: column; gap: 6px; overflow: hidden; padding: 8px; }

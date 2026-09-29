@@ -30,7 +30,7 @@ function save(): void {
     <p v-if="notice" class="hint">{{ notice }}</p>
     <p v-if="selected" class="hint">当前默认：{{ selected.label }}</p>
     <div class="filters">
-      <ThemeSelect v-model="mailsetId" placeholder="选择发件邮箱" :options="senders.map(item => ({ value: item.id, label: item.label }))" />
+      <ThemeSelect v-model="mailsetId" placeholder="选择发件邮箱" empty-text="发件邮箱还没读到。点旁边的重新读取。" :options="senders.map(item => ({ value: item.id, label: item.label }))" />
       <button type="button" class="solid" @click="save">保存默认发件人</button>
       <button type="button" class="text-button" @click="emit('reload')">重新读取发件邮箱</button>
     </div>

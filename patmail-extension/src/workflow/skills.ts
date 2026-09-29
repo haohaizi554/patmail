@@ -22,7 +22,7 @@ export const SKILLS: SkillTemplate[] = [
     tint: 'sky',
     detail: '客户先选期限监控，再走这条。',
     params: [
-      field('surface_label', '从哪里找', '期限监控', '名字可以改。找案件的地方还是期限监控。')
+      field('surface_label', '从哪里找', '期限监控', '从查询入口里点一个。')
     ]
   },
   {
@@ -55,11 +55,11 @@ export const SKILLS: SkillTemplate[] = [
     title: '对上要发的信',
     blurb: '按文号，对上该发哪一种信',
     tint: 'pink',
-    detail: '到系统里已经有的发文类型中，按名字来对。对不上就先空着，不猜。',
+    detail: '有客户文号一种，只有我方文号一种。从发文类型里点。',
     params: [
-      field('customer_type_id', '有客户文号时发这种', '', '从已经配好的，或从全部种类里点。不点就按下面的词来对。'),
+      field('customer_type_id', '有客户文号时发这种', '', '从发文类型里点一种。'),
       field('customer_type_name', '有客户文号时的信叫什么', '', '', true),
-      field('our_type_id', '只有我方文号时发这种', '', '从已经配好的，或从全部种类里点。不点就按下面的词来对。'),
+      field('our_type_id', '只有我方文号时发这种', '', '从发文类型里点一种。'),
       field('our_type_name', '只有我方文号时的信叫什么', '', '', true),
       field('type_keyword', '名字里要有', '提醒申请PCT', '几种信都要带这个词。'),
       field('customer_keyword', '有客户文号时还要有', '贵方案号', '这一行填了客户文号，就走这种。'),
@@ -73,16 +73,16 @@ export const SKILLS: SkillTemplate[] = [
   {
     id: 'send-style',
     title: '几件合成一封',
-    blurb: '同一客户合成一封，还是一件一封',
+    blurb: '同一客户合成一封',
     tint: 'mint',
-    detail: '具体用哪一种，在客户里选。这里改的是你看到的名字。',
+    detail: '这一条用同客户合并发文。同一客户的几件合成一封。',
     params: [
-      field('style_1_label', '合成一封', '同客户合并发文', '客户里看到的名字。'),
-      field('style_1_value', '合成一封的记号', '1', '程序用来记住这一种。', true),
-      field('style_2_label', '一件一封', '单个来文发文', '客户里看到的名字。'),
-      field('style_2_value', '一件一封的记号', '2', '程序用来记住这一种。', true),
-      field('style_3_label', '按第一联系人合成', '同客户第一联系人合并发文', '客户里看到的名字。'),
-      field('style_3_value', '按第一联系人合成的记号', '3', '程序用来记住这一种。', true)
+      field('style_1_label', '发文方式', '同客户合并发文', '从名单里点一种。'),
+      field('style_1_value', '同客户合并发文的记号', '1', '程序用来记住这一种。', true),
+      field('style_2_label', '单个来文发文', '单个来文发文', '客户看到这个名字。', true),
+      field('style_2_value', '单个来文发文的记号', '2', '程序用来记住这一种。', true),
+      field('style_3_label', '同客户第一联系人合并发文', '同客户第一联系人合并发文', '客户看到这个名字。', true),
+      field('style_3_value', '同客户第一联系人合并发文的记号', '3', '程序用来记住这一种。', true)
     ]
   },
   {
@@ -104,7 +104,7 @@ export const SKILLS: SkillTemplate[] = [
     tint: 'sky',
     detail: '这次选一个。没选的话，按下面这句话来。',
     params: [
-      field('sender_mailset', '优先用这个邮箱', '', '不选的话，先用规则里记住的邮箱，再否则用客户上记住的。'),
+      field('sender_mailset', '优先用这个邮箱', '', '不选的话，沿用下面写出来的那个邮箱。'),
       field('sender_mailset_label', '这个邮箱叫什么', '', '', true),
       field('sender_fallback', '这次没选时', '先用规则里记住的邮箱，再否则用客户上记住的', '客户和期限监控都按这个顺序。')
     ]
@@ -114,9 +114,9 @@ export const SKILLS: SkillTemplate[] = [
     title: '谁来看一眼',
     blurb: '写好后交给当前登录的人看',
     tint: 'lilac',
-    detail: '审核人是现在登录的这个人。',
+    detail: '从人员名单里点一个。现在登录的人会标出来。',
     params: [
-      field('review_label', '页面上怎么写', '提交给当前登录人', '客户里看到的名字。'),
+      field('review_label', '交给谁', '提交给当前登录人', '点开名单选一个人。'),
       field('review_value', '交给谁的记号', 'self', '程序用来记住交给当前登录人。', true)
     ]
   },

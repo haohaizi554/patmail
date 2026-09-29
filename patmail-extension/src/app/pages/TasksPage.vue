@@ -20,9 +20,14 @@ import { describeItemRecord, describeTaskRecord } from '../record-status'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { sendToBackground } from '../../utils/runtime'
 import { useWorkspace } from '../composables/useWorkspace'
+import { useWorkflowCatalog } from '../composables/useWorkflowCatalog'
+import WorkflowMailEntry from '../components/WorkflowMailEntry.vue'
+import EmptyGuide from '../components/EmptyGuide.vue'
 
 const bridge = inject<MessageBridge>('bridge')
 const { connection, customers, rules, tasks, call } = useWorkspace()
+const { catalog } = useWorkflowCatalog()
+const entry = ref<'diy' | 'workflow'>('diy')
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
 const detail = ref<Record<string, unknown> | null>(null)
 const detailMessage = ref('')
@@ -226,6 +231,8 @@ const signatureDefaultKey = computed(() => defaultSignatureChoice(
   rules.value?.defaultSignatureId ?? null,
   siteReservedId.value || null
 )?.key ?? '')
+const signatureName = computed(() => signatureList.value.find(item => item.key === signatureDefaultKey.value)?.name ?? '')
+const signatureText = computed(() => signatureList.value.find(item => item.key === signatureDefaultKey.value)?.content.trim() ?? '')
 
 watch(ready, (ok) => {
   if (!ok) return
@@ -287,16 +294,25 @@ onMounted(() => { if (ready.value) void call({ action: 'load' }) })
   <PageHead title="发文任务" desc="高效执行专利发文任务，让重要文件准时送达！" :art="bg('创业路上的小胜利.png')" />
   <section v-if="!ready" class="card"><p class="empty">尚未确认 EASY 用户。刷新页面后也不会加载其他账号的任务。</p></section>
   <template v-else>
-    <section class="card">
-      <div class="card-head"><h2>拼一封发文</h2></div>
+    <div class="filters">
+      <button type="button" :class="entry === 'diy' ? 'solid' : 'ghost'" @click="entry = 'diy'">自己拼一封</button>
+      <button type="button" :class="entry === 'workflow' ? 'solid' : 'ghost'" @click="entry = 'workflow'">按工作流发文</button>
+    </div>
+    <WorkflowMailEntry v-if="entry === 'workflow'" :customers="customers" :rules="rules" :operator-id="connection.operatorId" :mail-types="mailTypes" :senders="mailsets" :signature-name="signatureName" :signature-text="signatureText" :catalog="catalog" />
+    <section v-else class="card">
+      <div class="card-head"><h2>自己拼一封</h2></div>
       <p class="hint">创建任务是把客户、文件、发文类型和已保存规则自己拼起来。这一步只生成预览，还不会提交到 EASY。</p>
       <div class="form-grid">
-        <label>客户<ThemeSelect v-model="customerId" placeholder="选择客户" :options="customerOptions(customers)" /></label>
+        <div v-if="customers.length === 0" class="span-all">
+          <EmptyGuide text="还没有客户。先去客户管理建一个，再回来拼这封。" action="去创建客户" hash="/customers" />
+        </div>
+        <label v-else>客户<ThemeSelect v-model="customerId" placeholder="选择客户" :options="customerOptions(customers)" /></label>
         <label>发文类型<MailTypeTreeSelect v-model="mailTypeId" :options="mailTypeOptions" :disabled="mailTypes.length === 0" /></label>
-        <label>发件人<ThemeSelect :model-value="mailsetId" placeholder="选择发件邮箱" :options="senderOptions" @update:model-value="chooseSender(String($event))" /></label>
-        <label>签名<ThemeSelect :model-value="signatureId" placeholder="选择签名" :options="signatureOptions" @update:model-value="chooseSignature(String($event))" @open="loadSignatures(true)" /></label>
+        <label>发件人<ThemeSelect :model-value="mailsetId" placeholder="选择发件邮箱" empty-text="发件邮箱还没读到。先确认已经连上，再重新打开这一页。" :options="senderOptions" @update:model-value="chooseSender(String($event))" /></label>
+        <label>签名<ThemeSelect :model-value="signatureId" placeholder="选择签名" empty-text="签名还是空的。点开会重新读取。要自己写一份，去发文映射添加暂存签名。" :options="signatureOptions" @update:model-value="chooseSignature(String($event))" @open="loadSignatures(true)" /></label>
         <label>文件名<input v-model="fileKeyword" placeholder="可按文件名缩小范围" @keydown.enter="searchFiles" /></label>
       </div>
+      <p v-if="mailTypes.length === 0" class="hint">发文类型还没读到。确认已经连上后，<button type="button" class="text-button" @click="loadMailTypes">重新读取</button>。</p>
       <div class="filters">
         <button type="button" class="ghost" :disabled="fileLoading" @click="searchFiles">{{ fileLoading ? '查找中' : '查找文件' }}</button>
         <button type="button" class="ghost" @click="applyRules">带入这个客户的规则</button>
@@ -353,7 +369,7 @@ onMounted(() => { if (ready.value) void call({ action: 'load' }) })
     <section class="card">
       <h2>本地计划</h2>
       <p class="hint">这些计划保存在扩展里，和上面从 EASY 读到的发文不是同一份列表。</p>
-      <p v-if="tasks.length === 0" class="empty">暂无任务</p>
+      <p v-if="tasks.length === 0" class="empty">还没有本地计划。先在上面自己拼一封，或切到按工作流发文。</p>
       <table v-else class="grid">
         <thead><tr><th>客户</th><th>文件</th><th>预计邮件</th><th>状态</th><th>记录</th><th></th></tr></thead>
         <tbody>
