@@ -21,6 +21,7 @@ Content-Type：`application/x-www-form-urlencoded; charset=UTF-8`
 | [07-发文与邮件.md](07-发文与邮件.md) | MailCustomer / SaveMailInfo / 邮件页读取 |
 | [08-流程审批.md](08-流程审批.md) | GetFlowInfo / GetFlowHistory / GetUrgencyList / GetFlowSubmit / FlowSubmit |
 | [09-期限监控.md](09-期限监控.md) | LimitMonitorInit / GetLimitMonitorCaseList / LimitMailCustomer |
+| [10-邮件签名.md](10-邮件签名.md) | GetMailSignatureSettingList / GetSignatureset / GetSignature / Getmailset |
 
 ## 接口清单
 
@@ -37,7 +38,7 @@ Content-Type：`application/x-www-form-urlencoded; charset=UTF-8`
 | 流向与下载列名 | CaseInfo.ashx | GetFlowdirection | 只读响应已核对 |
 | 部门树 | Common.ashx | LoadDeptTree | 只读响应已核对 |
 | 人员树 | Common.ashx | GetTreeUser | 只读响应已核对 |
-| 代理机构树 | Common.ashx | GetTreeAgent | 请求已核对，响应正文未单独保存 |
+| 代理机构树 | Common.ashx | GetTreeAgent | 响应键 `TreeUser` 已由页面脚本核对，原文未保存 |
 | 所属分部 | BaseInfo.ashx | GetDeptBranch | 只读响应已核对 |
 | 专利标签 | CaseInfo.ashx | GetApplyTags | 只读响应已核对，当前账号为空 |
 | 下载名称模板 | BaseInfo.ashx | GetFileTempNameList | 只读响应已核对 |
@@ -52,12 +53,19 @@ Content-Type：`application/x-www-form-urlencoded; charset=UTF-8`
 | 批量删文件 | CaseInfo.ashx | BatchDelFile | 页面参数已核对，未调用 |
 | 保存收文 | CaseInfo.ashx | SaveFileReceiveInfo | 页面参数已核对，未调用 |
 | 下载 | BaseInfo.ashx / FileHandler.ashx | DownLoad | 页面步骤已核对，未下载文件 |
-| 客户发文 | Notice.ashx | MailCustomer | 请求和成功条件已核对，未重新调用 |
+| 客户发文 | Notice.ashx | MailCustomer | 成功只看 `objid`，原文未保存，未重新调用 |
 | 期限监控列表 | Report.ashx | GetLimitMonitorCaseList | 请求和只读响应已核对 |
-| 期限监控发文 | Notice.ashx | LimitMailCustomer | 请求和页面成功条件已核对，未重新调用 |
-| 保存邮件 | Mail.ashx | SaveMailInfo | 请求和成功条件已核对，未重新调用 |
+| 期限监控发文 | Notice.ashx | LimitMailCustomer | 成功看 `NeedConfirmFillAgency` 或 `objid`，原文未保存 |
+| 保存邮件 | Mail.ashx | SaveMailInfo | 成功只看 `ClientInfo.Status`，原文未保存 |
+| 关联文件 | Mail.ashx | SaveMailRalteCaseFile | `file_ids` 为分号拼接，成功只看 `ClientInfo.Result` |
 | 邮件页读取 | Mail.ashx | GetMailInfo / GetMailCase / GetMailFile 等 | 只读响应已核对 |
 | 上传 | UploadFile.aspx | CommUpload | 页面入口已核对，未上传 |
 | 流程信息 | Common.ashx | GetFlowInfo / GetFlowHistory / GetUrgencyList | 只读响应已核对 |
-| 流程节点 | Common.ashx | GetFlowSubmit | 请求已核对，响应正文未保存，未调用 |
-| 流程提交 | Common.ashx | FlowSubmit | 页面参数已核对，未调用 |
+| 流程节点 | Common.ashx | GetFlowSubmit | 节点字段已由 `IhgFlow.js` 核对，那次响应是空的 502 |
+| 流程提交 | Common.ashx | FlowSubmit | 成功只看 `ClientInfo.Result`，未调用 |
+| 结束发文流程 | Mail.ashx | EndEmailFlowd | 参数已由 `mail.js` 核对，未调用 |
+| 个人签名名单 | Login.ashx | GetMailSignatureSettingList | 请求和长度已核对，响应正文未保存 |
+| 个人签名正文 | Login.ashx | GetSignatureset | 请求和长度已核对，响应正文未保存 |
+| 签名页代理机构 | CaseInfo.ashx | GetAencyList | 请求和长度已核对，响应正文未保存 |
+| 发文页签名下拉 | Mail.ashx | GetSignature | 请求和字段名已核对，响应正文未保存 |
+| 邮箱预留签名 | Login.ashx | Getmailset | 页面参数已核对，这次抓包没有这条请求 |
