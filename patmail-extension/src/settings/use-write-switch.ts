@@ -1,13 +1,20 @@
 import { onMounted, onUnmounted, ref } from 'vue'
-import { hydrateWriteSwitch, isWriteSwitchOpen, setWriteSwitchOpen, watchWriteSwitch } from './write-switch'
+import { hydrateWriteSwitch, isWriteSwitchOpen, isWriteSwitchReady, setWriteSwitchOpen, watchWriteSwitch } from './write-switch'
 
 export function useWriteSwitch() {
   const open = ref(isWriteSwitchOpen())
+  const ready = ref(isWriteSwitchReady())
   let stop = (): void => {}
 
   onMounted(() => {
-    stop = watchWriteSwitch(() => { open.value = isWriteSwitchOpen() })
-    void hydrateWriteSwitch().then(() => { open.value = isWriteSwitchOpen() })
+    stop = watchWriteSwitch(() => {
+      open.value = isWriteSwitchOpen()
+      ready.value = isWriteSwitchReady()
+    })
+    void hydrateWriteSwitch().then(() => {
+      open.value = isWriteSwitchOpen()
+      ready.value = isWriteSwitchReady()
+    })
   })
   onUnmounted(() => stop())
 
@@ -16,5 +23,5 @@ export function useWriteSwitch() {
     open.value = isWriteSwitchOpen()
   }
 
-  return { open, setOpen }
+  return { open, ready, setOpen }
 }

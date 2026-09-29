@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import { computed, inject, ref, watch } from 'vue'
+import { computed, inject, onActivated, onMounted, ref, watch } from 'vue'
 import LimitPage from '../../../../src/pages/LimitPage.vue'
 import LimitQuerySection from '../../floating/LimitQuerySection.vue'
 import BindQueryBar from '../components/BindQueryBar.vue'
 import EmptyGuide from '../components/EmptyGuide.vue'
 import type { LimitMonitorResult, LimitMonitorRow } from '../../api/limit-monitor-types'
 import { isLimitMonitorType, type LimitMonitorQuery } from '../../api/limit-monitor-params'
-import { PENDING_CUSTOMER_KEY, applyBoundQuery, matchPctMailTypes, querySnapshot } from '../../customer/mail-flow'
+import { PCT_RESUME_KEY, PENDING_CUSTOMER_KEY, applyBoundQuery, matchPctMailTypes, querySnapshot } from '../../customer/mail-flow'
 import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
 import { fetchMailTypeNodes } from '../../customer/mail-type-load'
 import { fetchMailSenders } from '../../customer/mailset-load'
 import type { MailSender } from '../../customer/mailset'
+import { fillSheetEmails } from '../../customer/customer-page'
 import { applyPctMailTypes, clonePctTask, matchSheetCtrlProcs, pctRowsFromTable, summarizePctTask, volumesOf } from '../../customer/pct-sheet'
 import { planPctRecipients, currentMailId, sheetRowsOnMail } from '../../customer/pct-recipients'
 import { isPctTask } from '../../customer/guards'
@@ -515,6 +516,38 @@ async function appendSheetContacts(): Promise<void> {
   }
 }
 
+function restoreSheet(force = false): void {
+  const task = pctCustomer.value?.pctTask
+  if (!task || (sheetRows.value.length && !force)) return
+  sheetRows.value = task.rows.map(row => ({ ...row }))
+  if (task.mailsetId) mailsetId.value = task.mailsetId
+}
+
+async function resumeQuery(): Promise<void> {
+  const raw = sessionStorage.getItem(PCT_RESUME_KEY)
+  if (!raw) return
+  sessionStorage.removeItem(PCT_RESUME_KEY)
+  let parsed: { caseVolume?: string; ctrlProcId?: string }
+  try {
+    parsed = JSON.parse(raw) as { caseVolume?: string; ctrlProcId?: string }
+  } catch {
+    return
+  }
+  const caseVolume = parsed.caseVolume?.trim() ?? ''
+  const ctrl = parsed.ctrlProcId?.trim() ?? ''
+  if (!caseVolume || !isQueryGuid(ctrl)) return
+  restoreSheet(true)
+  if (!connected.value) {
+    message.value = '任务已经记在这个客户上。连上 EASY 之后，可以用我方文号再查一次。'
+    return
+  }
+  seedQuery(splitCaseVolumes(caseVolume), ctrl)
+  await search({ type: 'all', caseVolume, ctrlProcId: ctrl, fields: { case_volume: caseVolume, ctrl_proc: ctrl } })
+}
+
+onMounted(() => { void resumeQuery() })
+onActivated(() => { void resumeQuery() })
+
 async function createTask(): Promise<void> {
   const customer = pctCustomer.value
   if (!customer) {
@@ -526,6 +559,23 @@ async function createTask(): Promise<void> {
     return
   }
   sheetRows.value = applyPctMailTypes(sheetRows.value, mailNodes.value, pctConfig.value)
+  let emailNote = ''
+  if (bridge && isQueryGuid(customer.easyCustomerId ?? '')) {
+    const directory = await bridge.request({ type: MessageType.ReadCustomerDirectory, payload: { customerId: customer.easyCustomerId ?? '' } })
+    if (directory.type === MessageType.Error) {
+      emailNote = directory.payload.message
+    } else if (directory.type === MessageType.CustomerDirectoryResult) {
+      const payload = directory.payload
+      if (!payload.ok) {
+        emailNote = payload.error.message
+      } else {
+        const filled = fillSheetEmails(sheetRows.value, payload.data.rows)
+        sheetRows.value = filled.rows
+        const matched = filled.rows.filter(row => (row.mailTo ?? '').includes('@') || (row.mailCc ?? '').includes('@')).length
+        emailNote = [payload.data.complete ? '' : (payload.data.message || '客户联系人没有读全。'), matched ? `已为 ${matched} 行补上客户联系人里唯一的邮箱。` : '', ...filled.notes].filter(Boolean).join('')
+      }
+    }
+  }
   if (sheetRows.value.some(row => !row.mailTypeId)) {
     message.value = '发文类型还没从原网站读全。连上 EASY 后点重新读取，再创建任务。'
     return
@@ -596,7 +646,7 @@ async function createTask(): Promise<void> {
     : `已按表格创建任务。这次没有发件人，规则里也还没设默认。${summarizePctTask(task)}任务记在插件里，还不会提交到 EASY。`
   seedQuery(volumes, ctrl)
   await search({ type: 'all', caseVolume, ctrlProcId: ctrl, fields: { case_volume: caseVolume, ctrl_proc: ctrl } })
-  message.value = `${savedText}${message.value ? ` ${message.value}` : ''}`
+  message.value = `${savedText}${emailNote ? ` ${emailNote}` : ''}${message.value ? ` ${message.value}` : ''}`
 }
 </script>
 

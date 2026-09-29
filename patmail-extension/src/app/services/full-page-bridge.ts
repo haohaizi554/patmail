@@ -9,6 +9,8 @@ export function createFullPageBridge(): MessageBridge {
       const slow = contactExport || message.type === MessageType.SearchFiles || message.type === MessageType.SearchLimitMonitor
         || message.type === MessageType.ListMailProcesses || message.type === MessageType.ListFlowReviewers
         || message.type === MessageType.ReadCaseDemands
+        || message.type === MessageType.ReadCustomerDemands
+        || message.type === MessageType.ReadCustomerDirectory
         || message.type === MessageType.ReadMailContacts
         || message.type === MessageType.DiagnoseExistingMail
         || message.type === MessageType.LoadDictionary || message.type === MessageType.ScanFileSearchForm

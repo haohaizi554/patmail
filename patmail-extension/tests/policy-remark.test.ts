@@ -78,13 +78,33 @@ describe('客户发文方式备注', () => {
     expect(readMailRules(broken, owner).writable).toBe(false)
   })
 
-  it('几套发文方式相同时，备注不挡住分组', () => {
+  it('几套备注不同、发文方式相同时，不静默选用最新的一套', () => {
     const grouped = planMailGroups(
       [file('1', 'a'), file('2', 'a')],
       [policy('a', '日常'), policy('a', '加急')]
     )
-    expect(grouped.groups).toHaveLength(1)
-    expect(grouped.groups[0]?.files.map(item => item.fileId)).toEqual(['1', '2'])
+    expect(grouped.groups).toHaveLength(0)
+    expect(grouped.skipped.map(item => item.code)).toEqual(['AMBIGUOUS_POLICY', 'AMBIGUOUS_POLICY'])
+    expect(grouped.skipped[0]?.message).toContain('备注')
+  })
+
+  it('文件描述对上其中一套时，用那一套的备注', () => {
+    const daily = '11111111-1111-4111-8111-111111111111'
+    const urgent = '22222222-2222-4222-8222-222222222222'
+    const grouped = planMailGroups(
+      [file('1', 'a')],
+      [
+        { ...policy('a', '日常'), mailTypeId: daily, mailTypeName: '证书' },
+        { ...policy('a', '加急', 'single_file'), mailTypeId: urgent, mailTypeName: '加急证书', version: 9 }
+      ],
+      [{
+        id: 'map-1', fileDescriptionText: '专利证书', mailTypeId: daily, mailTypeName: '证书',
+        enabled: true, version: 1, updatedAt: '2026-09-29T00:00:00.000Z'
+      }]
+    )
     expect(grouped.skipped).toEqual([])
+    expect(grouped.groups[0]?.policyRemark).toBe('日常')
+    expect(grouped.groups[0]?.sendMode).toBe('merge_by_customer_description')
+    expect(grouped.groups[0]?.policyVersion).toBe(1)
   })
 })

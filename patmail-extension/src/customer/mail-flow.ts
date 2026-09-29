@@ -81,6 +81,7 @@ export function mailStylesFor(surface: QuerySurfaceId | ''): { value: string; la
 }
 
 export const PENDING_CUSTOMER_KEY = 'patmail.pendingCustomer'
+export const PCT_RESUME_KEY = 'patmail.pctResume'
 
 const BOUND_KEY = /^[A-Za-z][A-Za-z0-9_]{0,80}$/
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

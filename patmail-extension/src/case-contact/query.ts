@@ -31,10 +31,11 @@ function tag(name: string, value = ''): string {
   return `&lt;${name}&gt;${xmlText(value)}&lt;/${name}&gt;`
 }
 
-/** 案件查询的 Element。值本身是转义后的 XML，交给表单编码再转一次。 */
+/** 案件查询的 Element。客户案号写入 case_volume_customer。值本身是转义后的 XML，交给表单编码再转一次。 */
 export function agencySearchElement(volumes: string[]): string {
-  return tag('case_volume', volumes.join('\n')) +
-    SEARCH_FIELDS.map(name => tag(name)).join('') +
+  const customerVolumes = volumes.join('\n')
+  return tag('case_volume') +
+    SEARCH_FIELDS.map(name => tag(name, name === 'case_volume_customer' ? customerVolumes : '')).join('') +
     tag('is_proc', '1') +
     tag('is_finish')
 }
@@ -81,7 +82,7 @@ export function searchHits(data: unknown): { hits: CaseHit[]; total: number } | 
   const hits: CaseHit[] = []
   for (const row of data.TableRows) {
     if (!isRecord(row)) continue
-    const volume = textOf(row, 'case_volume', 80)
+    const volume = textOf(row, 'case_volume_customer', 80)
     const caseId = textOf(row, 'case_id', 40)
     if (!volume || !isQueryGuid(caseId)) continue
     hits.push({ volume, caseId })
@@ -103,7 +104,8 @@ export function techUserText(data: unknown): string {
   return textOf(data.p_case_info[0], 'tech_user_id_text', 80)
 }
 
+/** 导出列是客户案号。著录里没有客户文号时，保留用户贴进来的那一串，不用我方文号替换。 */
 export function shownVolume(data: unknown, fallback: string): string {
   if (!isRecord(data) || !Array.isArray(data.p_case_info) || !isRecord(data.p_case_info[0])) return fallback
-  return textOf(data.p_case_info[0], 'case_volume', 80) || fallback
+  return textOf(data.p_case_info[0], 'case_volume_customer', 80) || fallback
 }

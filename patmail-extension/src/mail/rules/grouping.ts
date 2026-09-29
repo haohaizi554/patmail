@@ -1,5 +1,6 @@
 import { isQueryGuid } from '../../query/query-validator'
 import type { CustomerMailPolicy, DescriptionMailTypeMapping, MailGroup, SelectedPatentFile, SendMode } from '../types'
+import { policyRemark } from './customer-policy'
 import { mappingKey } from './description-mapping'
 
 export interface GroupingResult {
@@ -25,24 +26,32 @@ function modeFor(
   file: SelectedPatentFile,
   policies: CustomerMailPolicy[],
   mappings: DescriptionMailTypeMapping[]
-): { mode: SendMode; version: number; profileId: string } | null {
+): { mode: SendMode; version: number; profileId: string; remark: string } | null {
   const profileId = file.customerProfileId?.trim() ?? ''
   const matches = policies.filter(item => item.enabled && item.customerProfileId === profileId && item.querySurface !== 'limit' && (item.sendMode === 'merge_by_customer_description' || item.sendMode === 'single_file'))
   if (!profileId || matches.length === 0) return null
   const only = matches[0]
-  if (matches.length === 1 && only?.sendMode) return { mode: only.sendMode, version: only.version, profileId }
-  const modes = [...new Set(matches.flatMap(item => item.sendMode ? [item.sendMode] : []))]
-  if (modes.length === 1 && modes[0]) {
-    const newest = matches.reduce((best, item) => item.version > best.version ? item : best)
-    return { mode: modes[0], version: newest.version, profileId }
+  if (matches.length === 1 && only?.sendMode) {
+    return { mode: only.sendMode, version: only.version, profileId, remark: policyRemark(only.remark) }
   }
   const description = file.fileDescriptionId?.trim()
     ? `id:${file.fileDescriptionId.trim()}`
     : file.fileDescription.trim() ? `text:${file.fileDescription.trim()}` : ''
   const mapped = mappings.filter(item => item.enabled && isQueryGuid(item.mailTypeId) && mappingKey(item) === description)
-  if (mapped.length !== 1) return null
-  const hit = matches.find(item => item.mailTypeId === mapped[0].mailTypeId)
-  return hit?.sendMode ? { mode: hit.sendMode, version: hit.version, profileId } : null
+  const mappedPolicies = mapped.length === 1
+    ? matches.filter(item => item.mailTypeId === mapped[0]?.mailTypeId && item.sendMode)
+    : []
+  const mappedPolicy = mappedPolicies.length === 1 ? mappedPolicies[0] : undefined
+  if (mappedPolicy?.sendMode) {
+    return { mode: mappedPolicy.sendMode, version: mappedPolicy.version, profileId, remark: policyRemark(mappedPolicy.remark) }
+  }
+  const modes = [...new Set(matches.flatMap(item => item.sendMode ? [item.sendMode] : []))]
+  const remarks = new Set(matches.map(item => policyRemark(item.remark)))
+  if (modes.length === 1 && modes[0] && remarks.size <= 1) {
+    const newest = matches.reduce((best, item) => item.version > best.version ? item : best)
+    return { mode: modes[0], version: newest.version, profileId, remark: policyRemark(newest.remark) }
+  }
+  return null
 }
 
 /** 文件管理里，同客户且同文件描述才合并。发文方式取这个查询方式下保存的那一种；有多种时，用文件描述对上的发文类型来区分。 */
@@ -69,11 +78,16 @@ export function planMailGroups(files: SelectedPatentFile[], policies: CustomerMa
     }
     const policy = modeFor(file, policies, mappings)
     if (!policy) {
-      const several = policies.filter(item => item.enabled && item.customerProfileId === file.customerProfileId && item.querySurface !== 'limit').length > 1
+      const sets = policies.filter(item => item.enabled && item.customerProfileId === file.customerProfileId && item.querySurface !== 'limit')
+      const remarks = new Set(sets.map(item => policyRemark(item.remark)))
       skipped.push({
         file,
-        code: several ? 'AMBIGUOUS_POLICY' : 'MISSING_POLICY',
-        message: several ? '这个客户在文件管理下有多种发文方式，文件描述还没对上其中一种发文类型。' : '该客户在文件管理下还没有发文方式。'
+        code: sets.length > 1 ? 'AMBIGUOUS_POLICY' : 'MISSING_POLICY',
+        message: sets.length > 1
+          ? remarks.size > 1
+            ? '这个客户有多套备注不同的发文方式，文件描述还没对上其中一套。'
+            : '这个客户在文件管理下有多种发文方式，文件描述还没对上其中一种发文类型。'
+          : '该客户在文件管理下还没有发文方式。'
       })
       continue
     }
@@ -90,7 +104,8 @@ export function planMailGroups(files: SelectedPatentFile[], policies: CustomerMa
       descriptionLabel: key.label,
       sendMode: policy.mode,
       files: [file],
-      policyVersion: policy.version
+      policyVersion: policy.version,
+      policyRemark: policy.remark
     })
   }
   const compare = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0

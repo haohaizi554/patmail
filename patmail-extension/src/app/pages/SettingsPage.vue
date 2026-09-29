@@ -5,7 +5,7 @@ import { useWriteSwitch } from '../../settings/use-write-switch'
 import { useWorkspace } from '../composables/useWorkspace'
 
 const { connection } = useWorkspace()
-const { open, setOpen } = useWriteSwitch()
+const { open, ready, setOpen } = useWriteSwitch()
 
 function onToggle(event: Event): void {
   void setOpen((event.target as HTMLInputElement).checked)
@@ -23,7 +23,9 @@ function onToggle(event: Event): void {
         <input type="checkbox" :checked="open" @change="onToggle" />
         写开关
       </label>
-      <p class="hint">{{ open ? '已打开。写开关不再拦截创建、保存和流程提交。' : '已关闭。不会创建邮件、保存草稿或提交流程。' }}</p>
+      <p v-if="!ready" class="hint">正在读取写开关。</p>
+      <p v-else-if="open" class="hint">已打开。可以写回查询模板。创建邮件、保存草稿和流程提交还要等响应核对完，现在仍不会发出。</p>
+      <p v-else class="hint">已关闭。不会写回查询模板，也不会创建邮件、保存草稿或提交流程。</p>
     </form>
   </section>
 </template>

@@ -8,13 +8,14 @@ import {
   techUserText
 } from '../src/case-contact/query'
 import { contactWorkbook } from '../src/case-contact/xlsx'
-import { caseContactSkills, hasCaseContactSkill } from '../src/customer/skills'
+import { caseContactExportBlock, caseContactSkills, hasCaseContactSkill } from '../src/customer/skills'
+import { PCL_ORIGIN } from '../src/api/config'
 import { isCustomerProfile } from '../src/customer/guards'
 
 describe('案件联系人导出', () => {
-  it('查询条件把客户案号放进 case_volume，并保持转义', () => {
-    const element = agencySearchElement(['WT-CN20260104-01', 'CS-CN20251009-01'])
-    expect(element.startsWith('&lt;case_volume&gt;WT-CN20260104-01\nCS-CN20251009-01&lt;/case_volume&gt;')).toBe(true)
+  it('查询条件把客户案号放进 case_volume_customer，并保持转义', () => {
+    const element = agencySearchElement(['PA2610049CND', 'PA2610050CND'])
+    expect(element.startsWith('&lt;case_volume&gt;&lt;/case_volume&gt;&lt;case_volume_customer&gt;PA2610049CND\nPA2610050CND&lt;/case_volume_customer&gt;')).toBe(true)
     expect(element).toContain('&lt;case_type&gt;&lt;/case_type&gt;')
     expect(element).toContain('&lt;is_proc&gt;1&lt;/is_proc&gt;')
     expect(element).not.toContain('<case_volume>')
@@ -27,10 +28,13 @@ describe('案件联系人导出', () => {
         case_id: 'B1E3444A-FCCB-460C-B207-49D0A67A6DF1',
         case_volume_customer: 'PA2610049CND',
         tablerowscount: '1'
+      }, {
+        case_volume: 'WT-CN20260104-02',
+        case_id: 'B1E3444A-FCCB-460C-B207-49D0A67A6DF2'
       }]
     })
     expect(parsed).toEqual({
-      hits: [{ volume: 'WT-CN20260104-01', caseId: 'B1E3444A-FCCB-460C-B207-49D0A67A6DF1' }],
+      hits: [{ volume: 'PA2610049CND', caseId: 'B1E3444A-FCCB-460C-B207-49D0A67A6DF1' }],
       total: 1
     })
   })
@@ -63,6 +67,9 @@ describe('案件联系人导出', () => {
     expect(hasCaseContactSkill({ name: '鹏城实验室' })).toBe(true)
     expect(hasCaseContactSkill({ name: '其他客户' })).toBe(false)
     expect(caseContactSkills('改名以后', ['case-contacts'])).toEqual(['case-contacts'])
+    expect(caseContactExportBlock('http://183.36.43.66:88', [{ name: '鹏城实验室' }])).toContain('鹏城实验室的 EASY')
+    expect(caseContactExportBlock(PCL_ORIGIN, [{ name: '其他客户' }])).toContain('先创建客户')
+    expect(caseContactExportBlock(PCL_ORIGIN, [{ name: '鹏城实验室' }])).toBe('')
     expect(isCustomerProfile({
       id: 'customer-1', name: '鹏城实验室', baseTemplateId: 'manual', overrides: {},
       skills: ['case-contacts'], enabled: true,

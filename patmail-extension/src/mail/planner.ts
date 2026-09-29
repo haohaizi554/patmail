@@ -23,7 +23,7 @@ export function planDrafts(snapshot: SelectionSnapshot, rules: MailRuleBundle, p
   const drafts: MailDraftPreview[] = grouped.groups.map(group => {
     const resolved = resolveMailType(group, rules.mappings)
     const mapping = resolved.mapping
-    const policy = rules.policies.find(item => item.enabled && item.customerProfileId === group.customerProfileId && item.sendMode === group.sendMode && (!item.mailTypeId || !mapping?.mailTypeId || item.mailTypeId === mapping.mailTypeId))
+    const policy = rules.policies.find(item => item.enabled && item.customerProfileId === group.customerProfileId && item.sendMode === group.sendMode && (group.policyRemark === undefined || (item.remark ?? '').trim() === group.policyRemark) && (!item.mailTypeId || !mapping?.mailTypeId || item.mailTypeId === mapping.mailTypeId))
     const recipient = resolveRecipients(group.customerProfileId, rules.recipients, policy?.recipientTemplateId)
     const to = recipient ? uniqueAddresses(recipient.to) : { addresses: [], invalid: [] as string[] }
     const cc = recipient ? uniqueAddresses(recipient.cc) : { addresses: [], invalid: [] as string[] }

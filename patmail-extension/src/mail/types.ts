@@ -149,6 +149,8 @@ export interface MailGroup {
   sendMode: SendMode
   files: SelectedPatentFile[]
   policyVersion: number
+  /** 选中的那一套发文方式备注。空字符串表示没填备注。 */
+  policyRemark?: string
 }
 
 export interface ValidationIssue {

@@ -10,7 +10,7 @@ import { isMessage, MessageType, type AppMessage, type BackgroundResponse } from
 import { hydrateWriteSwitch, watchWriteSwitch } from '../settings/write-switch'
 
 watchWriteSwitch()
-void hydrateWriteSwitch()
+await hydrateWriteSwitch()
 
 const CALL_CHANNEL = 'patmail-call'
 const RESULT_CHANNEL = 'patmail-result'

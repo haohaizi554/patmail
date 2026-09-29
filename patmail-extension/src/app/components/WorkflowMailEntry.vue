@@ -1,17 +1,23 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, inject, ref, watch } from 'vue'
 import MailTypeTreeSelect from '../../../../src/components/MailTypeTreeSelect.vue'
 import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
 import EmptyGuide from './EmptyGuide.vue'
 import type { MailSender } from '../../customer/mailset'
-import { pctRowsFromTable, applyPctMailTypes } from '../../customer/pct-sheet'
+import { PCT_RESUME_KEY, PENDING_CUSTOMER_KEY, applyBoundQuery, querySnapshot } from '../../customer/mail-flow'
+import { fillSheetEmails } from '../../customer/customer-page'
+import { applyPctMailTypes, buildPctTask, clonePctTask, matchSheetCtrlProcs, pctRowsFromTable, summarizePctTask, volumesOf } from '../../customer/pct-sheet'
 import type { CustomerQueryProfile, LimitMailStyle, PctTaskRow } from '../../customer/types'
 import { groupWorkflowRows } from '../../customer/workflow-mail'
 import { readXlsxRows } from '../../customer/xlsx-table'
 import { assembleMail, fillFromRules } from '../../mail'
 import type { AssembledMail } from '../../mail/assemble'
 import type { MailRuleBundle, SelectedPatentFile } from '../../mail/types'
-import { isWriteSwitchOpen } from '../../settings/write-switch'
+import { joinCaseVolumes } from '../../customer/volume-list'
+import { isQueryGuid } from '../../query/query-validator'
+import { scopeFromConnection } from '../../shared/connection'
+import { MessageType, type MessageBridge } from '../../shared/message'
+import { useWorkspace } from '../composables/useWorkspace'
 import { packagedPctWorkflow, pctRuntimeFrom, workflowSender, type WorkflowCatalog, type WorkflowDefinition } from '../../workflow/catalog'
 
 const props = defineProps<{
@@ -25,6 +31,9 @@ const props = defineProps<{
   catalog: WorkflowCatalog
 }>()
 
+const bridge = inject<MessageBridge>('bridge')
+const { connection, call } = useWorkspace()
+const saving = ref(false)
 const workflowId = ref('pct-reminder')
 const customerId = ref('')
 const sheetName = ref('')
@@ -98,7 +107,8 @@ const outcome = computed(() => {
   if (!count) return ''
   if (count === 1) return `${rows.value.length} 行合成 1 封。`
   if (customer.value?.limitMailStyle === '2') return `${rows.value.length} 行，一件一封，共 ${count} 封。`
-  return `${rows.value.length} 行，按收件人分成 ${count} 封。`
+  if (customer.value?.limitMailStyle === '1') return `${rows.value.length} 行，按客户分成 ${count} 封。`
+  return `${rows.value.length} 行，按客户和收件人分成 ${count} 封。`
 })
 const outcomeGroups = computed(() => {
   if (cards.value.length < 2 || cards.value.length > 6) return []
@@ -258,29 +268,126 @@ const progressPercent = computed(() => {
   return Math.round(((done + (moving ? 0.35 : 0)) / progress.value.length) * 100)
 })
 
-function createAndSend(): void {
+async function ctrlForSheet(): Promise<{ id: string; message: string }> {
+  if (!bridge || connection.value.sessionStatus !== 'authenticated') {
+    return { id: '', message: '还没确认当前登录的人，任务没有记下。' }
+  }
+  const response = await bridge.request({ type: MessageType.LoadDictionary, payload: { kind: 'picker', force: false } })
+  if (response.type !== MessageType.DictionaryResult || !response.payload.ok || response.payload.data.kind !== 'picker') {
+    const message = response.type === MessageType.Error
+      ? response.payload.message
+      : response.type === MessageType.DictionaryResult && !response.payload.ok
+        ? response.payload.error.message
+        : '处理事项列表没有从原网站读到。'
+    return { id: '', message }
+  }
+  const options = (response.payload.data.dictionaries.limitCtrlProc?.options ?? []).map(item => ({
+    id: item.value,
+    label: item.label,
+    ...(item.parentValue ? { parentId: item.parentValue } : {})
+  }))
+  const matched = matchSheetCtrlProcs(rows.value.map(row => row.procLabel), options)
+  if (!matched.ok) return { id: '', message: matched.message }
+  return { id: matched.ids, message: '' }
+}
+
+async function fillEmails(customerId: string): Promise<string> {
+  if (!isQueryGuid(customerId)) return '这位客户还没有原网站编号，收件人仍用表格里的称呼。'
+  if (!bridge) return '客户联系人没有读到，称呼还没有补成邮箱。'
+  const response = await bridge.request({ type: MessageType.ReadCustomerDirectory, payload: { customerId } })
+  if (response.type === MessageType.Error) return response.payload.message
+  if (response.type !== MessageType.CustomerDirectoryResult) return '客户联系人没有读到，称呼还没有补成邮箱。'
+  if (!response.payload.ok) return response.payload.error.message
+  const filled = fillSheetEmails(rows.value, response.payload.data.rows)
+  rows.value = filled.rows
+  const matched = filled.rows.filter(row => (row.mailTo ?? '').includes('@') || (row.mailCc ?? '').includes('@')).length
+  const incomplete = response.payload.data.complete ? '' : (response.payload.data.message || '客户联系人没有读全。')
+  return [incomplete, matched ? `已为 ${matched} 行补上客户联系人里唯一的邮箱。` : '', ...filled.notes].filter(Boolean).join('')
+}
+
+async function createAndSend(): Promise<void> {
+  if (saving.value) return
   buildPreview()
-  const steps = [
-    { label: '核对客户和表格', detail: '', state: 'run' as const },
-    { label: '按发文模式合成信件', detail: '', state: 'wait' as const },
-    { label: '创建并发送', detail: '', state: 'wait' as const }
-  ]
-  progress.value = steps
-  if (!customer.value || !rows.value.length || unmatched.value.length || !resolvedSender.value || !previews.value.length) {
+  const current = customer.value
+  if (!current || !rows.value.length || unmatched.value.length || !resolvedSender.value || !previews.value.length) {
     progress.value = [{ label: '核对客户和表格', detail: status.value || '还缺客户、表格、发文类型或发件人。', state: 'stop' }]
     return
   }
+  const checked = { label: '核对客户和表格', detail: `${rows.value.length} 行，客户是${current.name}。`, state: 'done' as const }
   progress.value = [
-    { label: '核对客户和表格', detail: `${rows.value.length} 行，客户是${customer.value.name}。`, state: 'done' },
-    { label: '按发文模式合成信件', detail: `按「${styleLabel.value || '一件一封'}」合成 ${previews.value.length} 封。`, state: 'done' },
-    {
-      label: '创建并发送',
-      detail: isWriteSwitchOpen()
-        ? '写开关已经打开。创建之后系统回什么还没核对完，现在提交对不上，所以停在这里，没有发出去。'
-        : '写开关关着。到系统设置里打开之后才能创建和发送。',
-      state: 'stop'
-    }
+    checked,
+    { label: '补上客户联系人邮箱', detail: '正在读取客户资料页的联系人。', state: 'run' },
+    { label: '对上处理事项', detail: '', state: 'wait' },
+    { label: '记到客户配置', detail: '', state: 'wait' }
   ]
+  saving.value = true
+  try {
+    const emailNote = await fillEmails(current.easyCustomerId ?? '')
+    buildPreview()
+    progress.value = [
+      checked,
+      { label: '补上客户联系人邮箱', detail: emailNote || '表格里的称呼没有需要补的邮箱。', state: 'done' },
+      { label: '对上处理事项', detail: '正在从原网站读取处理事项。', state: 'run' },
+      { label: '记到客户配置', detail: '', state: 'wait' }
+    ]
+    const resolved = await ctrlForSheet()
+    if (!isQueryGuid(resolved.id)) {
+      progress.value[2] = { label: '对上处理事项', detail: resolved.message || '处理事项还没对上原网站。', state: 'stop' }
+      return
+    }
+    const scope = scopeFromConnection(connection.value)
+    if (!scope) {
+      progress.value[2] = { label: '对上处理事项', detail: '还没确认当前登录的人，任务没有记下。', state: 'stop' }
+      return
+    }
+    const sender = resolvedSender.value
+    const built = buildPctTask({
+      rows: rows.value,
+      ctrlProcId: resolved.id,
+      confirmedProcIds: current.pctTask?.confirmedProcIds ?? [],
+      ...(sender ? { sender: { mailsetId: sender.mailsetId, label: sender.label } } : {}),
+      createdAt: new Date().toISOString()
+    })
+    if (!built.ok) {
+      progress.value[2] = { label: '对上处理事项', detail: built.message, state: 'stop' }
+      return
+    }
+    const volumes = volumesOf(rows.value)
+    const caseVolume = joinCaseVolumes(volumes)
+    const fields = querySnapshot({ ctrl_proc: resolved.id, ...(caseVolume.length <= 4000 ? { case_volume: caseVolume } : {}) })
+    const next = applyBoundQuery(current, {
+      surface: 'limit',
+      fields,
+      reviewSelf: current.reviewTarget === 'self'
+    })
+    next.pctTask = clonePctTask(built.task)
+    if (sender && senderTouched.value) {
+      next.mailsetId = sender.mailsetId
+      next.mailsetLabel = sender.label
+    }
+    const result = await call({
+      action: 'saveCustomer',
+      profile: { ...next, updatedAt: new Date().toISOString() },
+      expectedScope: scope,
+      expectedRevision: current.revision ?? 1
+    })
+    if (!result?.ok) {
+      progress.value[2] = { label: '对上处理事项', detail: '处理事项已经对上。', state: 'done' }
+      progress.value[3] = { label: '记到客户配置', detail: result?.message || '任务没有保存。', state: 'stop' }
+      return
+    }
+    sessionStorage.setItem(PENDING_CUSTOMER_KEY, current.id)
+    sessionStorage.setItem(PCT_RESUME_KEY, JSON.stringify({ caseVolume, ctrlProcId: resolved.id }))
+    progress.value[2] = { label: '对上处理事项', detail: '处理事项已经对上。', state: 'done' }
+    progress.value[3] = {
+      label: '记到客户配置',
+      detail: `${summarizePctTask(built.task)}接下来到期限监控查询并确认勾选。创建邮件和提交还没核对完响应，这一步没有发出去。`,
+      state: 'done'
+    }
+    location.hash = '#/limits'
+  } finally {
+    saving.value = false
+  }
 }
 
 function definitionHint(item: WorkflowDefinition | null): string {
@@ -343,8 +450,8 @@ function definitionHint(item: WorkflowDefinition | null): string {
       <section v-if="cards.length" class="card inset">
         <h2>{{ outcome }}</h2>
         <p v-if="outcomeGroups.length" class="hint">{{ outcomeGroups.join('，') }}。</p>
-        <p class="hint">收件人和抄送先用表格里的人，创建时再补邮箱。</p>
-        <button type="button" class="solid" @click="createAndSend">创建并发送</button>
+        <p class="hint">记下任务时，会用客户资料页的联系人把表格里的称呼补成唯一邮箱。原网站发文上已经填好的地址，仍在期限监控里追加。</p>
+        <button type="button" class="solid" :disabled="saving" @click="createAndSend">{{ saving ? '正在记下任务…' : '记下任务并去查询' }}</button>
         <div v-if="progress.length" class="send-progress" role="status">
           <div class="send-bar" aria-hidden="true"><span :style="{ width: progressPercent + '%' }"></span></div>
           <ol>

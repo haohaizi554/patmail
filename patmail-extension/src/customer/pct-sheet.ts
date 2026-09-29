@@ -1,3 +1,4 @@
+import { isPctTask } from './guards'
 import { isQueryGuid } from '../query/query-validator'
 import { resolvePctRuntime, type PctRuntimeConfig } from '../workflow/pct-config'
 import { pctMailTypeFor, pctVolumeSlot } from './mail-flow'
@@ -112,6 +113,37 @@ export function matchSheetCtrlProcs(
     names.push(label)
   }
   return { ok: true, ids: ids.join(','), names }
+}
+
+/** 把表格收成一份可保存的 PCT 任务。多种处理事项不能塞进同一个事项编号。 */
+export function buildPctTask(input: {
+  rows: PctTaskRow[]
+  ctrlProcId: string
+  confirmedProcIds: string[]
+  sender?: { mailsetId: string; label: string }
+  createdAt: string
+}): { ok: true; task: PctTaskDraft } | { ok: false; message: string } {
+  if (!isQueryGuid(input.ctrlProcId)) {
+    return {
+      ok: false,
+      message: input.ctrlProcId.includes(',')
+        ? '表格里有多种处理事项。一次任务只对上一个事项。'
+        : '处理事项还没对上原网站。'
+    }
+  }
+  const task: PctTaskDraft = {
+    workflowId: 'pct-reminder',
+    ctrlProcId: input.ctrlProcId,
+    rows: input.rows,
+    confirmedProcIds: input.confirmedProcIds.filter(item => isQueryGuid(item)),
+    ...(input.sender ? { mailsetId: input.sender.mailsetId, mailsetLabel: input.sender.label } : {}),
+    createdAt: input.createdAt
+  }
+  if (!isPctTask(task)) {
+    const tooLong = input.rows.some(row => (row.mailTo?.length ?? 0) > 4000 || (row.mailCc?.length ?? 0) > 4000)
+    return { ok: false, message: tooLong ? '某一行的收件人或抄送太长，任务没有保存。' : '这张表格组不成任务。' }
+  }
+  return { ok: true, task }
 }
 
 export function summarizePctTask(task: PctTaskDraft): string {

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 import { isCustomerProfile, isPctTask } from '../src/customer/guards'
 import { pctMailTypeFor } from '../src/customer/mail-flow'
-import { matchSheetCtrlProcs, pctRowsFromTable, summarizePctTask } from '../src/customer/pct-sheet'
+import { buildPctTask, matchSheetCtrlProcs, pctRowsFromTable, summarizePctTask } from '../src/customer/pct-sheet'
 import type { CustomerQueryProfile, PctTaskDraft } from '../src/customer/types'
 import { joinCaseVolumes, splitCaseVolumes } from '../src/customer/volume-list'
 import { readXlsxRows, rowsFromSheetXml, sharedStringsFromXml } from '../src/customer/xlsx-table'
@@ -93,6 +93,28 @@ describe('PCT 表格', () => {
     expect(isCustomerProfile(profile({ querySurface: 'limit', workflowId: 'pct-reminder', limitMailStyle: '1', pctTask: task() }))).toBe(true)
     expect(isPctTask(task({ rows: [{ ...task().rows[0], mailTypeRadioIndex: 2 as 1 }] }))).toBe(false)
     expect(summarizePctTask(task())).toContain('提醒申请PCT（贵方案号）-深圳市')
+  })
+
+  it('多种处理事项不能收成一次任务', () => {
+    const built = buildPctTask({
+      rows: task().rows,
+      ctrlProcId: '71d067a3-d1a3-4d4b-87f9-38ea9d96bf70,71d067a3-d1a3-4d4b-87f9-38ea9d96bf71',
+      confirmedProcIds: [],
+      createdAt: '2026-09-29T00:00:00.000Z'
+    })
+    expect(built.ok).toBe(false)
+    if (!built.ok) expect(built.message).toContain('多种处理事项')
+  })
+
+  it('对上一个事项后可以记下任务', () => {
+    const built = buildPctTask({
+      rows: task().rows,
+      ctrlProcId: '71d067a3-d1a3-4d4b-87f9-38ea9d96bf70',
+      confirmedProcIds: ['not-a-guid', '71d067a3-d1a3-4d4b-87f9-38ea9d96bf71'],
+      createdAt: '2026-09-29T00:00:00.000Z'
+    })
+    expect(built.ok).toBe(true)
+    if (built.ok) expect(built.task.confirmedProcIds).toEqual(['71d067a3-d1a3-4d4b-87f9-38ea9d96bf71'])
   })
 })
 

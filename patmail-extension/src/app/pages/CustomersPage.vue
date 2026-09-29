@@ -32,6 +32,9 @@ import { useWorkflowCatalog } from '../composables/useWorkflowCatalog'
 import { useWorkspace } from '../composables/useWorkspace'
 
 const bridge = inject<MessageBridge>('bridge')
+const demandText = ref('')
+const demandMessage = ref('')
+const demandLoading = ref(false)
 const { connection, customers, rules, call } = useWorkspace()
 const contactCustomers = computed(() => customers.value.filter(hasCaseContactSkill))
 const { catalog } = useWorkflowCatalog()
@@ -190,6 +193,8 @@ function edit(id: string): void {
   enabled.value = profile.enabled
   createdAt.value = profile.createdAt
   keptCustomerId.value = profile.easyCustomerId && isQueryGuid(profile.easyCustomerId) ? profile.easyCustomerId : ''
+  demandText.value = ''
+  demandMessage.value = ''
   formScope.value = scopeFromConnection(connection.value)
   formRevision.value = profile.revision ?? 1
   formMessage.value = ''
@@ -206,6 +211,34 @@ function saveAnother(): void {
   void save(false)
 }
 
+async function loadDemands(): Promise<void> {
+  if (!bridge || !isQueryGuid(keptCustomerId.value)) {
+    demandMessage.value = '这位客户还没有原网站客户编号，读不了客户要求。'
+    demandText.value = ''
+    return
+  }
+  demandLoading.value = true
+  demandMessage.value = ''
+  demandText.value = ''
+  try {
+    const response = await bridge.request({ type: MessageType.ReadCustomerDemands, payload: { customerId: keptCustomerId.value } })
+    if (response.type !== MessageType.CustomerDemandResult) {
+      demandMessage.value = response.type === MessageType.Error ? response.payload.message : '客户要求没有读到。'
+      return
+    }
+    if (!response.payload.ok) {
+      demandMessage.value = response.payload.error.message
+      return
+    }
+    demandText.value = response.payload.data.text
+    demandMessage.value = response.payload.data.complete
+      ? (response.payload.data.rows.length ? '已按客户资料页读到要求，没有改原网站上的内容。' : '这个客户的要求表是空的。')
+      : (response.payload.data.message || '要求表没有读全。下面只是已经读到的部分。')
+  } finally {
+    demandLoading.value = false
+  }
+}
+
 function cancel(): void {
   editingId.value = ''
   name.value = ''
@@ -219,6 +252,8 @@ function cancel(): void {
   enabled.value = true
   createdAt.value = ''
   keptCustomerId.value = ''
+  demandText.value = ''
+  demandMessage.value = ''
   formScope.value = null
   formMessage.value = ''
 }
@@ -468,6 +503,13 @@ watch(() => connection.value.operatorId, () => {
           <p v-if="mailStyle === defaultStyle" class="hint">当前就是默认：同客户合并发文。</p>
         </div>
         <p v-else-if="!surface" class="hint">先选查询入口。期限监控会带出已封装的工作流。</p>
+      </div>
+      <div v-if="editingId" class="hint">
+        <p>客户要求按原网站客户编号读取，只在这里看，不会改原网站。</p>
+        <button type="button" class="ghost" :disabled="demandLoading || !keptCustomerId" @click="loadDemands">{{ demandLoading ? '正在读取…' : '读取客户要求' }}</button>
+        <p v-if="!keptCustomerId">这位客户还没有原网站客户编号。在查询模板里填上之后，才能读取。</p>
+        <p v-if="demandMessage">{{ demandMessage }}</p>
+        <p v-if="demandText" class="demand-copy">{{ demandText }}</p>
       </div>
       <p v-if="formMessage" class="hint">{{ formMessage }}</p>
       <div class="form-footer">

@@ -1,6 +1,7 @@
 import { isLiveWriteCall } from '../automation/live-readonly-policy'
 import { extractReadonlyEvidence, readonlyContract } from '../automation/readonly-contracts'
-import { CURRENT_ENVIRONMENT } from './config'
+import { CURRENT_ENVIRONMENT, PCL_ORIGIN, trustedOrigin } from './config'
+import { isWriteSwitchOpen } from '../settings/write-switch'
 import { DictionaryService } from './dictionaries'
 import type { DictionaryLoadRequest, DictionarySnapshot } from './dictionaries'
 import { buildGetSearchFilesFromFields, buildGetSearchFilesParams, type FileSearchQuery } from './file-search-params'
@@ -27,6 +28,7 @@ import { WorkflowStore } from '../workflow/store'
 import type { WorkflowView } from '../workflow/types'
 import type { PlanInput } from '../workflow/planner'
 import { loadCaseDemandText, type CaseDemandAsset } from '../mail/easy/case-demand'
+import { loadCustomerDemands, loadCustomerDirectory, type CustomerDemandAsset, type CustomerDirectoryAsset } from '../customer/customer-page'
 import { listParams, readMailInfo } from '../mail/easy/contracts'
 import { loadMailContactText, type MailContactAsset } from '../mail/easy/mail-contacts'
 import { isQueryGuid } from '../query/query-validator'
@@ -123,7 +125,7 @@ export class EasyRuntime {
   private readonly mail: MailExecutionRuntime
   private readonly workflow: WorkflowRuntime
 
-  constructor(pageOrigin: string, options: RuntimeOptions = {}) {
+  constructor(private readonly pageOrigin: string, options: RuntimeOptions = {}) {
     this.transport = new EasyTransport(pageOrigin, options)
     this.session = new SessionService(this.transport)
     this.history = new HistoryQueryService(this.transport)
@@ -269,6 +271,7 @@ export class EasyRuntime {
   }
 
   async saveHistoryQuery(title: string, queryId: string, queryXml: string, signal?: AbortSignal): Promise<ApiResult<{ saved: true }>> {
+    if (!isWriteSwitchOpen()) return apiError('BUSINESS_ERROR', '写开关已关闭。')
     await this.confirmAccountRead()
     return this.history.save(this.historyUserKey, 'file', { title, queryId, queryXml }, signal)
   }
@@ -411,6 +414,32 @@ export class EasyRuntime {
     })()
   }
 
+  /** 客户资料页要求表。只认客户编号，不打开邮件页，也不改要求。 */
+  readCustomerDemands(customerId: string, signal?: AbortSignal): Promise<ApiResult<CustomerDemandAsset>> {
+    return this.readCustomerPage(customerId, (params, next) => this.transport.post('customerPageDemand', params, next), loadCustomerDemands, signal)
+  }
+
+  /** 客户资料页联系人。用来把表格称呼对上邮箱，不读取电话和地址。 */
+  readCustomerDirectory(customerId: string, signal?: AbortSignal): Promise<ApiResult<CustomerDirectoryAsset>> {
+    return this.readCustomerPage(customerId, (params, next) => this.transport.post('customerPageContact', params, next), loadCustomerDirectory, signal)
+  }
+
+  private readCustomerPage<T>(
+    customerId: string,
+    post: (params: URLSearchParams, signal?: AbortSignal) => Promise<ApiResult<unknown>>,
+    load: (customerId: string, post: (params: URLSearchParams, signal?: AbortSignal) => Promise<ApiResult<unknown>>, signal?: AbortSignal) => Promise<ApiResult<T>>,
+    signal?: AbortSignal
+  ): Promise<ApiResult<T>> {
+    return (async (): Promise<ApiResult<T>> => {
+      if (!(await this.confirmAccountRead())) {
+        return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
+      }
+      const result = await load(customerId, post, signal)
+      if (!result.ok && result.error.code === 'SESSION_EXPIRED') this.session.expire()
+      return result
+    })()
+  }
+
   /** 当前发文上已经填好的地址，以及这封信里的文号。 */
   readMailAddresses(mailId: string): Promise<ApiResult<{ to: string; cc: string; customerId: string; caseVolumes: string[] }>> {
     return (async (): Promise<ApiResult<{ to: string; cc: string; customerId: string; caseVolumes: string[] }>> => {
@@ -502,6 +531,9 @@ export class EasyRuntime {
 
   exportCaseContacts(volumes: string[]): Promise<ApiResult<CaseContactExport>> {
     return (async (): Promise<ApiResult<CaseContactExport>> => {
+      if (trustedOrigin(this.pageOrigin) !== PCL_ORIGIN) {
+        return apiError('INVALID_ORIGIN', '案件联系人只能在鹏城实验室的 EASY 上读取。')
+      }
       if (!(await this.confirmAccountRead())) {
         return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
       }

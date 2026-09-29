@@ -8,7 +8,8 @@ import { readMailRules } from '../mail/repository'
 import type { MailRuleBundle } from '../mail/types'
 import type { QueryTemplate } from '../query/query-types'
 import { chooseAppTab, EasyConnectionController, emptyConnection, accountScopeMatches, freezeAccount, sameAccountContext, tabOrigin, type AccountContextSnapshot, type BrowserTabRef, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope, type SessionObservation } from '../shared/connection'
-import { isMessage, isWorkspaceForwardRequest, MessageType, type AppMessage, type BackgroundResponse, type CreatedTaskResult } from '../shared/message'
+import { caseContactExportBlock } from '../customer/skills'
+import { isMessage, workspaceForwardBlock, MessageType, type AppMessage, type BackgroundResponse, type CreatedTaskResult } from '../shared/message'
 import { loadAccount, deleteCustomerAccount, deleteQueryTemplateAccount, refreshStaleTasks, saveCustomerAccount, saveQueryTemplateAccount, saveRuleAccount, type LocalArea } from './account-data'
 import { observeSearchPage, resolveSelectedFiles, toQueryObservation, type QueryObservationResult } from '../automation/file-search-snapshot'
 import { rememberFileTypeTree } from '../automation/file-description-resolver'
@@ -408,8 +409,15 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
     }
     const target = await boundTab(host)
     if (!target.ok) return workspaceResult({ ok: false, message: target.message, connection: host.connection.context })
-    if (!isWorkspaceForwardRequest(action.message)) {
-      return workspaceResult({ ok: false, message: '完整页面不能转发这个请求。', connection: host.connection.context })
+    const forwardBlock = workspaceForwardBlock(action.message)
+    if (forwardBlock) {
+      return workspaceResult({ ok: false, message: forwardBlock, connection: host.connection.context })
+    }
+    if (action.message.type === MessageType.ExportCaseContacts) {
+      const frozen = freezeAccount(host.connection.context)
+      const account = frozen ? await readAccount(host, frozen) : null
+      const contactBlock = caseContactExportBlock(host.connection.context.easyOrigin, account?.customers ?? [])
+      if (contactBlock) return workspaceResult({ ok: false, message: contactBlock, connection: host.connection.context })
     }
     const frozen = freezeAccount(host.connection.context)
     const version = host.connection.context.connectionVersion

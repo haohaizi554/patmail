@@ -12,6 +12,7 @@ import type { LimitMonitorQuery } from '../api/limit-monitor-params'
 import { isProcessOpenTarget, type ProcessListQuery, type ProcessListResult, type ProcessOpenTarget } from '../api/mail-process'
 import type { CaseContactExport } from '../case-contact/query'
 import type { CaseDemandAsset } from '../mail/easy/case-demand'
+import type { CustomerDemandAsset, CustomerDirectoryAsset } from '../customer/customer-page'
 import type { MailContactAsset } from '../mail/easy/mail-contacts'
 import type { AccountReviewerList } from '../workflow/contracts'
 import type { LimitMonitorResult } from '../api/limit-monitor-types'
@@ -62,6 +63,10 @@ export const MessageType = {
   ListFlowReviewersResult: 'LIST_FLOW_REVIEWERS_RESULT',
   ReadCaseDemands: 'READ_CASE_DEMANDS',
   CaseDemandResult: 'CASE_DEMAND_RESULT',
+  ReadCustomerDemands: 'READ_CUSTOMER_DEMANDS',
+  CustomerDemandResult: 'CUSTOMER_DEMAND_RESULT',
+  ReadCustomerDirectory: 'READ_CUSTOMER_DIRECTORY',
+  CustomerDirectoryResult: 'CUSTOMER_DIRECTORY_RESULT',
   ReadMailContacts: 'READ_MAIL_CONTACTS',
   MailContactResult: 'MAIL_CONTACT_RESULT',
   ReadMailAddresses: 'READ_MAIL_ADDRESSES',
@@ -132,6 +137,8 @@ export type ContentRequest =
   | Response<'OPEN_EASY_FORM', { target: ProcessOpenTarget }>
   | Request<'LIST_FLOW_REVIEWERS'>
   | Response<'READ_CASE_DEMANDS', { caseId: string }>
+  | Response<'READ_CUSTOMER_DEMANDS', { customerId: string }>
+  | Response<'READ_CUSTOMER_DIRECTORY', { customerId: string }>
   | Response<'READ_MAIL_CONTACTS', { mailId: string; customerId: string }>
   | Response<'READ_MAIL_ADDRESSES', { mailId: string }>
   | Response<'LIST_HISTORY_QUERIES', { force: boolean; surface?: 'file' | 'limit' }>
@@ -276,6 +283,8 @@ export type ContentResponse =
   | Response<'OPEN_EASY_FORM_RESULT', { ok: boolean; message: string }>
   | Response<'LIST_FLOW_REVIEWERS_RESULT', ApiResult<AccountReviewerList>>
   | Response<'CASE_DEMAND_RESULT', ApiResult<CaseDemandAsset>>
+  | Response<'CUSTOMER_DEMAND_RESULT', ApiResult<CustomerDemandAsset>>
+  | Response<'CUSTOMER_DIRECTORY_RESULT', ApiResult<CustomerDirectoryAsset>>
   | Response<'MAIL_CONTACT_RESULT', ApiResult<MailContactAsset>>
   | Response<'MAIL_ADDRESS_RESULT', ApiResult<{ to: string; cc: string; customerId: string; caseVolumes: string[] }>>
   | Response<'FILE_SEARCH_CANCELLED', { ok: true }>
@@ -320,6 +329,37 @@ function isCaseDemandResult(value: unknown): value is ApiResult<CaseDemandAsset>
   if (!isRecord(value)) return false
   if (value.ok === false) return isRecord(value.error) && typeof value.error.code === 'string' && typeof value.error.message === 'string'
   return value.ok === true && isCaseDemandAsset(value.data)
+}
+
+function isCustomerDemandAsset(value: unknown): value is CustomerDemandAsset {
+  if (!isRecord(value) || !isQueryGuid(String(value.customerId)) || typeof value.text !== 'string' || value.text.length > 400_000) return false
+  if (typeof value.complete !== 'boolean' || typeof value.message !== 'string' || value.message.length > 400) return false
+  if (!Array.isArray(value.rows) || value.rows.length > 500) return false
+  return value.rows.every(row => isRecord(row) &&
+    typeof row.demandId === 'string' && row.demandId.length <= 80 &&
+    typeof row.caseType === 'string' && row.caseType.length <= 20_000 &&
+    typeof row.demandType === 'string' && row.demandType.length <= 20_000 &&
+    typeof row.title === 'string' && row.title.length <= 20_000 &&
+    typeof row.description === 'string' && row.description.length <= 20_000 &&
+    typeof row.fileName === 'string' && row.fileName.length <= 20_000 &&
+    typeof row.disabled === 'boolean')
+}
+
+function isCustomerDirectoryAsset(value: unknown): value is CustomerDirectoryAsset {
+  if (!isRecord(value) || !isQueryGuid(String(value.customerId))) return false
+  if (typeof value.complete !== 'boolean' || typeof value.message !== 'string' || value.message.length > 400) return false
+  if (!Array.isArray(value.rows) || value.rows.length > 500) return false
+  return value.rows.every(row => isRecord(row) &&
+    typeof row.contactId === 'string' && row.contactId.length <= 80 &&
+    typeof row.name === 'string' && row.name.length <= 2_000 &&
+    typeof row.email === 'string' && row.email.length <= 2_000 &&
+    typeof row.contactType === 'string' && row.contactType.length <= 2_000)
+}
+
+function isCustomerPageResult<T>(value: unknown, asset: (data: unknown) => data is T): value is ApiResult<T> {
+  if (!isRecord(value)) return false
+  if (value.ok === false) return isRecord(value.error) && typeof value.error.code === 'string' && typeof value.error.message === 'string'
+  return value.ok === true && asset(value.data)
 }
 
 function isOptionalGuid(value: unknown): boolean {
@@ -402,6 +442,9 @@ export function isMessage(value: unknown): value is AppMessage {
       return value.payload === undefined
     case MessageType.ReadCaseDemands:
       return isRecord(value.payload) && isQueryGuid(String(value.payload.caseId)) && Object.keys(value.payload).length === 1
+    case MessageType.ReadCustomerDemands:
+    case MessageType.ReadCustomerDirectory:
+      return isRecord(value.payload) && isQueryGuid(String(value.payload.customerId)) && Object.keys(value.payload).length === 1
     case MessageType.ReadMailContacts:
       return isRecord(value.payload) && isOptionalGuid(value.payload.mailId) && isOptionalGuid(value.payload.customerId) && Object.keys(value.payload).length === 2
     case MessageType.ReadMailAddresses:
@@ -500,6 +543,10 @@ export function isMessage(value: unknown): value is AppMessage {
       return isAccountReviewerResult(value.payload)
     case MessageType.CaseDemandResult:
       return isCaseDemandResult(value.payload)
+    case MessageType.CustomerDemandResult:
+      return isCustomerPageResult(value.payload, isCustomerDemandAsset)
+    case MessageType.CustomerDirectoryResult:
+      return isCustomerPageResult(value.payload, isCustomerDirectoryAsset)
     case MessageType.MailContactResult:
       return isMailContactResult(value.payload)
     case MessageType.MailAddressResult:
@@ -553,6 +600,8 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.OpenEasyForm ||
     value.type === MessageType.ListFlowReviewers ||
     value.type === MessageType.ReadCaseDemands ||
+    value.type === MessageType.ReadCustomerDemands ||
+    value.type === MessageType.ReadCustomerDirectory ||
     value.type === MessageType.ReadMailContacts ||
     value.type === MessageType.ReadMailAddresses ||
     value.type === MessageType.ListHistoryQueries || value.type === MessageType.GetHistoryQuery ||
@@ -566,14 +615,20 @@ export function isContentRequest(value: unknown): value is ContentRequest {
   )
 }
 
-const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'SEARCH_LIMIT_MONITOR', 'EXPORT_CASE_CONTACTS', 'LIST_MAIL_PROCESSES', 'OPEN_EASY_FORM', 'LIST_FLOW_REVIEWERS', 'READ_CASE_DEMANDS', 'READ_MAIL_CONTACTS', 'READ_MAIL_ADDRESSES', 'GET_PAGE_INFO', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'SAVE_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
-const WRITE_FORWARD = new Set(['CREATE_EASY_MAIL', 'SAVE_EASY_MAIL'])
+const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'SEARCH_LIMIT_MONITOR', 'EXPORT_CASE_CONTACTS', 'LIST_MAIL_PROCESSES', 'OPEN_EASY_FORM', 'LIST_FLOW_REVIEWERS', 'READ_CASE_DEMANDS', 'READ_CUSTOMER_DEMANDS', 'READ_CUSTOMER_DIRECTORY', 'READ_MAIL_CONTACTS', 'READ_MAIL_ADDRESSES', 'GET_PAGE_INFO', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
+const WRITE_FORWARD = new Set(['CREATE_EASY_MAIL', 'SAVE_EASY_MAIL', 'SAVE_HISTORY_QUERY'])
 
-/** 消息校验和后台派发共用同一份许可。创建和保存还要看前端写开关。 */
+/** 不允许转发时给出原因。写开关关掉时，创建、保存和查询模板写回都停在这里。 */
+export function workspaceForwardBlock(value: unknown): string {
+  if (!isContentRequest(value)) return '完整页面不能转发这个请求。'
+  if (PAGE_FORWARD.has(value.type)) return ''
+  if (WRITE_FORWARD.has(value.type)) return isWriteSwitchOpen() ? '' : '写开关已关闭。'
+  return '完整页面不能转发这个请求。'
+}
+
+/** 消息校验和后台派发共用同一份许可。创建、保存和查询模板写回还要看前端写开关。 */
 export function isWorkspaceForwardRequest(value: unknown): value is ContentRequest {
-  if (!isContentRequest(value)) return false
-  if (PAGE_FORWARD.has(value.type)) return true
-  return isWriteSwitchOpen() && WRITE_FORWARD.has(value.type)
+  return workspaceForwardBlock(value) === ''
 }
 
 function isSearchContinuation(value: unknown): boolean {

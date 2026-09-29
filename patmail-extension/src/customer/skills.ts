@@ -1,3 +1,4 @@
+import { PCL_ORIGIN } from '../api/config'
 import type { CustomerSkillId } from './types'
 
 /** 目前只有这一家客户带上案件联系人导出。名字对上就默认解锁，不需要再勾一次。 */
@@ -34,4 +35,11 @@ export function rememberCaseContactCustomer(id: string): void {
 
 export function rememberedCaseContactCustomer(): string {
   return sessionStorage.getItem(CUSTOMER_KEY) ?? ''
+}
+
+/** 转发案件联系人导出之前要同时满足：绑定的是鹏城实验室，而且这个账号已经有这项能力。 */
+export function caseContactExportBlock(origin: string, customers: readonly { name: string; skills?: readonly string[] }[]): string {
+  if (origin !== PCL_ORIGIN) return '案件联系人只能在鹏城实验室的 EASY 上读取。'
+  if (!customers.some(hasCaseContactSkill)) return '先创建客户「鹏城实验室」并保存，才能导出联系人。'
+  return ''
 }

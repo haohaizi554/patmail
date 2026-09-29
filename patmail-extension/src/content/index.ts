@@ -148,6 +148,12 @@ const bridge: MessageBridge = {
       case MessageType.ReadCaseDemands:
         return { type: MessageType.CaseDemandResult,
           payload: await easyRuntime.readCaseDemands(message.payload.caseId, signal) }
+      case MessageType.ReadCustomerDemands:
+        return { type: MessageType.CustomerDemandResult,
+          payload: await easyRuntime.readCustomerDemands(message.payload.customerId, signal) }
+      case MessageType.ReadCustomerDirectory:
+        return { type: MessageType.CustomerDirectoryResult,
+          payload: await easyRuntime.readCustomerDirectory(message.payload.customerId, signal) }
       case MessageType.ReadMailContacts:
         return { type: MessageType.MailContactResult,
           payload: await easyRuntime.readMailContacts(message.payload.mailId, message.payload.customerId, signal) }
