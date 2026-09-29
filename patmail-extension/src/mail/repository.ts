@@ -16,7 +16,8 @@ export function emptyMailRules(ownerId: string): MailRuleBundle {
     subject: { template: '关于{文件名称}的通知', countInjection: false, anchor: '关于', missingAnchor: 'keep', version: 1 },
     body: { template: '请查收{文件数量}个文件。', supplement: '', version: 1 },
     defaultReviewer: null,
-    defaultSender: null
+    defaultSender: null,
+    defaultSignatureId: null
   }
 }
 
@@ -29,6 +30,7 @@ function isPolicy(value: unknown): value is CustomerMailPolicy {
   if (surface === 'limit') {
     if (item.limitMailStyle !== '1' && item.limitMailStyle !== '2' && item.limitMailStyle !== '3') return false
   } else if (item.sendMode !== 'merge_by_customer_description' && item.sendMode !== 'single_file') return false
+  if (item.remark != null && item.remark !== '' && (typeof item.remark !== 'string' || item.remark.length > 80 || !item.remark.trim())) return false
   if (item.mailTypeId === undefined && item.mailTypeName === undefined) return true
   return typeof item.mailTypeId === 'string' && isQueryGuid(item.mailTypeId) && typeof item.mailTypeName === 'string' && item.mailTypeName.trim().length > 0
 }
@@ -98,7 +100,11 @@ export function readMailRules(value: unknown, ownerId: string): { bundle: MailRu
   if (record.defaultSender !== undefined && record.defaultSender !== null && !sender) {
     return { bundle: emptyMailRules(ownerId), writable: false, warning: '默认发件人无法识别，未覆盖原数据。' }
   }
-  return { bundle: { version: 1, revision: record.revision, ownerId, policies, mappings, recipients, signatures, subject: record.subject, body: record.body, defaultReviewer: reviewer, defaultSender: sender }, writable: true }
+  const signaturePref = readDefaultSignatureId(record.defaultSignatureId)
+  if (signaturePref === undefined) {
+    return { bundle: emptyMailRules(ownerId), writable: false, warning: '默认签名无法识别，未覆盖原数据。' }
+  }
+  return { bundle: { version: 1, revision: record.revision, ownerId, policies, mappings, recipients, signatures, subject: record.subject, body: record.body, defaultReviewer: reviewer, defaultSender: sender, defaultSignatureId: signaturePref }, writable: true }
 }
 
 function readDefaultReviewer(value: unknown): DefaultReviewer | null {
@@ -107,6 +113,15 @@ function readDefaultReviewer(value: unknown): DefaultReviewer | null {
   const row = value as DefaultReviewer
   if (!isQueryGuid(row.userId) || typeof row.name !== 'string' || !row.name.trim() || row.name.length > 80) return null
   return { userId: row.userId, name: row.name.trim() }
+}
+
+const SIGNATURE_PREF = /^(site|diy):\S{1,120}$/
+
+/** 缺省是 null，表示沿用原站签名。写了但认不出则整份规则不覆盖。 */
+function readDefaultSignatureId(value: unknown): string | null | undefined {
+  if (value === undefined || value === null || value === '') return null
+  if (typeof value === 'string' && SIGNATURE_PREF.test(value)) return value
+  return undefined
 }
 
 function readDefaultSender(value: unknown): DefaultSender | null {
@@ -181,6 +196,7 @@ export class MailRuleRepository {
       bundle.body = read.bundle.body
       bundle.defaultReviewer = read.bundle.defaultReviewer
       bundle.defaultSender = read.bundle.defaultSender
+      bundle.defaultSignatureId = read.bundle.defaultSignatureId ?? null
     })
   }
 }

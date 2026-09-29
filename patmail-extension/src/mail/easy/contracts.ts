@@ -309,13 +309,15 @@ export function relatedFileParams(mailId: string, fileIds: string): URLSearchPar
   return params
 }
 
+/** mail.js 只把 ClientInfo.Result 当成关联成功。原文没保存，所以成功后仍应回读 GetMailFile。 */
 export function readRelatedFiles(data: unknown): WriteStatus<{ accepted: true }> {
   if (!isRecord(data)) return { status: 'unknown', requestSent: true, message: '文件关联响应无法确认。' }
   const client = readClientInfo(data.ClientInfo)
-  if (!client.ok || client.data.Status !== true) {
-    return { status: 'unknown', requestSent: true, message: '文件关联的成功条件尚未在响应正文里核对。' }
+  if (!client.ok || client.data.Result === undefined) {
+    return { status: 'unknown', requestSent: true, message: '文件关联响应没有 ClientInfo.Result，不能重试。' }
   }
-  return { status: 'unknown', requestSent: true, message: '即使 Status 为真，也要重新读取文件列表后才能算关联完成。' }
+  if (client.data.Result === true) return { status: 'ok', data: { accepted: true } }
+  return { status: 'failed', requestSent: true, message: 'EASY 拒绝了文件关联。请先读取邮件文件，不要直接重试。' }
 }
 
 export function filesMatch(expected: string[], actual: EasyMailAttachment[]): boolean {

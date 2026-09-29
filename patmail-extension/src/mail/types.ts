@@ -20,8 +20,12 @@ export interface SelectedPatentFile {
   customerProfileId?: string
   customerBinding?: CustomerBinding
   caseId?: string
+  caseName?: string
   caseVolume?: string
+  /** 客户文号。转达邮件里常称作贵方案号，例如 ZL20250306002。 */
+  customerVolume?: string
   applicationNo?: string
+  officialPostDate?: string
   /** 由 Background 签发。页面自行编造的值不会被当成可信查询运行。 */
   querySessionId?: string
 }
@@ -43,6 +47,8 @@ export interface CustomerMailPolicy {
   sendMode?: SendMode
   /** 期限监控下的发文方式。1 同客户合并，2 单个来文，3 同客户第一联系人合并。 */
   limitMailStyle?: '1' | '2' | '3'
+  /** 同一客户可以有多套。备注用来区分。旧配置没有这个字段。 */
+  remark?: string
   /** 旧配置可能把发文类型写在这里。新的发文类型由文件描述决定。 */
   mailTypeId?: string
   mailTypeName?: string
@@ -127,6 +133,11 @@ export interface MailRuleBundle {
   defaultReviewer: DefaultReviewer | null
   /** 缺省表示还没设。创建任务时可以沿用，也可以当场改。 */
   defaultSender: DefaultSender | null
+  /**
+   * 发文时默认用哪一条签名。缺省表示用原站那一条。
+   * 形如 site:原站签名id 或 diy:暂存签名id。原站正文不写进这里，打开任务时现读。
+   */
+  defaultSignatureId?: string | null
 }
 
 export interface MailGroup {

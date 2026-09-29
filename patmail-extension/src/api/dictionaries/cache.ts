@@ -62,7 +62,7 @@ export class DictionaryCache {
   listColumnKey(userKey: string): string { return `${userKey}|listColumn` }
   mailTypeKey(userKey: string): string { return `${userKey}|mailType` }
   mailSetKey(userKey: string): string { return `${userKey}|mailSet` }
-  signatureKey(userKey: string, mailsetId: string): string { return `${userKey}|signature|${mailsetId}` }
+  signatureKey(userKey: string): string { return `${userKey}|signature` }
   reviewerKey(userKey: string): string { return `${userKey}|reviewer` }
   pickerKey(userKey: string, scope = ''): string { return scope ? `${userKey}|picker|${scope}` : `${userKey}|picker` }
 }

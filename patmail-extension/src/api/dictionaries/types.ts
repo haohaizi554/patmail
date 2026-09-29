@@ -102,7 +102,7 @@ export interface ReviewerSnapshot {
 
 export interface MailSetSnapshot {
   kind: 'mailSet'
-  items: Array<{ id: string; name: string; email: string; label: string }>
+  items: Array<{ id: string; name: string; email: string; label: string; isDefault: boolean; isPublic: boolean; signature: string }>
 }
 
 export type DictionaryKind = 'basic' | 'flow' | 'fileType' | 'fieldColumn' | 'listColumn' | 'mailType' | 'reviewer' | 'picker' | 'mailSet' | 'signature'
@@ -111,4 +111,4 @@ export type DictionaryLoadRequest =
   | { kind: 'basic' | 'flow' | 'fieldColumn' | 'listColumn' | 'mailType' | 'reviewer' | 'mailSet'; force: boolean }
   | { kind: 'picker'; force: boolean; caseTypeId?: string; country?: string; procType?: string }
   | { kind: 'fileType'; force: boolean; caseTypeId: string }
-  | { kind: 'signature'; force: boolean; mailsetId: string }
+  | { kind: 'signature'; force: boolean }

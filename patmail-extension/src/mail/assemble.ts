@@ -1,7 +1,8 @@
 import type { CustomerQueryProfile } from '../customer/types'
 import { resolveMailType } from './rules/description-mapping'
 import { resolveRecipients } from './rules/recipient-resolver'
-import { renderTemplate } from './rules/subject-builder'
+import { renderTemplate, templateValues, type TemplateExtra } from './rules/subject-builder'
+import { storedSignature } from './signature-catalog'
 import type { MailGroup, MailRuleBundle, SelectedPatentFile } from './types'
 
 export interface AssembledMail {
@@ -31,14 +32,8 @@ export interface RuleFill {
   notes: string[]
 }
 
-function valuesOf(customerName: string, files: SelectedPatentFile[]): Record<string, string> {
-  return {
-    文件名称: files.map(file => file.fileName.trim()).filter(Boolean).join('、'),
-    客户名称: customerName.trim(),
-    我方文号: files.map(file => file.caseVolume?.trim() ?? '').filter(Boolean).join('、'),
-    申请号: files.map(file => file.applicationNo?.trim() ?? '').filter(Boolean).join('、'),
-    文件数量: String(files.length)
-  }
+function valuesOf(customerName: string, files: SelectedPatentFile[], extra?: TemplateExtra): Record<string, string> {
+  return templateValues(files, customerName, extra)
 }
 
 function groupFor(file: SelectedPatentFile, customerProfileId: string): MailGroup {
@@ -57,22 +52,11 @@ function groupFor(file: SelectedPatentFile, customerProfileId: string): MailGrou
   }
 }
 
-/** 把已保存规则里的收件人、标题、正文和发文类型带进来，用户还可以改。 */
-export function fillFromRules(customer: CustomerQueryProfile, files: SelectedPatentFile[], rules: MailRuleBundle | null, operatorId: string): RuleFill {
+/** 把已保存规则里的收件人、标题、正文和发文类型带进来，用户还可以改。传入 signatureText 时用这一次选中的签名，不再另找规则里的默认项。 */
+export function fillFromRules(customer: CustomerQueryProfile, files: SelectedPatentFile[], rules: MailRuleBundle | null, operatorId: string, signatureText?: string): RuleFill {
   const notes: string[] = []
   const recipient = rules ? resolveRecipients(customer.id, rules.recipients) : null
   if (!recipient) notes.push('这个客户还没有收件人规则，收件人需要自己填。')
-  const values = valuesOf(customer.name, files)
-  const subject = rules ? renderTemplate(rules.subject.template, values) : { text: '', unresolved: [] as string[] }
-  const bodyBase = rules ? renderTemplate(rules.body.template, values) : { text: '', unresolved: [] as string[] }
-  const extra = rules ? renderTemplate(rules.body.supplement, values) : { text: '', unresolved: [] as string[] }
-  if (!rules?.subject.template.trim()) notes.push('还没有标题模板。')
-  for (const name of [...subject.unresolved, ...bodyBase.unresolved, ...extra.unresolved]) {
-    if (!notes.some(item => item.includes(name))) notes.push(`模板里的 {${name}} 还没有对应内容。`)
-  }
-  const signature = rules?.signatures.find(item => item.enabled && item.isDefault && item.operatorId === operatorId)?.content.trim() ?? ''
-  const bodyText = [bodyBase.text.trim(), extra.text.trim()].filter(Boolean).join('\n\n')
-  const body = signature && !bodyText.includes(signature) ? `${bodyText}${bodyText ? '\n\n' : ''}${signature}` : bodyText
   const matched = new Map<string, string>()
   if (rules) {
     for (const file of files) {
@@ -83,6 +67,19 @@ export function fillFromRules(customer: CustomerQueryProfile, files: SelectedPat
   }
   if (matched.size > 1) notes.push('所选文件对应了多个发文类型，请自己选一个。')
   const [mailTypeId, mailTypeName] = matched.size === 1 ? [...matched.entries()][0] : ['', '']
+  const values = valuesOf(customer.name, files, { mailTypeName })
+  const subject = rules ? renderTemplate(rules.subject.template, values) : { text: '', unresolved: [] as string[] }
+  const bodyBase = rules ? renderTemplate(rules.body.template, values) : { text: '', unresolved: [] as string[] }
+  const extra = rules ? renderTemplate(rules.body.supplement, values) : { text: '', unresolved: [] as string[] }
+  if (!rules?.subject.template.trim()) notes.push('还没有标题模板。')
+  for (const name of [...subject.unresolved, ...bodyBase.unresolved, ...extra.unresolved]) {
+    if (!notes.some(item => item.includes(name))) notes.push(`模板里的 {${name}} 还没有对应内容。`)
+  }
+  const signature = signatureText !== undefined
+    ? signatureText.trim()
+    : storedSignature(rules?.signatures ?? [], operatorId, rules?.defaultSignatureId)?.content.trim() ?? ''
+  const bodyText = [bodyBase.text.trim(), extra.text.trim()].filter(Boolean).join('\n\n')
+  const body = signature && !bodyText.includes(signature) ? `${bodyText}${bodyText ? '\n\n' : ''}${signature}` : bodyText
   return {
     to: recipient ? recipient.to.join(';') : '',
     cc: recipient ? recipient.cc.join(';') : '',

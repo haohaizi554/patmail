@@ -6,7 +6,7 @@ export type EasyOperation =
   | 'basicData' | 'flowDirection' | 'fileTypeTree' | 'fieldColumn' | 'listColumn' | 'mailType'
   | 'deptTree' | 'treeUser' | 'treeAgent' | 'fileTempList' | 'deptBranch' | 'applyTags' | 'limitInit' | 'limitCtrlProc'
   | 'mailCustomer' | 'mailInfoInit' | 'getMailInfo' | 'getMailFile' | 'getMailCase'
-  | 'getMailRule' | 'getCustomerContact' | 'getRecentContact' | 'getCaseContact' | 'getSalesContact' | 'getPicsContact' | 'getCaseAgentContact' | 'getSignature' | 'getMailSet' | 'caseDemand' | 'saveMailInfo' | 'saveMailRelatedFiles'
+  | 'getMailRule' | 'getCustomerContact' | 'getRecentContact' | 'getCaseContact' | 'getSalesContact' | 'getPicsContact' | 'getCaseAgentContact' | 'getSignature' | 'getMailSet' | 'mailSignatureList' | 'signatureSet' | 'caseDemand' | 'saveMailInfo' | 'saveMailRelatedFiles'
   | 'getFlowInfo' | 'getFlowHistory' | 'getUrgencyList' | 'getFlowSubmit' | 'getFlowLastStatus'
   | 'limitMonitor' | 'mailProcess' | 'processAP' | 'processEF' | 'getIsNewCpc'
 
@@ -48,6 +48,8 @@ const ROUTES: Record<EasyOperation, { path: string; call: string }> = {
   caseDemand: { path: '/AjaxServers/PatentAction.ashx', call: 'GetDemandBuCaseid' },
   getSignature: { path: '/AjaxServers/Mail.ashx', call: 'GetSignature' },
   getMailSet: { path: '/AjaxServers/Login.ashx', call: 'Getmailset' },
+  mailSignatureList: { path: '/AjaxServers/Login.ashx', call: 'GetMailSignatureSettingList' },
+  signatureSet: { path: '/AjaxServers/Login.ashx', call: 'GetSignatureset' },
   saveMailInfo: { path: '/AjaxServers/Mail.ashx', call: 'SaveMailInfo' },
   saveMailRelatedFiles: { path: '/AjaxServers/Mail.ashx', call: 'SaveMailRalteCaseFile' },
   getFlowInfo: { path: '/AjaxServers/Common.ashx', call: 'GetFlowInfo' },

@@ -1,56 +1,72 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import ThemeSelect from '../../../../../src/components/ThemeSelect.vue'
+import { ref } from 'vue'
 import type { MailSignatureItem } from '../../../mail/easy/signature-read'
+import { signatureKey } from '../../../mail/signature-catalog'
 import type { OperatorSignature } from '../../../mail/types'
 
-const props = defineProps<{
+defineProps<{
   signatures: OperatorSignature[]
-  reserved: MailSignatureItem | null
   items: MailSignatureItem[]
+  activeKey: string
   notice: string
 }>()
-const emit = defineEmits<{ save: [value: { name: string; content: string }]; reload: [] }>()
-const name = defineModel<string>('name', { default: '' })
-const content = defineModel<string>('content', { default: '' })
-const picked = ref('')
+const emit = defineEmits<{
+  save: [value: { name: string; content: string }]
+  remove: [id: string]
+  prefer: [key: string]
+  reload: []
+}>()
+const name = ref('')
+const content = ref('')
 
-const options = computed(() => props.items.map(item => ({ value: item.id || item.name, label: item.name })))
-
-watch(() => props.reserved, value => {
-  if (!value) return
-  picked.value = value.id || value.name
-  name.value = value.name
-  content.value = value.content
-})
-
-function choose(value: string): void {
-  picked.value = value
-  const row = props.items.find(item => (item.id || item.name) === value)
-  if (!row) return
-  name.value = row.name
-  content.value = row.content
+function add(): void {
+  const nextName = name.value.trim()
+  const nextContent = content.value.trim()
+  if (!nextName || !nextContent) {
+    emit('save', { name: nextName, content: nextContent })
+    return
+  }
+  emit('save', { name: nextName.slice(0, 80), content: nextContent.slice(0, 4000) })
+  name.value = ''
+  content.value = ''
 }
 </script>
 
 <template>
   <section class="card">
     <h2>操作员签名</h2>
-    <p class="hint">按默认发件邮箱读取原站预留的签名。一个邮箱只带一条预留签名，正文会一起读回来。保存后这个操作员只保留这一条。</p>
+    <p class="hint">原站签名直接使用，不用再存一遍。自己写的签名记在本机，作为暂存。默认用原站；要换的话点「设为默认」。发文任务里会把两边一起列出来。</p>
     <p v-if="notice" class="hint">{{ notice }}</p>
+    <p class="signature-kind is-site">原站</p>
+    <p v-if="items.length === 0" class="empty">还没有读到原站签名。</p>
+    <ul v-else class="signature-list">
+      <li v-for="item in items" :key="item.id" class="is-site">
+        <div class="signature-line">
+          <span class="signature-mark is-site">原站</span>
+          <strong>{{ item.name }}</strong>
+          <span v-if="activeKey === signatureKey('site', item.id)" class="hint">当前默认</span>
+          <button v-else type="button" class="text-button" @click="emit('prefer', signatureKey('site', item.id))">设为默认</button>
+        </div>
+        <p class="hint">{{ item.content }}</p>
+      </li>
+    </ul>
+    <p class="signature-kind is-diy">暂存</p>
     <div class="rule-fields">
-      <label v-if="options.length" class="span-row">原站签名
-        <ThemeSelect :model-value="picked" placeholder="选择签名" :options="options" @update:model-value="choose(String($event))" />
-      </label>
-      <label class="span-row">签名名称 <input v-model="name" type="text" /></label>
-      <label class="span-row">签名内容 <textarea v-model="content" rows="6"></textarea></label>
-      <button type="button" class="solid" @click="emit('save', { name: name.trim(), content })">用作操作员签名</button>
-      <button type="button" class="text-button" @click="emit('reload')">重新读取签名</button>
+      <label class="span-row">签名名称 <input v-model="name" type="text" maxlength="80" /></label>
+      <label class="span-row">签名内容 <textarea v-model="content" rows="6" maxlength="4000"></textarea></label>
+      <button type="button" class="solid" @click="add">添加暂存签名</button>
+      <button type="button" class="text-button" @click="emit('reload')">重新读取原站签名</button>
     </div>
-    <p v-if="signatures.length === 0" class="empty">尚未设置签名。</p>
-    <ul v-else>
-      <li v-for="item in signatures" :key="item.id">
-        <strong>{{ item.name }}</strong>
+    <p v-if="signatures.length === 0" class="empty">还没有暂存签名。</p>
+    <ul v-else class="signature-list">
+      <li v-for="item in signatures" :key="item.id" class="is-diy">
+        <div class="signature-line">
+          <span class="signature-mark is-diy">暂存</span>
+          <strong>{{ item.name }}</strong>
+          <span v-if="activeKey === signatureKey('diy', item.id)" class="hint">当前默认</span>
+          <button v-else type="button" class="text-button" @click="emit('prefer', signatureKey('diy', item.id))">设为默认</button>
+          <button type="button" class="text-button" @click="emit('remove', item.id)">删除</button>
+        </div>
         <p class="hint">{{ item.content }}</p>
       </li>
     </ul>

@@ -248,8 +248,7 @@ export class EasyRuntime {
     }
     const caseTypeId = request.kind === 'fileType' || request.kind === 'picker' ? request.caseTypeId ?? '' : ''
     const picker = request.kind === 'picker' ? { country: request.country ?? '', procType: request.procType ?? '' } : {}
-    const mailsetId = request.kind === 'signature' ? request.mailsetId : ''
-    return this.dictionaries.load(request.kind, this.historyUserKey, request.force, caseTypeId, signal, picker, mailsetId).then(result => {
+    return this.dictionaries.load(request.kind, this.historyUserKey, request.force, caseTypeId, signal, picker).then(result => {
       if (request.kind === 'listColumn' && result.ok && result.data.kind === 'listColumn' && result.data.colsel) {
         this.listColsel = result.data.colsel
       }

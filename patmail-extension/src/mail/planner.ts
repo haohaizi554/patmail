@@ -6,6 +6,7 @@ import { resolveRecipients, uniqueAddresses } from './rules/recipient-resolver'
 import { buildSubject } from './rules/subject-builder'
 import { buildBody } from './rules/body-builder'
 import { statusFrom, validateDraft } from './rules/validator'
+import { storedSignature } from './signature-catalog'
 import type { MailDraftPreview, MailRuleBundle, SelectionSnapshot, ValidationIssue } from './types'
 
 function customerName(profileId: string, profiles: CustomerQueryProfile[]): string {
@@ -26,10 +27,11 @@ export function planDrafts(snapshot: SelectionSnapshot, rules: MailRuleBundle, p
     const recipient = resolveRecipients(group.customerProfileId, rules.recipients, policy?.recipientTemplateId)
     const to = recipient ? uniqueAddresses(recipient.to) : { addresses: [], invalid: [] as string[] }
     const cc = recipient ? uniqueAddresses(recipient.cc) : { addresses: [], invalid: [] as string[] }
-    const signature = rules.signatures.find(item => item.enabled && item.isDefault && item.operatorId === operatorId)
+    const signature = storedSignature(rules.signatures, operatorId, rules.defaultSignatureId)
     const name = customerName(group.customerProfileId, profiles)
-    const subject = buildSubject(rules.subject, group, name)
-    const body = buildBody(rules.body, group, name, signature?.content ?? '')
+    const mailTypeName = resolved.conflict ? '' : mapping?.mailTypeName ?? ''
+    const subject = buildSubject(rules.subject, group, name, { mailTypeName })
+    const body = buildBody(rules.body, group, name, signature?.content ?? '', { mailTypeName })
     const issues: ValidationIssue[] = []
     for (const address of [...to.invalid, ...cc.invalid]) {
       issues.push({ code: 'INVALID_EMAIL', severity: 'error', message: `邮箱格式无效：${address}`, field: 'to', draftId: group.id })

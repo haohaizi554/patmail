@@ -75,8 +75,8 @@ export function taskFingerprint(input: Pick<TaskBuildInput, 'origin' | 'operator
     files,
     revision: rules.revision,
     identities,
-    policies: [...rules.policies].sort((left, right) => byText(left.customerProfileId, right.customerProfileId) || byText(left.querySurface ?? 'file', right.querySurface ?? 'file') || byText(left.sendMode ?? '', right.sendMode ?? '') || byText(left.limitMailStyle ?? '', right.limitMailStyle ?? ''))
-      .map(item => ({ customerProfileId: item.customerProfileId, querySurface: item.querySurface ?? 'file', sendMode: item.sendMode ?? '', limitMailStyle: item.limitMailStyle ?? '', mailTypeId: item.mailTypeId ?? '', mailTypeName: item.mailTypeName ?? '', enabled: item.enabled, version: item.version })),
+    policies: [...rules.policies].sort((left, right) => byText(left.customerProfileId, right.customerProfileId) || byText(left.querySurface ?? 'file', right.querySurface ?? 'file') || byText(left.remark ?? '', right.remark ?? '') || byText(left.sendMode ?? '', right.sendMode ?? '') || byText(left.limitMailStyle ?? '', right.limitMailStyle ?? ''))
+      .map(item => ({ customerProfileId: item.customerProfileId, querySurface: item.querySurface ?? 'file', remark: item.remark ?? '', sendMode: item.sendMode ?? '', limitMailStyle: item.limitMailStyle ?? '', mailTypeId: item.mailTypeId ?? '', mailTypeName: item.mailTypeName ?? '', enabled: item.enabled, version: item.version })),
     mappings: [...rules.mappings].sort((left, right) => byText(left.fileDescriptionId ?? left.fileDescriptionText ?? '', right.fileDescriptionId ?? right.fileDescriptionText ?? '') || byText(left.mailTypeId, right.mailTypeId) || byText(left.id, right.id))
       .map(item => ({ id: item.id, fileDescriptionId: item.fileDescriptionId ?? '', fileDescriptionText: item.fileDescriptionText ?? '', mailTypeId: item.mailTypeId, mailTypeName: item.mailTypeName, enabled: item.enabled, version: item.version })),
     recipients: [...rules.recipients].sort((left, right) => byText(left.customerProfileId, right.customerProfileId) || byText(left.id, right.id) || byText(left.name, right.name))

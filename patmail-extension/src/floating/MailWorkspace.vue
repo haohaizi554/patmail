@@ -158,16 +158,17 @@ watch(() => props.files, () => { drafts.value = [] }, { deep: true })
     </label>
     <button type="button" class="text-button" @click="save(draft => {
       if (!policyCustomer) return
-      const current = draft.policies.find(item => item.customerProfileId === policyCustomer && item.sendMode === policyMode)
+      const current = draft.policies.find(item => item.customerProfileId === policyCustomer && item.sendMode === policyMode && !(item.remark ?? '').trim())
       const next = {
         customerProfileId: policyCustomer,
         sendMode: policyMode,
+        ...(current?.remark ? { remark: current.remark } : {}),
         ...(current?.mailTypeId && current.mailTypeName ? { mailTypeId: current.mailTypeId, mailTypeName: current.mailTypeName } : {}),
         enabled: true,
         version: (current?.version ?? 0) + 1,
         updatedAt: new Date().toISOString()
       }
-      draft.policies = draft.policies.filter(item => !(item.customerProfileId === policyCustomer && item.sendMode === policyMode)).concat(next)
+      draft.policies = draft.policies.filter(item => !(item.customerProfileId === policyCustomer && item.sendMode === policyMode && !(item.remark ?? '').trim())).concat(next)
     })">保存发文方式</button>
 
     <label>文件描述原文<input v-model="mapText" type="text" /></label>
@@ -209,11 +210,14 @@ watch(() => props.files, () => { drafts.value = [] }, { deep: true })
     <label>签名名称<input v-model="signatureName" type="text" /></label>
     <label>签名内容<textarea v-model="signatureContent" rows="3" /></label>
     <button type="button" class="text-button" @click="save(draft => {
-      draft.signatures = draft.signatures.filter(item => item.operatorId !== owner)
-      draft.signatures.push({ id: newId('sign'), operatorId: owner, name: signatureName, content: signatureContent, enabled: true, isDefault: true, version: 1, updatedAt: new Date().toISOString() })
-    })">保存当前操作员签名</button>
+      const name = signatureName.trim()
+      const content = signatureContent.trim()
+      if (!name || !content) return
+      draft.signatures.push({ id: newId('sign'), operatorId: owner, name: name.slice(0, 80), content: content.slice(0, 4000), enabled: true, isDefault: false, version: 1, updatedAt: new Date().toISOString() })
+    })">添加暂存签名</button>
 
     <label>标题模板<input v-model="subjectTemplate" type="text" /></label>
+    <p class="hint">原站默认：{贵方案号}-{我方文号}-{案件名称}{发文类型}。没有内容的段会去掉。固定文字直接写。</p>
     <label class="check-line"><input v-model="countInjection" type="checkbox" />多个文件时在“关于”后注入数量</label>
     <label>没有“关于”时
       <ThemeSelect v-model="missingAnchor" :options="[{ value: 'keep', label: '保留原标题' }, { value: 'prefix', label: '添加前缀' }, { value: 'confirm', label: '标记人工确认' }]" />

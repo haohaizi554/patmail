@@ -7,9 +7,9 @@ export interface LoadedSignature {
   note: string
 }
 
-export async function fetchMailboxSignature(bridge: MessageBridge, mailsetId: string, force: boolean): Promise<{ data: LoadedSignature | null; message: string }> {
+export async function fetchMailboxSignature(bridge: MessageBridge, force: boolean): Promise<{ data: LoadedSignature | null; message: string }> {
   try {
-    const response = await bridge.request({ type: MessageType.LoadDictionary, payload: { kind: 'signature', force, mailsetId } })
+    const response = await bridge.request({ type: MessageType.LoadDictionary, payload: { kind: 'signature', force } })
     if (response.type === MessageType.Error) return { data: null, message: response.payload.message }
     if (response.type !== MessageType.DictionaryResult || !response.payload.ok || response.payload.data.kind !== 'signature') {
       const message = response.type === MessageType.DictionaryResult && !response.payload.ok

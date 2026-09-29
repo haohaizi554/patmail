@@ -175,6 +175,7 @@ export async function saveRuleAccount(area: LocalArea, origin: string, operatorI
     draft.body = bundle.body
     draft.defaultReviewer = bundle.defaultReviewer
     draft.defaultSender = bundle.defaultSender
+    draft.defaultSignatureId = bundle.defaultSignatureId ?? null
   })
   const account = tasks ? await loadAccount(area, origin, operatorId) : null
   const revalidation = tasks

@@ -31,6 +31,11 @@ function modeFor(
   if (!profileId || matches.length === 0) return null
   const only = matches[0]
   if (matches.length === 1 && only?.sendMode) return { mode: only.sendMode, version: only.version, profileId }
+  const modes = [...new Set(matches.flatMap(item => item.sendMode ? [item.sendMode] : []))]
+  if (modes.length === 1 && modes[0]) {
+    const newest = matches.reduce((best, item) => item.version > best.version ? item : best)
+    return { mode: modes[0], version: newest.version, profileId }
+  }
   const description = file.fileDescriptionId?.trim()
     ? `id:${file.fileDescriptionId.trim()}`
     : file.fileDescription.trim() ? `text:${file.fileDescription.trim()}` : ''
