@@ -23,12 +23,46 @@ export interface SubmitBuildInput {
   pageFields: MockPageFields | null
 }
 
-/** 结束流程的请求字段和响应都没有保存。这里不生成任何参数。 */
-export function buildEndEmailFlow(): { params: null; blockers: string[] } {
-  return {
-    params: null,
-    blockers: ['EndEmailFlowd 的请求字段和响应都没有核对。不能组参数，也不能调用。']
-  }
+/** mail.js 结束流程时写死的下一节点。 */
+export const END_FLOW_NODE_ID = '5A0F9ABF-0816-4FBB-A682-212FDDBE5224'
+
+export interface EndFlowInput {
+  mailId: string
+  status: number | null
+  flowId: string
+  flowType: string
+  flowSubType: string | null
+  currentNodeId: string | null
+  currentNodeCode: string | null
+}
+
+/** 按 Mail.EndFlow 组 EndEmailFlowd。回调不读响应，调用仍受流程写门禁约束。 */
+export function buildEndEmailFlow(input?: EndFlowInput | null): { params: URLSearchParams | null; blockers: string[] } {
+  if (!input) return { params: null, blockers: ['结束流程还没有当前流程信息。'] }
+  const blockers: string[] = []
+  if (!isQueryGuid(input.mailId)) blockers.push('f_obj_id 没有已确认的邮件 ID。')
+  if (input.status === null) blockers.push('f_cur_status 在当前流程响应里缺失。')
+  if (!isQueryGuid(input.flowId)) blockers.push('f_flow_id 没有来自当前流程。')
+  if (!input.flowType.trim()) blockers.push('f_flow_type 没有来自当前流程。')
+  if (input.flowSubType === null) blockers.push('f_flow_sub_type 在当前流程响应里缺失。')
+  if (!isQueryGuid(input.currentNodeId ?? '')) blockers.push('f_cur_node_id 在当前流程响应里缺失。')
+  if (!input.currentNodeCode?.trim()) blockers.push('f_cur_node_code 在当前流程响应里缺失。')
+  if (blockers.length > 0) return { params: null, blockers }
+  const params = new URLSearchParams()
+  params.set('Call', 'EndEmailFlowd')
+  params.set('f_obj_id', input.mailId)
+  params.set('f_cur_status', String(input.status))
+  params.set('f_status', '5000')
+  params.set('f_allow_edit', '0')
+  params.set('f_flow_id', input.flowId)
+  params.set('f_flow_type', input.flowType)
+  params.set('f_flow_sub_type', input.flowSubType ?? '')
+  params.set('f_cur_node_id', input.currentNodeId ?? '')
+  params.set('f_cur_node_code', input.currentNodeCode ?? '')
+  params.set('f_next_node_id', END_FLOW_NODE_ID)
+  params.set('f_next_node_code', 'END')
+  params.set('f_audit_type_id', 'submit')
+  return { params, blockers }
 }
 
 export function buildFlowSubmit(input: SubmitBuildInput): { params: URLSearchParams | null; blockers: string[] } {

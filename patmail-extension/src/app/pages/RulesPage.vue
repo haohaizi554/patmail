@@ -3,8 +3,8 @@ import PageHead from '../../../../src/components/PageHead.vue'
 import { bg } from '../../../../src/assets'
 import { computed, inject, ref, watch } from 'vue'
 import { plainClone } from '../../automation/snapshot'
-import { upsertMapping } from '../../mail'
-import type { CustomerMailPolicy, MailRuleBundle, SendMode } from '../../mail/types'
+import { removeCustomerPolicy, upsertCustomerPolicy, upsertMapping } from '../../mail'
+import type { MailRuleBundle, SendMode } from '../../mail/types'
 import type { LimitMailStyle, QuerySurfaceId } from '../../customer/types'
 import { isQueryGuid } from '../../query/query-validator'
 import { scopeFromConnection, type ExpectedAccountScope } from '../../shared/connection'
@@ -22,6 +22,7 @@ import { fetchMailSenders } from '../../customer/mailset-load'
 import { fetchMailTypeNodes } from '../../customer/mail-type-load'
 import { fetchMailboxSignature } from '../../mail/signature-load'
 import type { MailSignatureItem } from '../../mail/easy/signature-read'
+import { defaultSignatureChoice, signatureChoices, signatureKey } from '../../mail/signature-catalog'
 
 const bridge = inject<MessageBridge>('bridge')
 const { connection, customers, rules, accountEpoch, call } = useWorkspace()
@@ -32,26 +33,30 @@ const message = ref('')
 const importText = ref('')
 const reviewers = ref<Array<{ id: string; name: string }>>([])
 const reviewerNotice = ref('')
-const senders = ref<Array<{ id: string; label: string }>>([])
+const senders = ref<Array<{ id: string; label: string; isDefault: boolean; isPublic: boolean; signature: string }>>([])
 const senderNotice = ref('')
 const mailTypes = ref<Array<{ id: string; name: string; parentId: string }>>([])
 const mailTypeNotice = ref('')
 const signatureReserved = ref<MailSignatureItem | null>(null)
 const signatureItems = ref<MailSignatureItem[]>([])
 const signatureNotice = ref('')
+const signatureActiveKey = computed(() => defaultSignatureChoice(
+  signatureChoices(signatureItems.value, draft.value?.signatures ?? [], connection.value.operatorId),
+  draft.value?.defaultSignatureId ?? null,
+  signatureReserved.value?.id ?? null
+)?.key ?? '')
 
 watch(rules, (bundle) => {
   draft.value = bundle ? plainClone(bundle) : null
   draftScope.value = scopeFromConnection(connection.value)
 }, { immediate: true })
 watch(accountEpoch, () => { importText.value = '' })
-watch(ready, (ok) => { if (ok) { void loadReviewers(); void loadSenders(false); void loadMailTypes(false); void loadSignatures(false) } }, { immediate: true })
-watch(() => draft.value?.defaultSender?.mailsetId, () => { if (ready.value) void loadSignatures(false) })
+watch(ready, (ok) => { if (ok) { void loadReviewers(false); void loadSenders(false); void loadMailTypes(false); void loadSignatures(false) } }, { immediate: true })
 
-async function loadReviewers(): Promise<void> {
+async function loadReviewers(force: boolean): Promise<void> {
   if (!bridge || !ready.value) return
   reviewerNotice.value = '正在从原网站读取人员…'
-  const response = await bridge.request({ type: MessageType.LoadDictionary, payload: { kind: 'reviewer', force: false } })
+  const response = await bridge.request({ type: MessageType.LoadDictionary, payload: { kind: 'reviewer', force } })
   if (response.type === MessageType.Error) {
     reviewerNotice.value = response.payload.message
     reviewers.value = []
@@ -72,21 +77,20 @@ async function loadSenders(force: boolean): Promise<void> {
   if (!bridge || !ready.value) return
   senderNotice.value = '正在从原网站读取发件邮箱…'
   const loaded = await fetchMailSenders(bridge, force)
-  senders.value = loaded.items.map(item => ({ id: item.id, label: item.label }))
+  senders.value = loaded.items.map(item => ({
+    id: item.id,
+    label: item.label,
+    isDefault: item.isDefault,
+    isPublic: item.isPublic,
+    signature: item.signature
+  }))
   senderNotice.value = loaded.message
 }
 
 async function loadSignatures(force: boolean): Promise<void> {
-  const mailsetId = draft.value?.defaultSender?.mailsetId ?? ''
   if (!bridge || !ready.value) return
-  if (!isQueryGuid(mailsetId)) {
-    signatureReserved.value = null
-    signatureItems.value = []
-    signatureNotice.value = '先保存默认发件人，再读取这个邮箱预留的签名。'
-    return
-  }
-  signatureNotice.value = '正在从原网站读取签名…'
-  const loaded = await fetchMailboxSignature(bridge, mailsetId, force)
+  signatureNotice.value = '正在读取个人设置里的邮件签名…'
+  const loaded = await fetchMailboxSignature(bridge, force)
   signatureReserved.value = loaded.data?.reserved ?? null
   signatureItems.value = loaded.data?.items ?? []
   signatureNotice.value = loaded.data ? loaded.data.note : loaded.message
@@ -117,7 +121,8 @@ function addresses(value: string): string[] {
   return value.split(/[\s,;]+/).map(item => item.trim()).filter(Boolean)
 }
 
-async function savePolicy(policy: { customerProfileId: string; querySurface: QuerySurfaceId | ''; sendMode: SendMode | ''; limitMailStyle: LimitMailStyle | '' }): Promise<void> {
+async function savePolicy(policy: { customerProfileId: string; querySurface: QuerySurfaceId | ''; sendMode: SendMode | ''; limitMailStyle: LimitMailStyle | ''; remark: string; replaceKey: string }): Promise<void> {
+  if (!draft.value) return
   if (!policy.customerProfileId) { message.value = '请选择客户。'; return }
   if (policy.querySurface !== 'file' && policy.querySurface !== 'limit') {
     message.value = '请选择查询方式。'
@@ -131,27 +136,21 @@ async function savePolicy(policy: { customerProfileId: string; querySurface: Que
     message.value = '请选择这个查询方式下的发文方式。'
     return
   }
-  const surface = policy.querySurface
-  await persist(bundle => {
-    const previous = bundle.policies.find(item => item.customerProfileId === policy.customerProfileId && (item.querySurface ?? 'file') === surface)
-    const saved: CustomerMailPolicy = {
-      customerProfileId: policy.customerProfileId,
-      querySurface: surface,
-      enabled: true,
-      version: (previous?.version ?? 0) + 1,
-      updatedAt: new Date().toISOString(),
-      ...(surface === 'file' ? { sendMode: policy.sendMode as SendMode } : { limitMailStyle: policy.limitMailStyle as LimitMailStyle }),
-      ...(previous?.recipientTemplateId ? { recipientTemplateId: previous.recipientTemplateId } : {})
-    }
-    bundle.policies = bundle.policies
-      .filter(item => !(item.customerProfileId === policy.customerProfileId && (item.querySurface ?? 'file') === surface))
-      .concat(saved)
+  const result = upsertCustomerPolicy(draft.value.policies, {
+    customerProfileId: policy.customerProfileId,
+    querySurface: policy.querySurface,
+    sendMode: policy.sendMode,
+    limitMailStyle: policy.limitMailStyle,
+    remark: policy.remark,
+    replaceKey: policy.replaceKey
   })
+  if (!result.ok) { message.value = result.message; return }
+  await persist(bundle => { bundle.policies = result.policies })
 }
 
-async function removePolicy(target: { customerProfileId: string; querySurface: QuerySurfaceId }): Promise<void> {
+async function removePolicy(target: { customerProfileId: string; querySurface: QuerySurfaceId; remark: string }): Promise<void> {
   await persist(bundle => {
-    bundle.policies = bundle.policies.filter(item => !(item.customerProfileId === target.customerProfileId && (item.querySurface ?? 'file') === target.querySurface))
+    bundle.policies = removeCustomerPolicy(bundle.policies, target)
   })
 }
 
@@ -196,18 +195,35 @@ async function saveRecipient(input: { profileId: string; name: string; to: strin
 }
 
 async function saveSignature(input: { name: string; content: string }): Promise<void> {
-  if (!input.name.trim() || !input.content.trim()) { message.value = '请填写签名名称和内容。'; return }
+  const name = input.name.trim().slice(0, 80)
+  const content = input.content.trim().slice(0, 4000)
+  if (!name || !content) { message.value = '请填写签名名称和内容。'; return }
   await persist(bundle => {
-    bundle.signatures = [{
+    bundle.signatures = bundle.signatures.concat({
       id: crypto.randomUUID(),
       operatorId: connection.value.operatorId,
-      name: input.name.trim(),
-      content: input.content,
+      name,
+      content,
       enabled: true,
-      isDefault: true,
+      isDefault: false,
       version: 1,
       updatedAt: new Date().toISOString()
-    }]
+    })
+  })
+}
+
+async function removeSignature(id: string): Promise<void> {
+  await persist(bundle => {
+    bundle.signatures = bundle.signatures.filter(item => item.id !== id)
+    if (bundle.defaultSignatureId === signatureKey('diy', id)) bundle.defaultSignatureId = null
+  })
+}
+
+async function preferSignature(key: string): Promise<void> {
+  await persist(bundle => {
+    bundle.defaultSignatureId = key
+    const diyId = key.startsWith('diy:') ? key.slice(4) : ''
+    bundle.signatures = bundle.signatures.map(item => ({ ...item, isDefault: Boolean(diyId) && item.id === diyId }))
   })
 }
 
@@ -247,6 +263,7 @@ async function importRules(): Promise<void> {
     bundle.body = parsed.body
     bundle.defaultReviewer = parsed.defaultReviewer ?? null
     bundle.defaultSender = parsed.defaultSender ?? null
+    bundle.defaultSignatureId = parsed.defaultSignatureId ?? null
   })
 }
 </script>
@@ -260,14 +277,15 @@ async function importRules(): Promise<void> {
     <DescriptionMailTypeEditor :mappings="draft.mappings" :mail-types="mailTypes" :notice="mailTypeNotice" @save="saveMapping" @remove="removeMapping" @reload="loadMailTypes(true)" />
     <div class="rule-columns">
       <RecipientEditor :recipients="draft.recipients" :customers="customers" @save="saveRecipient" />
-      <SignatureEditor :signatures="draft.signatures" :reserved="signatureReserved" :items="signatureItems" :notice="signatureNotice" @save="saveSignature" @reload="loadSignatures(true)" />
+      <SignatureEditor :signatures="draft.signatures" :items="signatureItems" :active-key="signatureActiveKey" :notice="signatureNotice" @save="saveSignature" @remove="removeSignature" @prefer="preferSignature" @reload="loadSignatures(true)" />
     </div>
     <div class="rule-columns">
-      <DefaultReviewerEditor :reviewers="reviewers" :current-id="connection.operatorId" :selected="draft.defaultReviewer" :notice="reviewerNotice" @save="saveReviewer" />
+      <DefaultReviewerEditor :reviewers="reviewers" :current-id="connection.operatorId" :selected="draft.defaultReviewer" :notice="reviewerNotice" @save="saveReviewer" @reload="loadReviewers(true)" />
       <DefaultSenderEditor :senders="senders" :selected="draft.defaultSender" :notice="senderNotice" @save="saveSender" @reload="loadSenders(true)" />
     </div>
     <form class="card stack-form" @submit.prevent="saveText">
       <h2>标题和正文</h2>
+      <p class="hint">原站默认主题按「客户文号-我方文号-案件名称+发文类型」拼接，空的段会自动去掉。可以删掉其中几段，再写上自己的字，例如把文号改成第一件-最后一件，或改成「18件」。</p>
       <div class="rule-fields">
         <SubjectRuleEditor v-model="draft.subject" />
         <BodyRuleEditor v-model="draft.body" />

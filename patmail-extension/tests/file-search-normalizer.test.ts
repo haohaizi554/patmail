@@ -10,7 +10,7 @@ describe('GetSearchFiles 响应标准化', () => {
       TableRows: [{
         file_id: 'F-1', file_no: 'N-1', file_name: '专利证书.pdf', file_desc: '证书',
         file_status: '已完成', file_type: '官方来文', case_id: 'C-1',
-        case_name: '测试案件', case_volume: 'A', app_no: '2026.0001',
+        case_name: '测试案件', case_volume: 'A', case_volume_customer: 'ZL20250306002', app_no: '2026.0001',
         apply_type: '发明', customer_name: '测试客户', upload_time: '2026-07-10 ',
         post_date: '2026-07-11 ', extra_field: '不进入 UI'
       }],
@@ -20,7 +20,7 @@ describe('GetSearchFiles 响应标准化', () => {
     expect(result).toMatchObject({ ok: true, data: {
       total: 24, pageIndex: 2, pageSize: 20, totalPages: 2,
       items: [{ fileId: 'F-1', fileNo: 'N-1', fileName: '专利证书.pdf',
-        fileDescription: '证书', caseVolume: 'A', applicationNo: '2026.0001',
+        fileDescription: '证书', caseVolume: 'A', customerVolume: 'ZL20250306002', applicationNo: '2026.0001',
         customerName: '测试客户', uploadTime: '2026-07-10', officialPostDate: '2026-07-11' }]
     } })
     expect(JSON.stringify(result)).not.toContain('extra_field')

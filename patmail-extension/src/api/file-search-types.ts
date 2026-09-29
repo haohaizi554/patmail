@@ -12,6 +12,8 @@ export interface PatentFile {
   caseId?: string
   caseName?: string
   caseVolume?: string
+  /** 查询列 case_volume_customer，页面称作客户文号。 */
+  customerVolume?: string
   applicationNo?: string
   applicationType?: string
   customerName?: string

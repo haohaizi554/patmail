@@ -62,7 +62,7 @@ function isSessionSummary(value: unknown): value is SessionSummary {
 
 const OPTIONAL_FILE_KEYS = [
   'fileNo', 'fileDescription', 'fileStatus', 'fileType', 'caseId', 'caseName',
-  'caseVolume', 'applicationNo', 'applicationType', 'customerName',
+  'caseVolume', 'customerVolume', 'applicationNo', 'applicationType', 'customerName',
   'uploadTime', 'officialPostDate'
 ] as const
 

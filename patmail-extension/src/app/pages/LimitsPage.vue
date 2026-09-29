@@ -19,11 +19,17 @@ import { readXlsxRows } from '../../customer/xlsx-table'
 import { isQueryGuid } from '../../query/query-validator'
 import { scopeFromConnection } from '../../shared/connection'
 import { MessageType, type MessageBridge } from '../../shared/message'
+import { pctRuntimeFrom, workflowSender } from '../../workflow/catalog'
+import { useWorkflowCatalog } from '../composables/useWorkflowCatalog'
 import { useWorkspace } from '../composables/useWorkspace'
 import { infoDialog } from '../dialog'
 
 const bridge = inject<MessageBridge>('bridge')
 const { connection, customers, rules, call } = useWorkspace()
+const { catalog } = useWorkflowCatalog()
+const pctDefinition = computed(() => catalog.value.workflows.find(item => item.id === 'pct-reminder') ?? null)
+const pctConfig = computed(() => pctRuntimeFrom(pctDefinition.value))
+const workflowMailbox = computed(() => workflowSender(pctDefinition.value))
 const connected = computed(() => connection.value.sessionStatus === 'authenticated')
 const loading = ref(false)
 const savingTask = ref(false)
@@ -58,14 +64,16 @@ const mailsetOptions = computed(() => {
   if (mailsetId.value && !items.some(item => item.value === mailsetId.value)) {
     const saved = pctCustomer.value?.mailsetId === mailsetId.value
       ? pctCustomer.value.mailsetLabel
-      : rules.value?.defaultSender?.mailsetId === mailsetId.value
-        ? rules.value.defaultSender.label
-        : ''
+      : workflowMailbox.value?.id === mailsetId.value
+        ? workflowMailbox.value.label
+        : rules.value?.defaultSender?.mailsetId === mailsetId.value
+          ? rules.value.defaultSender.label
+          : ''
     items.unshift({ value: mailsetId.value, label: saved || '已保存的发件邮箱' })
   }
   return items
 })
-const mailMatch = computed(() => matchPctMailTypes(mailNodes.value))
+const mailMatch = computed(() => matchPctMailTypes(mailNodes.value, pctConfig.value))
 const sheetMerged = ref(false)
 const lastQuery = ref<Omit<LimitMonitorQuery, 'pageIndex' | 'pageSize'> | null>(null)
 
@@ -288,7 +296,7 @@ async function loadMailTypes(force: boolean): Promise<void> {
   const loaded = await fetchMailTypeNodes(bridge, force)
   mailNodes.value = loaded.nodes
   mailTypeMessage.value = loaded.message
-  if (sheetRows.value.length) sheetRows.value = applyPctMailTypes(sheetRows.value, mailNodes.value)
+  if (sheetRows.value.length) sheetRows.value = applyPctMailTypes(sheetRows.value, mailNodes.value, pctConfig.value)
 }
 
 async function loadMailSets(force: boolean): Promise<void> {
@@ -311,8 +319,12 @@ watch(connected, (ok) => {
   }
 }, { immediate: true })
 
+watch(pctConfig, () => {
+  if (sheetRows.value.length) sheetRows.value = applyPctMailTypes(sheetRows.value, mailNodes.value, pctConfig.value)
+})
+
 function preferredSenderId(): string {
-  return pctCustomer.value?.mailsetId || rules.value?.defaultSender?.mailsetId || ''
+  return pctCustomer.value?.mailsetId || workflowMailbox.value?.id || rules.value?.defaultSender?.mailsetId || ''
 }
 
 watch(() => pctCustomer.value?.id, () => {
@@ -322,6 +334,11 @@ watch(() => pctCustomer.value?.id, () => {
 }, { immediate: true })
 
 watch(() => rules.value?.defaultSender?.mailsetId, () => {
+  if (senderTouched.value || pctCustomer.value?.mailsetId) return
+  mailsetId.value = preferredSenderId()
+})
+
+watch(() => workflowMailbox.value?.id, () => {
   if (senderTouched.value || pctCustomer.value?.mailsetId) return
   mailsetId.value = preferredSenderId()
 })
@@ -359,8 +376,8 @@ async function onSheet(event: Event): Promise<void> {
     return
   }
   try {
-    const parsed = pctRowsFromTable(await readXlsxRows(await file.arrayBuffer()))
-    sheetRows.value = applyPctMailTypes(parsed.rows, mailNodes.value)
+    const parsed = pctRowsFromTable(await readXlsxRows(await file.arrayBuffer()), [], pctConfig.value)
+    sheetRows.value = applyPctMailTypes(parsed.rows, mailNodes.value, pctConfig.value)
     sheetNotice.value = parsed.notice
     if (sheetRows.value.length) await querySheet('batch')
   } catch (error) {
@@ -502,7 +519,7 @@ async function createTask(): Promise<void> {
     message.value = '先传入 PCT 表格。'
     return
   }
-  sheetRows.value = applyPctMailTypes(sheetRows.value, mailNodes.value)
+  sheetRows.value = applyPctMailTypes(sheetRows.value, mailNodes.value, pctConfig.value)
   if (sheetRows.value.some(row => !row.mailTypeId)) {
     message.value = '发文类型还没从原网站读全。连上 EASY 后点重新读取，再创建任务。'
     return
@@ -612,7 +629,8 @@ async function createTask(): Promise<void> {
               <button class="ghost" type="button" :disabled="loading || savingTask" @click="querySheet('each')">逐个文号查询</button>
             </div>
             <p class="hint">没改的话用发文规则里保存的默认发件人。这里改一次，会记在这次任务上，并记住到这个客户。</p>
-            <p v-if="!senderTouched && !pctCustomer?.mailsetId && rules?.defaultSender && mailsetId === rules.defaultSender.mailsetId" class="hint">当前沿用默认：{{ rules.defaultSender.label }}</p>
+            <p v-if="!senderTouched && !pctCustomer?.mailsetId && workflowMailbox && mailsetId === workflowMailbox.id" class="hint">当前沿用工作流里选的：{{ workflowMailbox.label }}</p>
+            <p v-else-if="!senderTouched && !pctCustomer?.mailsetId && rules?.defaultSender && mailsetId === rules.defaultSender.mailsetId" class="hint">当前沿用默认：{{ rules.defaultSender.label }}</p>
             <p v-if="mailsetMessage" class="hint">{{ mailsetMessage }}</p>
             <button type="button" class="text-button" @click="loadMailSets(true)">重新读取发件邮箱</button>
           </div>

@@ -1,5 +1,6 @@
 import { isFileSearchBusinessField, type FileSearchQuery } from '../api/file-search-params'
 import { isForbiddenFieldName } from '../query/field-registry'
+import { resolvePctRuntime, type PctRuntimeConfig } from '../workflow/pct-config'
 import type { CustomerQueryProfile, FileMailStyle, LimitMailStyle, QuerySurfaceId, WorkflowId } from './types'
 
 /** 查询入口。以后新增入口只加这一项，客户页按这份清单渲染。 */
@@ -225,30 +226,44 @@ export interface PctMailTypeMatch {
 }
 
 /** 有客户文号用贵方案号那一项；没有客户文号但有我方文号用我方案号深圳市那一项。两个都没有就不猜。 */
-export function pctVolumeSlot(input: { customerVolume?: string; ourVolume?: string }): PctVolumeSlot | null {
-  if (input.customerVolume?.trim()) return { id: 'customer_volume', radioIndex: 1 }
-  if (input.ourVolume?.trim()) return { id: 'our_volume_shenzhen', radioIndex: 3 }
+export function pctVolumeSlot(input: { customerVolume?: string; ourVolume?: string }, config?: PctRuntimeConfig): PctVolumeSlot | null {
+  const runtime = resolvePctRuntime(config)
+  if (input.customerVolume?.trim()) return { id: 'customer_volume', radioIndex: runtime.customerRadio }
+  if (input.ourVolume?.trim()) return { id: 'our_volume_shenzhen', radioIndex: runtime.ourRadio }
   return null
 }
 
-function shenzhen(name: string): boolean {
-  return name.includes('深圳市') && !name.includes('非深圳市')
+function named(name: string, keyword: string): boolean {
+  const text = keyword.trim()
+  return text.length > 0 && name.includes(text)
 }
 
-/** 在热加载的发文类型树里按名称对上 PCT 提醒的三项。对不上就留空，不写死名称。 */
-export function matchPctMailTypes(nodes: Array<{ id: string; name: string }>): PctMailTypeMatch {
-  const reminder = nodes.filter(node => node.id.trim() && node.name.includes('提醒申请PCT'))
+function inCity(name: string, config: PctRuntimeConfig): boolean {
+  return named(name, config.cityKeyword) && !named(name, config.otherCityKeyword)
+}
+
+function pickedType(nodes: Array<{ id: string; name: string }>, id: string): PctMailTypeNode | null {
+  const text = id.trim()
+  if (!text) return null
+  const found = nodes.find(node => node.id === text && node.name.trim())
+  return found ? { id: found.id, name: found.name } : null
+}
+
+/** 点名选定的优先。没选定，或这次名单里没有它，再按名字里的词来对。对不上就留空。 */
+export function matchPctMailTypes(nodes: Array<{ id: string; name: string }>, config?: PctRuntimeConfig): PctMailTypeMatch {
+  const runtime = resolvePctRuntime(config)
+  const reminder = nodes.filter(node => node.id.trim() && named(node.name, runtime.reminderKeyword))
   return {
-    customerVolume: reminder.find(node => node.name.includes('贵方案号') && shenzhen(node.name)) ?? null,
-    ourVolumeOtherCity: reminder.find(node => node.name.includes('我方案号') && node.name.includes('非深圳市')) ?? null,
-    ourVolumeShenzhen: reminder.find(node => node.name.includes('我方案号') && shenzhen(node.name)) ?? null
+    customerVolume: pickedType(nodes, runtime.customerTypeId) ?? reminder.find(node => named(node.name, runtime.customerKeyword) && inCity(node.name, runtime)) ?? null,
+    ourVolumeOtherCity: reminder.find(node => named(node.name, runtime.ourKeyword) && named(node.name, runtime.otherCityKeyword)) ?? null,
+    ourVolumeShenzhen: pickedType(nodes, runtime.ourTypeId) ?? reminder.find(node => named(node.name, runtime.ourKeyword) && inCity(node.name, runtime)) ?? null
   }
 }
 
-export function pctMailTypeFor(input: { customerVolume?: string; ourVolume?: string }, nodes: Array<{ id: string; name: string }>): (PctMailTypeNode & { radioIndex: 1 | 3 }) | null {
-  const slot = pctVolumeSlot(input)
+export function pctMailTypeFor(input: { customerVolume?: string; ourVolume?: string }, nodes: Array<{ id: string; name: string }>, config?: PctRuntimeConfig): (PctMailTypeNode & { radioIndex: 1 | 3 }) | null {
+  const slot = pctVolumeSlot(input, config)
   if (!slot) return null
-  const matched = matchPctMailTypes(nodes)
+  const matched = matchPctMailTypes(nodes, config)
   const node = slot.id === 'customer_volume' ? matched.customerVolume : matched.ourVolumeShenzhen
   if (!node) return null
   return { ...node, radioIndex: slot.radioIndex }

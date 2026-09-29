@@ -25,25 +25,30 @@ import type { MailSender } from '../../customer/mailset'
 import type { MessageBridge } from '../../shared/message'
 import type { FileMailStyle, LimitMailStyle, QuerySurfaceId, WorkflowId } from '../../customer/types'
 import { scopeFromConnection, type ExpectedAccountScope } from '../../shared/connection'
+import { packagedPctWorkflow, pctRuntimeFrom, workflowSender } from '../../workflow/catalog'
 import { confirmDialog } from '../dialog'
+import { useWorkflowCatalog } from '../composables/useWorkflowCatalog'
 import { useWorkspace } from '../composables/useWorkspace'
 
 const bridge = inject<MessageBridge>('bridge')
 const { connection, customers, call } = useWorkspace()
+const { catalog } = useWorkflowCatalog()
 const mailNodes = ref<Array<{ id: string; name: string }>>([])
 const mailTypeMessage = ref('正在从原网站读取发文类型…')
 const mailsets = ref<MailSender[]>([])
 const mailsetId = ref('')
+const senderTouched = ref(false)
 const mailsetMessage = ref('正在从原网站读取发件邮箱…')
 const mailsetOptions = computed(() => {
   const items = mailsets.value.map(item => ({ value: item.id, label: item.label }))
   if (mailsetId.value && !items.some(item => item.value === mailsetId.value)) {
-    const saved = customers.value.find(item => item.mailsetId === mailsetId.value)?.mailsetLabel
+    const fromCustomer = customers.value.find(item => item.mailsetId === mailsetId.value)?.mailsetLabel
+    const fromWorkflow = workflowSender(catalog.value.workflows.find(item => item.id === 'pct-reminder'))
+    const saved = fromCustomer || (fromWorkflow?.id === mailsetId.value ? fromWorkflow.label : '')
     items.unshift({ value: mailsetId.value, label: saved || '已保存的发件邮箱' })
   }
   return items
 })
-const mailMatch = computed(() => matchPctMailTypes(mailNodes.value))
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
 const name = ref('')
 const surface = ref<QuerySurfaceId | ''>('')
@@ -62,8 +67,29 @@ const removingId = ref('')
 
 const surfaceOptions = computed(() => QUERY_SURFACES.map(item => ({ value: item.id, label: item.label })))
 const stylePlaceholder = computed(() => surface.value ? '请选择发文模式' : '先选择查询入口')
-const workflowChoices = computed(() => workflowsFor(surface.value).map(item => ({ value: item.id, label: item.label })))
-const activeWorkflow = computed(() => WORKFLOWS.find(item => item.id === workflow.value) ?? null)
+const pctDefinition = computed(() => catalog.value.workflows.find(item => item.id === 'pct-reminder') ?? null)
+const pctRuntime = computed(() => pctRuntimeFrom(pctDefinition.value))
+const workflowMailbox = computed(() => workflowSender(pctDefinition.value))
+const pctName = computed(() => pctDefinition.value?.label || 'PCT提醒')
+const mailMatch = computed(() => matchPctMailTypes(mailNodes.value, pctRuntime.value))
+
+watch(workflowMailbox, (sender) => {
+  if (editingId.value || senderTouched.value || mailsetId.value || !sender) return
+  mailsetId.value = sender.id
+})
+
+function chooseSender(value: string): void {
+  senderTouched.value = true
+  mailsetId.value = value
+}
+const workflowChoices = computed(() => workflowsFor(surface.value).map(item => ({
+  value: item.id,
+  label: item.id === 'pct-reminder' ? pctName.value : item.label
+})))
+const activeWorkflow = computed(() => {
+  if (workflow.value === 'pct-reminder' && pctDefinition.value) return packagedPctWorkflow(pctDefinition.value)
+  return WORKFLOWS.find(item => item.id === workflow.value) ?? null
+})
 
 function describe(item: { boundQuery?: Record<string, string>; overrides: Record<string, string> }): string {
   if (item.boundQuery && Object.keys(item.boundQuery).length) return summarizeBoundQuery(item.boundQuery)
@@ -83,6 +109,7 @@ function edit(id: string): void {
   workflow.value = profile.workflowId ?? (surface.value === 'limit' ? 'pct-reminder' : '')
   mailStyle.value = (surface.value === 'limit' ? profile.limitMailStyle : profile.fileMailStyle) ?? ''
   reviewChoice.value = profile.reviewTarget ?? 'self'
+  senderTouched.value = true
   mailsetId.value = profile.mailsetId ?? ''
   enabled.value = profile.enabled
   createdAt.value = profile.createdAt
@@ -99,7 +126,8 @@ function cancel(): void {
   workflow.value = ''
   mailStyle.value = ''
   reviewChoice.value = 'self'
-  mailsetId.value = ''
+  senderTouched.value = false
+  mailsetId.value = workflowMailbox.value?.id ?? ''
   enabled.value = true
   createdAt.value = ''
   keptCustomerId.value = ''
@@ -245,7 +273,7 @@ watch(() => connection.value.operatorId, () => {
   <template v-else>
     <section class="card">
       <h2>已保存的客户</h2>
-      <p class="hint">期限监控先选工作流。PCT提醒是第一条，表格能决定的项按列走，发文模式和审核在这里选。</p>
+      <p class="hint">期限监控先选工作流。{{ pctName }}是第一条，表格能决定的项按列走，发文模式和审核在这里选。</p>
       <p v-if="listMessage" class="hint">{{ listMessage }}</p>
       <p v-if="customers.length === 0" class="empty">还没有客户。在下面填好名称后保存。</p>
       <table v-else class="grid">
@@ -254,7 +282,7 @@ watch(() => connection.value.operatorId, () => {
           <tr v-for="item in customers" :key="item.id">
             <td>{{ item.name }}</td>
             <td>{{ querySurfaceOf(item.querySurface).label }}</td>
-            <td>{{ WORKFLOWS.find(flow => flow.id === item.workflowId)?.label ?? '—' }}</td>
+            <td>{{ item.workflowId === 'pct-reminder' ? pctName : (WORKFLOWS.find(flow => flow.id === item.workflowId)?.label ?? '—') }}</td>
             <td>{{ customerMailStyleLabel(item) }}</td>
             <td>{{ describe(item) }}</td>
             <td>{{ item.enabled ? '启用中' : '已停用' }}</td>
@@ -288,7 +316,7 @@ watch(() => connection.value.operatorId, () => {
             </label>
             <div v-else-if="mode.id === 'from'">
               <label>{{ mode.label }}
-                <ThemeSelect :model-value="mailsetId" placeholder="选择发件邮箱" :options="mailsetOptions" @update:model-value="mailsetId = String($event)" />
+                <ThemeSelect :model-value="mailsetId" placeholder="选择发件邮箱" :options="mailsetOptions" @update:model-value="chooseSender(String($event))" />
               </label>
               <p v-if="mailsetMessage" class="hint">{{ mailsetMessage }}</p>
               <button type="button" class="text-button" @click="loadMailSets(true)">重新读取发件邮箱</button>
@@ -297,8 +325,8 @@ watch(() => connection.value.operatorId, () => {
               <p><strong>{{ mode.label }}</strong>：{{ mode.decidedBy }}</p>
               <p v-if="mailTypeMessage">{{ mailTypeMessage }}</p>
               <template v-else>
-                <p>有客户文号：{{ mailMatch.customerVolume?.name || '原网站这次没有返回这一项' }}</p>
-                <p>只有我方文号：{{ mailMatch.ourVolumeShenzhen?.name || '原网站这次没有返回这一项' }}</p>
+                <p>有客户文号：{{ mailMatch.customerVolume?.name || pctRuntime.customerTypeName || '这次没有对上' }}</p>
+                <p>只有我方文号：{{ mailMatch.ourVolumeShenzhen?.name || pctRuntime.ourTypeName || '这次没有对上' }}</p>
               </template>
               <button type="button" class="text-button" @click="loadMailTypes(true)">重新读取发文类型</button>
             </div>

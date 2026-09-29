@@ -11,6 +11,9 @@ import { summarizePctTask } from '../../customer/pct-sheet'
 import type { CustomerQueryProfile } from '../../customer/types'
 import { assembleMail, fillFromRules } from '../../mail'
 import { appendRecipientField } from '../../mail/easy/contracts'
+import type { MailSignatureItem } from '../../mail/easy/signature-read'
+import { fetchMailboxSignature } from '../../mail/signature-load'
+import { defaultSignatureChoice, signatureChoices } from '../../mail/signature-catalog'
 import type { AssembledMail } from '../../mail/assemble'
 import type { SelectedPatentFile } from '../../mail/types'
 import { describeItemRecord, describeTaskRecord } from '../record-status'
@@ -43,6 +46,11 @@ const mailsets = ref<MailSender[]>([])
 const mailsetId = ref('')
 const senderTouched = ref(false)
 const senderNotice = ref('')
+const siteSignatures = ref<MailSignatureItem[]>([])
+const siteReservedId = ref('')
+const signatureId = ref('')
+const signatureTouched = ref(false)
+const signatureNotice = ref('')
 
 const customer = computed(() => customers.value.find(item => item.id === customerId.value) ?? null)
 const mailTypeName = computed(() => mailTypes.value.find(item => item.id === mailTypeId.value)?.name ?? '')
@@ -147,8 +155,11 @@ function toggleFile(file: PatentFile): void {
       fileDescription: file.fileDescription ?? '',
       customerName: file.customerName ?? customer.value?.name ?? '',
       caseId: file.caseId,
+      caseName: file.caseName,
       caseVolume: file.caseVolume,
-      applicationNo: file.applicationNo
+      customerVolume: file.customerVolume,
+      applicationNo: file.applicationNo,
+      officialPostDate: file.officialPostDate
     })
   preview.value = null
 }
@@ -159,7 +170,7 @@ function applyRules(): void {
     fillNotes.value = ['先选择客户，再带入这个客户的规则。']
     return
   }
-  const filled = fillFromRules(current, picked.value, rules.value, connection.value.operatorId)
+  const filled = fillFromRules(current, picked.value, rules.value, connection.value.operatorId, selectedSignatureText())
   const sole = current.pctTask?.rows.length === 1 ? current.pctTask.rows[0] : null
   const keptTo = sole?.mailTo || (current.pctTask?.rows.length === 1 ? current.pctTask.mailTo : '')
   const keptCc = sole?.mailCc || (current.pctTask?.rows.length === 1 ? current.pctTask.mailCc : '')
@@ -202,10 +213,30 @@ function customerOptions(rows: CustomerQueryProfile[]): Array<{ value: string; l
   return rows.map(item => ({ value: item.id, label: item.name }))
 }
 
+const signatureList = computed(() => signatureChoices(siteSignatures.value, rules.value?.signatures ?? [], connection.value.operatorId))
+const signatureOptions = computed(() => signatureList.value.map(item => ({
+  value: item.key,
+  label: item.name,
+  group: item.source === 'site' ? '原站' : '暂存',
+  tone: item.source,
+  badge: item.source === 'site' ? '原站' : '暂存'
+})))
+const signatureDefaultKey = computed(() => defaultSignatureChoice(
+  signatureList.value,
+  rules.value?.defaultSignatureId ?? null,
+  siteReservedId.value || null
+)?.key ?? '')
+
 watch(ready, (ok) => {
   if (!ok) return
   void loadMailTypes()
   void loadSenders(false)
+  void loadSignatures(false)
+}, { immediate: true })
+
+watch(signatureDefaultKey, (key) => {
+  if (signatureTouched.value) return
+  signatureId.value = key
 }, { immediate: true })
 
 watch(() => rules.value?.defaultSender?.mailsetId, (id) => {
@@ -218,6 +249,23 @@ async function loadSenders(force: boolean): Promise<void> {
   const loaded = await fetchMailSenders(bridge, force)
   mailsets.value = loaded.items
   senderNotice.value = loaded.message
+}
+
+async function loadSignatures(force: boolean): Promise<void> {
+  if (!bridge || !ready.value) return
+  const loaded = await fetchMailboxSignature(bridge, force)
+  siteSignatures.value = loaded.data?.items ?? []
+  siteReservedId.value = loaded.data?.reserved?.id ?? ''
+  signatureNotice.value = loaded.data ? loaded.data.note : loaded.message
+}
+
+function chooseSignature(value: string): void {
+  signatureTouched.value = true
+  signatureId.value = value
+}
+
+function selectedSignatureText(): string {
+  return signatureList.value.find(item => item.key === signatureId.value)?.content.trim() ?? ''
 }
 
 function chooseSender(value: string): void {
@@ -246,6 +294,7 @@ onMounted(() => { if (ready.value) void call({ action: 'load' }) })
         <label>客户<ThemeSelect v-model="customerId" placeholder="选择客户" :options="customerOptions(customers)" /></label>
         <label>发文类型<MailTypeTreeSelect v-model="mailTypeId" :options="mailTypeOptions" :disabled="mailTypes.length === 0" /></label>
         <label>发件人<ThemeSelect :model-value="mailsetId" placeholder="选择发件邮箱" :options="senderOptions" @update:model-value="chooseSender(String($event))" /></label>
+        <label>签名<ThemeSelect :model-value="signatureId" placeholder="选择签名" :options="signatureOptions" @update:model-value="chooseSignature(String($event))" @open="loadSignatures(true)" /></label>
         <label>文件名<input v-model="fileKeyword" placeholder="可按文件名缩小范围" @keydown.enter="searchFiles" /></label>
       </div>
       <div class="filters">
@@ -256,6 +305,8 @@ onMounted(() => { if (ready.value) void call({ action: 'load' }) })
       <p v-if="fileMessage" class="hint">{{ fileMessage }}</p>
       <p v-if="senderNotice" class="hint">{{ senderNotice }}</p>
       <p v-else-if="!senderTouched && rules?.defaultSender && mailsetId === rules.defaultSender.mailsetId" class="hint">发件人沿用规则默认：{{ rules.defaultSender.label }}。要换的话在上面改，只影响这次预览。</p>
+      <p v-if="signatureNotice" class="hint">{{ signatureNotice }}</p>
+      <p v-else-if="signatureId && signatureId === signatureDefaultKey" class="hint">签名沿用默认。打开下拉会重新读取原站和暂存。要换的话在上面改，再点「带入这个客户的规则」写进正文。</p>
       <p v-for="note in fillNotes" :key="note" class="hint">{{ note }}</p>
       <table v-if="fileHits.length" class="grid">
         <thead><tr><th></th><th>文件</th><th>客户</th><th>我方文号</th></tr></thead>

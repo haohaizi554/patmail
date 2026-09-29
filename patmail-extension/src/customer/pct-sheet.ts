@@ -1,41 +1,34 @@
 import { isQueryGuid } from '../query/query-validator'
-import { PCT_REMINDER, pctMailTypeFor, pctVolumeSlot } from './mail-flow'
+import { resolvePctRuntime, type PctRuntimeConfig } from '../workflow/pct-config'
+import { pctMailTypeFor, pctVolumeSlot } from './mail-flow'
 import type { PctTaskDraft, PctTaskRow } from './types'
 import { joinCaseVolumes, splitCaseVolumes } from './volume-list'
-
-const HEADER = {
-  ourVolume: '我方文号',
-  customerVolume: '客户文号',
-  customerName: '客户名称',
-  contactName: '第一客户联系人',
-  iprName: '客户联系人(IPR)',
-  procLabel: '处理事项'
-} as const
 
 function cell(row: string[], index: number): string {
   if (index < 0) return ''
   return (row[index] ?? '').trim().slice(0, 80)
 }
 
-export function pctRowsFromTable(table: string[][], mailTypes: Array<{ id: string; name: string }> = []): { rows: PctTaskRow[]; notice: string } {
+export function pctRowsFromTable(table: string[][], mailTypes: Array<{ id: string; name: string }> = [], config?: PctRuntimeConfig): { rows: PctTaskRow[]; notice: string } {
+  const runtime = resolvePctRuntime(config)
   const header = (table[0] ?? []).map(item => item.trim())
   const column = (name: string) => header.indexOf(name)
-  const our = column(HEADER.ourVolume)
-  const proc = column(HEADER.procLabel)
+  const our = column(runtime.columns.ourVolume)
+  const proc = column(runtime.columns.procLabel)
   if (our < 0 || proc < 0) {
-    return { rows: [], notice: '表格要有「我方文号」和「处理事项」这两列。' }
+    return { rows: [], notice: `表格要有「${runtime.columns.ourVolume}」和「${runtime.columns.procLabel}」这两列。` }
   }
-  const customer = column(HEADER.customerVolume)
-  const name = column(HEADER.customerName)
-  const contact = column(HEADER.contactName)
-  const ipr = column(HEADER.iprName)
+  const customer = column(runtime.columns.customerVolume)
+  const name = column(runtime.columns.customerName)
+  const contact = column(runtime.columns.contactName)
+  const ipr = column(runtime.columns.iprName)
   const rows: PctTaskRow[] = []
   let skipped = 0
   for (const source of table.slice(1)) {
     const ourVolume = cell(source, our)
     const customerVolume = cell(source, customer)
-    const slot = pctVolumeSlot({ customerVolume, ourVolume })
-    const picked = pctMailTypeFor({ customerVolume, ourVolume }, mailTypes)
+    const slot = pctVolumeSlot({ customerVolume, ourVolume }, runtime)
+    const picked = pctMailTypeFor({ customerVolume, ourVolume }, mailTypes, runtime)
     if (!slot || !ourVolume) {
       skipped += 1
       continue
@@ -53,10 +46,10 @@ export function pctRowsFromTable(table: string[][], mailTypes: Array<{ id: strin
     if (rows.length >= 300) break
   }
   if (!rows.length) return { rows: [], notice: skipped ? '表格里没有同时带我方文号、并能判断发文类型的行。' : '表格里没有数据行。' }
-  const other = rows.filter(row => row.procLabel && row.procLabel !== PCT_REMINDER.procLabel).length
+  const other = rows.filter(row => row.procLabel && row.procLabel !== runtime.procLabel).length
   const notice = [
     `读到 ${rows.length} 行。`,
-    other ? `其中 ${other} 行的处理事项不是「${PCT_REMINDER.procLabel}」。` : '',
+    other ? `其中 ${other} 行的处理事项不是「${runtime.procLabel}」。` : '',
     skipped ? `跳过 ${skipped} 行没有文号的记录。` : ''
   ].filter(Boolean).join('')
   return { rows, notice }
@@ -79,11 +72,12 @@ export function volumesOf(rows: PctTaskRow[]): string[] {
   return splitCaseVolumes(joinCaseVolumes(rows.map(row => row.ourVolume)))
 }
 
-export function applyPctMailTypes(rows: PctTaskRow[], mailTypes: Array<{ id: string; name: string }>): PctTaskRow[] {
+export function applyPctMailTypes(rows: PctTaskRow[], mailTypes: Array<{ id: string; name: string }>, config?: PctRuntimeConfig): PctTaskRow[] {
+  const runtime = resolvePctRuntime(config)
   const next = pctRowsFromTable([
-    ['我方文号', '客户文号', '客户名称', '第一客户联系人', '客户联系人(IPR)', '处理事项'],
+    [runtime.columns.ourVolume, runtime.columns.customerVolume, runtime.columns.customerName, runtime.columns.contactName, runtime.columns.iprName, runtime.columns.procLabel],
     ...rows.map(row => [row.ourVolume, row.customerVolume, row.customerName, row.contactName, row.iprName, row.procLabel])
-  ], mailTypes).rows
+  ], mailTypes, runtime).rows
   return next.map(row => {
     const prev = rows.find(item => item.ourVolume.replace(/\s/g, '') === row.ourVolume.replace(/\s/g, ''))
     if (!prev) return row

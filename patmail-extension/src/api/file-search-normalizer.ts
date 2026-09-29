@@ -11,6 +11,7 @@ const OPTIONAL_FIELDS = {
   case_id: 'caseId',
   case_name: 'caseName',
   case_volume: 'caseVolume',
+  case_volume_customer: 'customerVolume',
   app_no: 'applicationNo',
   apply_type: 'applicationType',
   customer_name: 'customerName',
