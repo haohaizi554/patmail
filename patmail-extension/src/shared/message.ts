@@ -26,6 +26,7 @@ import type { MailDraftPreview, SelectedPatentFile } from '../mail/types'
 import type { MailExecutionView } from '../mail/easy/types'
 import { isWorkflowView } from '../workflow/guards'
 import type { WorkflowView } from '../workflow/types'
+import { isWriteSwitchOpen } from '../settings/write-switch'
 
 /** 所有通道共享的 JSON 消息信封；具体消息使用下方的可辨识联合类型。 */
 export interface Message<TPayload = unknown> {
@@ -542,10 +543,13 @@ export function isContentRequest(value: unknown): value is ContentRequest {
 }
 
 const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'SEARCH_LIMIT_MONITOR', 'LIST_MAIL_PROCESSES', 'OPEN_EASY_FORM', 'LIST_FLOW_REVIEWERS', 'READ_CASE_DEMANDS', 'READ_MAIL_CONTACTS', 'READ_MAIL_ADDRESSES', 'GET_PAGE_INFO', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
+const WRITE_FORWARD = new Set(['CREATE_EASY_MAIL', 'SAVE_EASY_MAIL'])
 
-/** 消息校验和后台派发共用同一份许可，避免新查询只通过前一层、却被后一层截断。 */
+/** 消息校验和后台派发共用同一份许可。创建和保存还要看前端写开关。 */
 export function isWorkspaceForwardRequest(value: unknown): value is ContentRequest {
-  return isContentRequest(value) && PAGE_FORWARD.has(value.type)
+  if (!isContentRequest(value)) return false
+  if (PAGE_FORWARD.has(value.type)) return true
+  return isWriteSwitchOpen() && WRITE_FORWARD.has(value.type)
 }
 
 function isSearchContinuation(value: unknown): boolean {
@@ -758,9 +762,6 @@ function isDictionaryRequest(value: unknown): value is DictionaryLoadRequest {
     return typeof value.caseTypeId === 'string' &&
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.caseTypeId) &&
       Object.keys(value).length === 3
-  }
-  if (value.kind === 'signature') {
-    return isFlowId(value.mailsetId) && Object.keys(value).length === 3
   }
   return Object.keys(value).length === 2
 }

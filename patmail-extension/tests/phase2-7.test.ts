@@ -12,12 +12,12 @@ import { MemoryTaskRepository } from '../src/automation/repository'
 import { WRITE_STAGES } from '../src/automation/state'
 import { buildTask, taskFingerprint, type TaskBuildInput } from '../src/automation/task-builder'
 import { validateTask } from '../src/automation/task-validator'
-import { EASY_MAIL_WRITES_ENABLED } from '../src/mail/easy/gate'
+import { mailWritesEnabled } from '../src/mail/easy/gate'
 import { emptyMailRules } from '../src/mail'
 import type { CustomerQueryProfile } from '../src/customer/types'
 import type { MailRuleBundle, SelectedPatentFile } from '../src/mail/types'
 import { isMessage, MessageType } from '../src/shared/message'
-import { WORKFLOW_CONTRACT, WORKFLOW_WRITES_ENABLED } from '../src/workflow/gate'
+import { WORKFLOW_CONTRACT, workflowWritesEnabled } from '../src/workflow/gate'
 import { reviewersForNode } from '../src/workflow/reviewer-resolver'
 import { canReplan, nextWorkflowState } from '../src/workflow/state'
 import { MemoryWorkflowStore } from '../src/workflow/store'
@@ -359,9 +359,9 @@ describe('执行协调与恢复', () => {
 })
 
 describe('接口契约与写开关', () => {
-  it('keeps production writes closed and does not treat 502 as GetFlowSubmit success', async () => {
-    expect(EASY_MAIL_WRITES_ENABLED).toBe(false)
-    expect(WORKFLOW_WRITES_ENABLED).toBe(false)
+  it('defaults the write switch open and does not treat 502 as GetFlowSubmit success', async () => {
+    expect(mailWritesEnabled()).toBe(true)
+    expect(workflowWritesEnabled()).toBe(true)
     expect(CONTRACT_EVIDENCE.find(item => item.call === 'GetFlowSubmit')).toMatchObject({ responseCaptured: false, status: 'pending' })
     expect(CONTRACT_EVIDENCE.find(item => item.call === 'FlowSubmit')?.responseCaptured).toBe(false)
     expect(CONTRACT_EVIDENCE.find(item => item.call === 'EndEmailFlowd')?.source).toBe('unverified')

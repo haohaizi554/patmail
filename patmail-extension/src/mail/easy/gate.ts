@@ -1,20 +1,30 @@
+import { isQueryGuid } from '../../query/query-validator'
+import { isWriteSwitchOpen } from '../../settings/write-switch'
 import type { SendMode } from '../types'
 
-/** 真实写操作默认关闭。页面消息不能打开它。 */
-export const EASY_MAIL_WRITES_ENABLED = false
+/** 跟系统设置里的写开关走。默认打开。 */
+export function mailWritesEnabled(): boolean {
+  return isWriteSwitchOpen()
+}
 
-/** 抓包只确认了合并发文 mailstyle=1。响应正文和单发参数都还没核对。 */
+/** 抓包只确认了合并发文 mailstyle=1。创建和保存的响应原文还没落下。关联文件的分隔符已从 mail.js 核对。 */
 export const WRITE_CONTRACT = {
   mergeMailStyleConfirmed: true,
   singleMailStyleConfirmed: false,
   mailCustomerBodyCaptured: false,
   saveResponseBodyCaptured: false,
-  relatedFileIdFormatConfirmed: false
+  relatedFileIdFormatConfirmed: true
 } as const
+
+/** mail.js 把勾选文件的 objid 用分号拼进 file_ids。空列表提交空字符串。 */
+export function encodeRelatedFileIds(fileIds: string[]): string | null {
+  if (fileIds.some(id => !isQueryGuid(id))) return null
+  return fileIds.join(';')
+}
 
 export function liveWriteBlockers(mode: SendMode): string[] {
   const reasons: string[] = []
-  if (!EASY_MAIL_WRITES_ENABLED) reasons.push('真实写操作默认关闭。')
+  if (!mailWritesEnabled()) reasons.push('写开关已关闭。')
   if (!WRITE_CONTRACT.mailCustomerBodyCaptured) reasons.push('MailCustomer 的响应正文还没有核对，不能创建。')
   if (!WRITE_CONTRACT.saveResponseBodyCaptured) reasons.push('SaveMailInfo 的响应正文还没有核对，不能保存。')
   if (!WRITE_CONTRACT.relatedFileIdFormatConfirmed) reasons.push('SaveMailRalteCaseFile 的 file_ids 格式还没有核对。')
@@ -33,5 +43,5 @@ export interface MailWriteGate {
 
 export const productionGate: MailWriteGate = {
   blockers: liveWriteBlockers,
-  relatedFileIds: () => null
+  relatedFileIds: encodeRelatedFileIds
 }

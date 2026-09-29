@@ -3,11 +3,12 @@ import { computed, ref, watch } from 'vue'
 import { MessageType, type MessageBridge } from '../shared/message'
 import { MAIL_FLOW_TYPE } from '../workflow/contracts'
 import { reviewersForNode } from '../workflow/reviewer-resolver'
-import { WORKFLOW_WRITES_ENABLED } from '../workflow/gate'
+import { useWriteSwitch } from '../settings/use-write-switch'
 import type { WorkflowView } from '../workflow/types'
 import ThemeSelect from '../../../src/components/ThemeSelect.vue'
 
 const props = defineProps<{ bridge?: MessageBridge; mailId: string; ready: boolean }>()
+const { open: writesOpen } = useWriteSwitch()
 const view = ref<WorkflowView | null>(null)
 const nodeId = ref('')
 const reviewerId = ref('')
@@ -85,8 +86,7 @@ async function preview(): Promise<void> {
 <template>
   <section class="file-card" aria-label="发文流程">
     <p class="mail-stage" role="status">{{ ready ? '流程读取' : '文件关联核验完成后才能读取流程' }}</p>
-    <p class="hint">真实提交流程尚未开放。</p>
-    <p v-if="WORKFLOW_WRITES_ENABLED" class="hint">写开关状态异常。</p>
+    <p class="hint">{{ writesOpen ? '写开关已打开。' : '写开关已关闭，不会提交流程。' }}</p>
     <p v-if="mailId" class="hint">EASY 邮件 ID：{{ mailId }}</p>
     <p v-if="view?.snapshot" class="hint">当前节点 {{ view.snapshot.currentNodeName || '空' }} · {{ view.snapshot.currentNodeCode || '无代码' }} · 状态 {{ view.snapshot.status ?? '未知' }}</p>
     <p v-if="view?.snapshot" class="hint">当前办理人 {{ view.snapshot.currentUserName || '空' }} · {{ view.snapshot.currentUserId || '无 GUID' }}</p>

@@ -17,8 +17,8 @@ import type { MailRuleBundle, SelectedPatentFile } from '../src/mail/types'
 import { EasyConnectionController, scopeFromConnection } from '../src/shared/connection'
 import { MessageType } from '../src/shared/message'
 import type { QueryTemplate } from '../src/query/query-types'
-import { EASY_MAIL_WRITES_ENABLED } from '../src/mail/easy/gate'
-import { WORKFLOW_WRITES_ENABLED } from '../src/workflow/gate'
+import { mailWritesEnabled } from '../src/mail/easy/gate'
+import { workflowWritesEnabled } from '../src/workflow/gate'
 import { productionWriteAllowed } from '../src/automation/contract-capture'
 
 const origin = 'http://183.36.43.66:88'
@@ -223,8 +223,8 @@ describe('Phase 3.4 任务权威、依赖范围与文件来源', () => {
     const matched = await runner.run({ call: 'GetUserModel', origin, operatorId: userA, expected: { userId: userA } })
     expect(matched.acceptanceLayer).toBe('MANUAL_COMPARED')
     expect(matched.evidenceLevel).not.toBe('UI_COMPARED')
-    expect(EASY_MAIL_WRITES_ENABLED).toBe(false)
-    expect(WORKFLOW_WRITES_ENABLED).toBe(false)
-    expect(productionWriteAllowed()).toBe(false)
+    expect(mailWritesEnabled()).toBe(true)
+    expect(workflowWritesEnabled()).toBe(true)
+    expect(productionWriteAllowed()).toBe(true)
   })
 })

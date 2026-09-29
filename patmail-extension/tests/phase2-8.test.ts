@@ -14,8 +14,8 @@ import { runDryRun } from '../src/automation/dry-run'
 import { emptyMailRules } from '../src/mail'
 import type { CustomerQueryProfile } from '../src/customer/types'
 import type { MailRuleBundle, SelectedPatentFile } from '../src/mail/types'
-import { EASY_MAIL_WRITES_ENABLED } from '../src/mail/easy/gate'
-import { WORKFLOW_WRITES_ENABLED } from '../src/workflow/gate'
+import { mailWritesEnabled } from '../src/mail/easy/gate'
+import { workflowWritesEnabled } from '../src/workflow/gate'
 
 const origin = 'http://183.36.43.66:88'
 const guid = (suffix: string) => `${suffix}-1111-4111-8111-111111111111`
@@ -196,9 +196,9 @@ describe('Dry-run 与契约', () => {
       request: { Call: 'MailCustomer' }, response: { objid: '1' }, readbackMatched: true
     })
     expect(evidenceLevel([mocked], 'MailCustomer')).toBe('UNKNOWN')
-    expect(productionWriteAllowed()).toBe(false)
-    expect(EASY_MAIL_WRITES_ENABLED).toBe(false)
-    expect(WORKFLOW_WRITES_ENABLED).toBe(false)
+    expect(productionWriteAllowed()).toBe(true)
+    expect(mailWritesEnabled()).toBe(true)
+    expect(workflowWritesEnabled()).toBe(true)
     expect(LIVE_EASY_ACCEPTANCE.status).toBe('PENDING')
     expect(classifyReadonlyCall('GetFlowSubmit', 502).ok).toBe(false)
     expect(classifyReadonlyCall('MailCustomer', 200).ok).toBe(false)

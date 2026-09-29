@@ -45,7 +45,7 @@ function workspaceScroller(): HTMLElement | null {
   return document.querySelector('.workspace')
 }
 const search = ref('')
-const pageName = computed(() => nav.find(item => item.hash === route.value)?.name ?? '首页')
+const pageName = computed(() => route.value === '/settings' ? '系统设置' : nav.find(item => item.hash === route.value)?.name ?? '首页')
 const page = computed(() => pages[route.value as keyof typeof pages] ?? HomePage)
 const profileName = computed(() => workspace.connection.value.displayName || '未登录')
 const profileDept = computed(() => workspace.connection.value.sessionStatus === 'authenticated' ? 'EASY 已连接' : '尚未连接')
@@ -53,6 +53,10 @@ const profileDept = computed(() => workspace.connection.value.sessionStatus === 
 function go(name: string): void {
   const item = nav.find(entry => entry.name === name)
   if (item) location.hash = item.hash
+}
+
+function onShellSettings(name: string): void {
+  if (name === '系统设置') location.hash = '/settings'
 }
 provide('bridge', createFullPageBridge())
 
@@ -74,7 +78,7 @@ onUnmounted(() => window.removeEventListener('hashchange', onHash))
 </script>
 
 <template>
-  <Shell :page="pageName" :search="search" placeholder="搜索我方文号、客户或申请号..." :items="nav" :profile-name="profileName" :profile-dept="profileDept" :show-demo="false" :show-settings="false" @navigate="go" @update:search="search = $event">
+  <Shell :page="pageName" :search="search" placeholder="搜索我方文号、客户或申请号..." :items="nav" :profile-name="profileName" :profile-dept="profileDept" :show-demo="false" :show-settings="true" @navigate="go" @settings="onShellSettings" @update:search="search = $event">
     <KeepAlive>
       <component :is="page" :key="route" />
     </KeepAlive>

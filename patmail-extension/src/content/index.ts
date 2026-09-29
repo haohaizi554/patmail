@@ -6,6 +6,10 @@ import { readPageInfo, scanPage } from './scanner'
 import { EasyRuntime } from '../api/client'
 import { scanFileSearchForm, warmFileSearchTrees } from '../query/scan-file-search-form.mjs'
 import { LiveEasyAcceptanceRunner } from '../automation/acceptance-runner'
+import { hydrateWriteSwitch, watchWriteSwitch } from '../settings/write-switch'
+
+watchWriteSwitch()
+void hydrateWriteSwitch()
 
 // API 请求始终由目标页面同源的 Content Script 发起，沿用浏览器已有会话。
 const easyRuntime = new EasyRuntime(location.origin)

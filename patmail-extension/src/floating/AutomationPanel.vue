@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { productionWriteAllowed } from '../automation/contract-capture'
+import { useWriteSwitch } from '../settings/use-write-switch'
 import { runDryRun } from '../automation/dry-run'
 import { LIVE_EASY_ACCEPTANCE } from '../automation/easy-acceptance'
 import { exportDiagnostic } from '../automation/logger'
@@ -11,12 +11,10 @@ import { buildStagePlans } from '../automation/stage-plan'
 import { validateTask } from '../automation/task-validator'
 import type { AutomationStagePlan, AutomationTask } from '../automation/types'
 import { sendToBackground } from '../utils/runtime'
-import { EASY_MAIL_WRITES_ENABLED } from '../mail/easy/gate'
 import type { CustomerQueryProfile } from '../customer/types'
 import ThemeSelect from '../../../src/components/ThemeSelect.vue'
 import type { MailRuleBundle, SelectedPatentFile } from '../mail/types'
 import { MAIL_FLOW_TYPE } from '../workflow/contracts'
-import { WORKFLOW_WRITES_ENABLED } from '../workflow/gate'
 import { useWorkspace } from '../app/composables/useWorkspace'
 import { scopeFromConnection } from '../shared/connection'
 import { MessageType, type ExistingMailDiagnostic, type MessageBridge, type TaskSummary } from '../shared/message'
@@ -30,6 +28,7 @@ const props = defineProps<{
   queryTemplateVersion: number
   businessOrigin: string
 }>()
+const { open: writesOpen } = useWriteSwitch()
 
 const history = ref<TaskSummary[]>([])
 const checked = ref<AutomationTask | null>(null)
@@ -89,7 +88,7 @@ watch(() => props.userId, () => {
 async function plan(): Promise<void> {
   const input = currentInput()
   const result = runDryRun(input, null)
-  if (result.writeCalls.length > 0 || result.plans.some(item => item.sideEffect === 'write' && item.canExecute) || productionWriteAllowed()) {
+  if (result.writeCalls.length > 0 || result.plans.some(item => item.sideEffect === 'write' && item.canExecute)) {
     message.value = '计划包含写请求，已停止。'
     return
   }
@@ -211,8 +210,7 @@ async function diagnose(): Promise<void> {
 <template>
   <section class="file-card" aria-label="发文任务">
     <p class="mail-stage" role="status">任务计划</p>
-    <p class="hint">真实邮件创建、保存、文件关联和流程提交保持关闭。</p>
-    <p v-if="EASY_MAIL_WRITES_ENABLED || WORKFLOW_WRITES_ENABLED" class="hint">写开关状态异常。</p>
+    <p class="hint">{{ writesOpen ? '写开关已打开。' : '写开关已关闭，不会创建、保存或提交流程。' }}</p>
     <button type="button" class="text-button" :disabled="files.length === 0" @click="plan">生成计划</button>
     <button type="button" class="text-button" :disabled="!checked" @click="showBlockers = !showBlockers">查看阻塞项</button>
     <button type="button" class="text-button" :disabled="!checked" @click="recheck">重新核对</button>

@@ -1,23 +1,29 @@
 <script setup lang="ts">
 import PageHead from '../../../../src/components/PageHead.vue'
 import { bg } from '../../../../src/assets'
-import { EASY_MAIL_WRITES_ENABLED } from '../../mail/easy/gate'
-import { productionWriteAllowed } from '../../automation/contract-capture'
-import { WORKFLOW_WRITES_ENABLED } from '../../workflow/gate'
+import { useWriteSwitch } from '../../settings/use-write-switch'
 import { useWorkspace } from '../composables/useWorkspace'
 
 const { connection } = useWorkspace()
+const { open, setOpen } = useWriteSwitch()
+
+function onToggle(event: Event): void {
+  void setOpen((event.target as HTMLInputElement).checked)
+}
 </script>
 
 <template>
-  <PageHead title="系统设置" desc="当前连接和写入开关都在这里，生产写入保持关闭。" :art="bg('今天也要高效发文.png')" />
+  <PageHead title="系统设置" desc="写开关在这里，默认打开。" :art="bg('今天也要高效发文.png')" />
   <section class="card">
     <h2>系统设置</h2>
     <p class="hint">站点 {{ connection.easyOrigin }}</p>
     <p class="hint">会话 {{ connection.sessionStatus }} · 标签页 {{ connection.easyTabId ?? '未绑定' }}</p>
-    <p class="hint">Dry-run：只生成本地计划。</p>
-    <p class="hint">Live Readonly：只读验收，不写邮件。</p>
-    <p class="hint">Test Write：测试白名单为空，不会发起写请求。</p>
-    <p class="hint">Production Write：{{ productionWriteAllowed() || EASY_MAIL_WRITES_ENABLED || WORKFLOW_WRITES_ENABLED ? '状态异常' : '关闭' }}</p>
+    <form class="stack-form" @submit.prevent>
+      <label>
+        <input type="checkbox" :checked="open" @change="onToggle" />
+        写开关
+      </label>
+      <p class="hint">{{ open ? '已打开。写开关不再拦截创建、保存和流程提交。' : '已关闭。不会创建邮件、保存草稿或提交流程。' }}</p>
+    </form>
   </section>
 </template>

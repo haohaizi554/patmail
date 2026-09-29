@@ -7,6 +7,10 @@ import { EasyConnectionController, sameConnectionSnapshot, type ConnectionSnapsh
 import { handleWorkspaceMessage, openWorkspaceTab, recheckBoundSession, type WorkspaceHost } from './workspace'
 import { isRecord } from '../shared/guards'
 import { isMessage, MessageType, type AppMessage, type BackgroundResponse } from '../shared/message'
+import { hydrateWriteSwitch, watchWriteSwitch } from '../settings/write-switch'
+
+watchWriteSwitch()
+void hydrateWriteSwitch()
 
 const CALL_CHANNEL = 'patmail-call'
 const RESULT_CHANNEL = 'patmail-result'

@@ -18,12 +18,29 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+function runtimeChrome(extra: Record<string, unknown>): void {
+  const listeners = new Set<(message: unknown, sender: chrome.runtime.MessageSender) => void>()
+  vi.stubGlobal('chrome', {
+    runtime: {
+      id: 'patmail-test',
+      lastError: undefined,
+      ...extra,
+      onMessage: {
+        addListener(fn: (message: unknown, sender: chrome.runtime.MessageSender) => void) { listeners.add(fn) },
+        removeListener(fn: (message: unknown, sender: chrome.runtime.MessageSender) => void) { listeners.delete(fn) }
+      }
+    }
+  })
+}
+
 function background(reply: (message: BackgroundRequest) => Promise<unknown>): void {
-  vi.stubGlobal('chrome', { runtime: {
-    sendMessage(message: BackgroundRequest, callback: (value: unknown) => void) {
+  runtimeChrome({
+    sendMessage(envelope: unknown, callback: (value: unknown) => void) {
+      const wrapped = envelope !== null && typeof envelope === 'object' && (envelope as { channel?: string }).channel === 'patmail-call'
+      const message = wrapped ? (envelope as { message: BackgroundRequest }).message : envelope as BackgroundRequest
       void reply(message).then(callback)
     }
-  } })
+  })
 }
 
 describe('full-page query message chain', () => {
@@ -88,10 +105,10 @@ describe('full-page query message chain', () => {
   })
 
   it('reports a closed Chrome message channel with the actual runtime reason', async () => {
-    vi.stubGlobal('chrome', { runtime: {
+    runtimeChrome({
       lastError: { message: 'The message port closed before a response was received.' },
       sendMessage(_message: unknown, callback: (value: unknown) => void) { callback(undefined) }
-    } })
+    })
     expect(await createFullPageBridge().request(query)).toMatchObject({ type: MessageType.Error, payload: {
       message: expect.stringContaining('message port closed')
     } })
@@ -99,7 +116,7 @@ describe('full-page query message chain', () => {
 
   it('reports a background timeout instead of confusing it with an empty search result', async () => {
     vi.useFakeTimers()
-    vi.stubGlobal('chrome', { runtime: { sendMessage() {} } })
+    runtimeChrome({ sendMessage() {} })
     const pending = createFullPageBridge().request(query)
     await vi.advanceTimersByTimeAsync(70_000)
     expect(await pending).toMatchObject({ type: MessageType.Error, payload: { message: expect.stringContaining('时限') } })

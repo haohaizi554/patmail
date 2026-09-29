@@ -17,8 +17,8 @@ import type { MailRuleBundle, SelectedPatentFile } from '../src/mail/types'
 import { EasyConnectionController, scopeFromConnection } from '../src/shared/connection'
 import { MessageType } from '../src/shared/message'
 import type { QueryTemplate } from '../src/query/query-types'
-import { EASY_MAIL_WRITES_ENABLED } from '../src/mail/easy/gate'
-import { WORKFLOW_WRITES_ENABLED } from '../src/workflow/gate'
+import { mailWritesEnabled } from '../src/mail/easy/gate'
+import { workflowWritesEnabled } from '../src/workflow/gate'
 
 const origin = 'http://183.36.43.66:88'
 const guid = (suffix: string) => `${suffix}-1111-4111-8111-111111111111`
@@ -259,7 +259,7 @@ describe('Phase 3.3 可信任务、模板摘要与账号事务', () => {
       async call() { return { httpStatus: 200, sessionOk: true, fields: { clientStatus: 'false' }, shape: 'object' } }
     }).run({ origin, operatorId: userA, call: 'GetUserModel' })
     expect(business.result).toBe('FAIL')
-    expect(EASY_MAIL_WRITES_ENABLED).toBe(false)
-    expect(WORKFLOW_WRITES_ENABLED).toBe(false)
+    expect(mailWritesEnabled()).toBe(true)
+    expect(workflowWritesEnabled()).toBe(true)
   })
 })

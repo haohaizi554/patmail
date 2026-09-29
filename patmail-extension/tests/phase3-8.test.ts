@@ -12,8 +12,8 @@ import {
   type QueryDisk
 } from '../src/automation/file-search-snapshot'
 import { emptyMailRules } from '../src/mail'
-import { EASY_MAIL_WRITES_ENABLED } from '../src/mail/easy/gate'
-import { WORKFLOW_WRITES_ENABLED } from '../src/workflow/gate'
+import { mailWritesEnabled } from '../src/mail/easy/gate'
+import { workflowWritesEnabled } from '../src/workflow/gate'
 import { productionWriteAllowed } from '../src/automation/contract-capture'
 import type { FileSearchResult, PatentFile } from '../src/api/file-search-types'
 import type { SelectedPatentFile } from '../src/mail/types'
@@ -223,8 +223,8 @@ describe('Phase 3.8 恢复与证据时间', () => {
     expect(plans.find(item => item.stage === 'MAIL_CREATE')?.canExecute).toBe(false)
     expect(plans.find(item => item.stage === 'MAIL_SAVE')?.canExecute).toBe(false)
     expect(plans.find(item => item.stage === 'DESCRIPTION_MAPPING')?.canExecute).toBe(false)
-    expect(EASY_MAIL_WRITES_ENABLED).toBe(false)
-    expect(WORKFLOW_WRITES_ENABLED).toBe(false)
-    expect(productionWriteAllowed()).toBe(false)
+    expect(mailWritesEnabled()).toBe(true)
+    expect(workflowWritesEnabled()).toBe(true)
+    expect(productionWriteAllowed()).toBe(true)
   })
 })

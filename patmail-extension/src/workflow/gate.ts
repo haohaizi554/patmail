@@ -1,5 +1,9 @@
-/** 真实流程提交默认关闭。页面消息不能打开它。 */
-export const WORKFLOW_WRITES_ENABLED = false
+import { isWriteSwitchOpen } from '../settings/write-switch'
+
+/** 跟系统设置里的写开关走。默认打开。 */
+export function workflowWritesEnabled(): boolean {
+  return isWriteSwitchOpen()
+}
 
 export const WORKFLOW_CONTRACT = {
   getFlowSubmitBodyCaptured: false,
@@ -14,7 +18,7 @@ export interface WorkflowWriteGate {
 
 export function liveWorkflowBlockers(): string[] {
   const reasons: string[] = []
-  if (!WORKFLOW_WRITES_ENABLED) reasons.push('真实流程提交默认关闭。')
+  if (!workflowWritesEnabled()) reasons.push('写开关已关闭。')
   if (!WORKFLOW_CONTRACT.getFlowSubmitBodyCaptured) reasons.push('GetFlowSubmit 的响应正文还没有核对。')
   if (!WORKFLOW_CONTRACT.flowSubmitBodyCaptured) reasons.push('FlowSubmit 的响应正文还没有核对。')
   if (!WORKFLOW_CONTRACT.endFlowBodyCaptured) reasons.push('EndEmailFlowd 的响应正文还没有核对。')

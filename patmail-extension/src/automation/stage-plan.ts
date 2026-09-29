@@ -1,3 +1,4 @@
+import { isWriteSwitchOpen } from '../settings/write-switch'
 import { evaluateTaskEvidence, type EvidenceAccount, type EvidenceEvaluation } from './evidence-evaluation'
 import { STAGES } from './state'
 import type { AutomationStagePlan, AutomationTask, EvidenceLevel } from './types'
@@ -28,7 +29,8 @@ export function buildStagePlans(task: AutomationTask, contract: EvidenceLevel = 
       const blockers = issues.filter(issue => ISSUE_STAGE[issue.code] === definition.id).map(issue => issue.message)
       const write = definition.sideEffect === 'write'
       const gate = task.identityGate
-      if (write) blockers.push('写操作默认关闭。', '接口还没有完成请求、响应和回读核验。')
+      if (write && !isWriteSwitchOpen()) blockers.push('写开关已关闭。')
+      if (write) blockers.push('接口还没有完成请求、响应和回读核验。')
       if (write && gate?.fileSource === 'FILE_SOURCE_UNVERIFIED') blockers.push('文件来源尚未经查询响应确认。')
       if (write && gate?.mixedQuerySession) blockers.push('所选文件不属于同一次查询运行。')
       if (write && gate?.persistence && gate.persistence !== 'PERSISTED') blockers.push('查询来源尚未持久化，执行前需要重新核验。')

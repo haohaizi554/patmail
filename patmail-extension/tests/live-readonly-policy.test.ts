@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { EasyRuntime } from '../src/api/client'
 import { EASY_ORIGIN } from '../src/api/config'
 import { extractReadonlyEvidence } from '../src/automation/readonly-contracts'
-import { EASY_MAIL_WRITES_ENABLED } from '../src/mail/easy/gate'
-import { WORKFLOW_WRITES_ENABLED } from '../src/workflow/gate'
+import { mailWritesEnabled } from '../src/mail/easy/gate'
+import { workflowWritesEnabled } from '../src/workflow/gate'
 import { productionWriteAllowed } from '../src/automation/contract-capture'
 import { LIVE_WRITE_CALLS, readOnlyAutoDecision, testWritePrecheck } from '../src/automation/live-readonly-policy'
 
 describe('READ_ONLY_AUTO', () => {
-  it('blocks write calls before any request and keeps production switches closed', async () => {
+  it('blocks readonly probes of write calls while the frontend switch stays open', async () => {
     const seen: string[] = []
     const runtime = new EasyRuntime(EASY_ORIGIN, {
       fetcher: async (input) => {
@@ -24,7 +24,7 @@ describe('READ_ONLY_AUTO', () => {
     expect(await runtime.probeReadonly('NotARealCall')).toMatchObject({ httpStatus: 0 })
     expect(readOnlyAutoDecision('NotARealCall')).toBe('unknown-blocked')
     expect(seen).toEqual([])
-    expect(EASY_MAIL_WRITES_ENABLED || WORKFLOW_WRITES_ENABLED || productionWriteAllowed()).toBe(false)
+    expect(mailWritesEnabled() && workflowWritesEnabled() && productionWriteAllowed()).toBe(true)
   })
 
   it('reads a case type only from the existing dictionary adapter', () => {

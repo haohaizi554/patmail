@@ -15,10 +15,10 @@ import { productionWriteAllowed } from '../src/automation/contract-capture'
 import type { CustomerQueryProfile } from '../src/customer/types'
 import { applyConfirmedBind, emptyMailRules, selectPage, toSelectedFile } from '../src/mail'
 import type { MailRuleBundle, SelectedPatentFile } from '../src/mail/types'
-import { EASY_MAIL_WRITES_ENABLED } from '../src/mail/easy/gate'
+import { mailWritesEnabled } from '../src/mail/easy/gate'
 import { EasyConnectionController, chooseAppTab, emptyConnection } from '../src/shared/connection'
 import { MessageType, isMessage } from '../src/shared/message'
-import { WORKFLOW_WRITES_ENABLED } from '../src/workflow/gate'
+import { workflowWritesEnabled } from '../src/workflow/gate'
 
 const origin = 'http://183.36.43.66:88'
 const guid = (suffix: string) => `${suffix}-1111-4111-8111-111111111111`
@@ -264,9 +264,9 @@ describe('完整页面数据与证据', () => {
     expect(task.mailDrafts.length).toBeGreaterThan(0)
     expect(describeTaskRecord(task.status)).not.toContain('已成功发送')
     expect(describeTaskRecord('COMPLETED')).toContain('发送未核验')
-    expect(productionWriteAllowed()).toBe(false)
-    expect(EASY_MAIL_WRITES_ENABLED).toBe(false)
-    expect(WORKFLOW_WRITES_ENABLED).toBe(false)
+    expect(productionWriteAllowed()).toBe(true)
+    expect(mailWritesEnabled()).toBe(true)
+    expect(workflowWritesEnabled()).toBe(true)
     expect(isMessage({ type: MessageType.Workspace, payload: { action: 'forward', message: { type: MessageType.CreateEasyMail, payload: {} } } })).toBe(false)
   })
 })

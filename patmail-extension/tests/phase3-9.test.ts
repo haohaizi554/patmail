@@ -18,9 +18,9 @@ import { MemoryEvidenceStore } from '../src/automation/evidence-store'
 import type { ExecutionLedger } from '../src/automation/ledger'
 import type { TaskStore } from '../src/automation/task-service'
 import { emptyMailRules } from '../src/mail'
-import { EASY_MAIL_WRITES_ENABLED } from '../src/mail/easy/gate'
+import { mailWritesEnabled } from '../src/mail/easy/gate'
 import { productionWriteAllowed } from '../src/automation/contract-capture'
-import { WORKFLOW_WRITES_ENABLED } from '../src/workflow/gate'
+import { workflowWritesEnabled } from '../src/workflow/gate'
 import { MessageType } from '../src/shared/message'
 import type { FileSearchResult, PatentFile } from '../src/api/file-search-types'
 import type { SelectedPatentFile } from '../src/mail/types'
@@ -238,7 +238,7 @@ describe('Phase 3.9 当前来源与证据聚合', () => {
     expect(reviewed.checkpoints).toEqual(task.checkpoints)
     expect(reviewed.items[0]?.easyMailId).toBe(mailId)
     expect(reviewed.issues.some(item => item.code === 'CURRENT_EVIDENCE_INVALID')).toBe(true)
-    expect(EASY_MAIL_WRITES_ENABLED || WORKFLOW_WRITES_ENABLED || productionWriteAllowed()).toBe(false)
+    expect(mailWritesEnabled() && workflowWritesEnabled() && productionWriteAllowed()).toBe(true)
   })
 
   it('lets the background recompute trust instead of accepting a page-supplied verdict', async () => {

@@ -1,3 +1,4 @@
+import { isWriteSwitchOpen } from '../settings/write-switch'
 import type { EvidenceLevel } from './types'
 
 export interface ContractSample {
@@ -85,7 +86,7 @@ export function evidenceLevel(samples: ContractSample[], call: string): Evidence
   return 'UNKNOWN'
 }
 
-/** 静态目录上的 responseCaptured 不参与判断。写开关关闭时结果始终是关闭。 */
-export function productionWriteAllowed(): false {
-  return false
+/** 静态目录上的 responseCaptured 不参与判断。是否允许生产写入只看前端写开关，默认打开。 */
+export function productionWriteAllowed(): boolean {
+  return isWriteSwitchOpen()
 }

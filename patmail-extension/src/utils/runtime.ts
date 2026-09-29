@@ -44,8 +44,9 @@ function sendThroughMessage(message: BackgroundRequest, timeoutMs: number): Prom
     chrome.runtime.onMessage.addListener(onResult)
     try {
       chrome.runtime.sendMessage({ channel: CALL_CHANNEL, id: requestId, message }, (response: unknown) => {
-        void chrome.runtime.lastError
+        const reason = chrome.runtime.lastError?.message ?? ''
         if (acceptedBackground(response)) finish(response)
+        else if (reason) finish(describeBackground(response, reason))
       })
     } catch (error) {
       finish(failure(error instanceof Error ? error.message : '扩展后台无法接收消息。'))

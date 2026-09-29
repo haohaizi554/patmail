@@ -39,7 +39,7 @@ export const CONTRACT_EVIDENCE: ContractEvidence[] = [
   {
     handler: '/AjaxServers/Mail.ashx', call: 'SaveMailRalteCaseFile', method: 'POST', contentType: FORM,
     requestFields: ['Call', 'mail_id', 'file_ids'],
-    fieldSources: 'HAR 中的 file_ids 为空，不能推断分隔格式。',
+    fieldSources: 'mail.js 用勾选文件的 objid 以分号拼接。HAR 里这次值为空。',
     responseShape: '正文未保存。',
     successCondition: 'Status=true 不是关联成功。必须回读 GetMailFile。',
     responseCaptured: false, source: 'captured-request', status: 'pending',
@@ -101,10 +101,10 @@ export const CONTRACT_EVIDENCE: ContractEvidence[] = [
   },
   {
     handler: '/AjaxServers/Mail.ashx', call: 'EndEmailFlowd', method: 'POST', contentType: FORM,
-    requestFields: [],
-    fieldSources: '只知道会在 GetFlowInfo 之后调用。字段没有保存。',
-    responseShape: '未捕获。',
-    successCondition: '未知。不能把它当成审核通过或邮件发送。',
+    requestFields: ['f_obj_id', 'f_cur_status', 'f_status', 'f_allow_edit', 'f_flow_id', 'f_flow_type', 'f_flow_sub_type', 'f_cur_node_id', 'f_cur_node_code', 'f_next_node_id', 'f_next_node_code', 'f_audit_type_id'],
+    fieldSources: 'mail.js 的 Mail.EndFlow。f_status 固定 5000，下一节点固定 END。',
+    responseShape: '回调不读字段。',
+    successCondition: '不能把它当成审核通过或邮件发送。',
     responseCaptured: false, source: 'unverified', status: 'pending',
     note: '不发明参数，不调用。'
   }
