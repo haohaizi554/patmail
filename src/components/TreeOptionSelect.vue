@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { buildOptionTree, searchOptionTree, type TreeOption } from '../../patmail-extension/src/query/option-tree'
-import { placeMenu } from './theme-select'
+import { placeMenu, treeMenuWidth } from './theme-select'
 import TreeOptionNode from './TreeOptionNode.vue'
 
 const props = withDefaults(defineProps<{
@@ -52,9 +52,10 @@ function updatePosition(): void {
   if (!el) return
   const rect = el.getBoundingClientRect()
   const placed = placeMenu(
-    { top: rect.top, bottom: rect.bottom, left: rect.left, width: Math.max(rect.width, 280) },
+    { top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width },
     { width: window.innerWidth, height: window.innerHeight },
-    320
+    320,
+    treeMenuWidth(props.options)
   )
   menuStyle.value = {
     top: `${placed.top}px`,

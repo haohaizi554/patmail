@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { filterSelectOptions, highlightAfterKey, placeMenu, selectNeedsSearch, showsGroup, textOptions } from '../../src/components/theme-select'
+import { filterSelectOptions, highlightAfterKey, menuWidthForLabels, placeMenu, selectNeedsSearch, showsGroup, textOptions, treeMenuWidth } from '../../src/components/theme-select'
 
 describe('theme select', () => {
   it('opens downward and flips upward when the lower space is tight', () => {
@@ -15,6 +15,22 @@ describe('theme select', () => {
   it('keeps the menu inside the viewport', () => {
     const placed = placeMenu({ top: 40, bottom: 76, left: 760, width: 220 }, { width: 800, height: 600 })
     expect(placed.left + placed.width).toBeLessThanOrEqual(792)
+  })
+
+  it('widens the menu to the longest option and still stays inside the viewport', () => {
+    const wide = placeMenu({ top: 100, bottom: 136, left: 20, width: 180 }, { width: 800, height: 600 }, 240, 420)
+    expect(wide.width).toBe(420)
+    expect(wide.left).toBe(20)
+    const shifted = placeMenu({ top: 40, bottom: 76, left: 500, width: 180 }, { width: 800, height: 600 }, 240, 420)
+    expect(shifted.width).toBe(420)
+    expect(shifted.left + shifted.width).toBeLessThanOrEqual(792)
+    const labels = menuWidthForLabels(['短', 'tclip@centips.com<tclip@centips.com>'])
+    expect(labels).toBeGreaterThan(menuWidthForLabels(['短']))
+    const tree = treeMenuWidth([
+      { value: 'a', label: '父级' },
+      { value: 'b', label: '很长的子级名称', parent: 'a' }
+    ])
+    expect(tree).toBeGreaterThan(menuWidthForLabels(['很长的子级名称']))
   })
 
   it('moves the highlight only after the menu is open', () => {

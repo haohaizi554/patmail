@@ -24,13 +24,19 @@ label > .theme-select,
 .theme-select-trigger:focus-visible { outline: 2px solid #ffb3d0; outline-offset: 1px; }
 .theme-select-trigger:active { background: #fff7fb; }
 .theme-select-trigger:disabled { opacity: .55; cursor: not-allowed; }
-.theme-select-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.theme-select-value { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.theme-select-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.theme-select-badge {
+  flex: none; border-radius: 999px; padding: 0 6px; font-size: 11px; font-weight: 700; line-height: 18px;
+}
+.theme-select-badge.is-tone-site { background: #ffe4ef; color: #e44586; }
+.theme-select-badge.is-tone-diy { background: #e7e4ff; color: #5b4fd0; }
 .theme-select-value.is-placeholder { color: var(--sub, #8d97b0); }
 .theme-select-chevron { width: 12px; height: 12px; flex: none; color: #c9a0b4; }
 .theme-select-trigger.is-open .theme-select-chevron { transform: rotate(180deg); }
 #theme-select-portal { pointer-events: none; }
 .theme-select-menu {
-  position: fixed; z-index: 40; margin: 0; padding: 6px; overflow: auto; list-style: none;
+  position: fixed; z-index: 40; margin: 0; padding: 6px; overflow-x: hidden; overflow-y: auto; list-style: none;
   border: 1px solid #eadff0; border-radius: 12px; background: #fff; color: var(--text, #243056);
   box-shadow: 0 12px 32px #ffd0e266; pointer-events: auto;
   font: 13px/1.4 "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
@@ -39,9 +45,12 @@ label > .theme-select,
 .theme-select-search input { width: 100%; height: 30px; box-sizing: border-box; border: 1px solid #eadff0; border-radius: 8px; padding: 0 8px; font: inherit; font-size: 12px; color: inherit; }
 .theme-select-search input:focus-visible { outline: 2px solid #ffb3d0; outline-offset: 1px; }
 .theme-select-group { padding: 6px 8px 2px; color: var(--sub, #8d97b0); font-size: 11px; font-weight: 700; }
-.theme-select-menu [role="option"] { min-height: 32px; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.theme-select-menu [role="option"] { display: flex; align-items: center; gap: 8px; min-height: 32px; border-radius: 8px; padding: 6px 10px; cursor: pointer; white-space: nowrap; }
+.theme-select-menu [role="option"].is-tone-site { background: #fff7fb; }
+.theme-select-menu [role="option"].is-tone-diy { background: #f6f5ff; }
 .theme-select-menu [role="option"].is-active { background: #fff0f6; }
 .theme-select-menu [role="option"].is-selected { background: #ffe4ef; color: #ff3f86; font-weight: 700; }
+.theme-select-menu [role="option"].is-tone-diy.is-selected { background: #e4e0ff; color: #4338ca; }
 .theme-select-empty { padding: 8px 10px; color: var(--sub, #8d97b0); }
 .theme-tree-menu { display: flex; flex-direction: column; gap: 6px; overflow: hidden; padding: 8px; }
 .theme-tree-search { display: flex; gap: 6px; }
@@ -50,17 +59,17 @@ label > .theme-select,
 .theme-tree-query, .theme-tree-clear { height: 30px; border: 0; border-radius: 8px; background: #ff4f93; color: #fff; font: inherit; font-size: 12px; cursor: pointer; }
 .theme-tree-query { padding: 0 12px; }
 .theme-tree-query:focus-visible, .theme-tree-clear:focus-visible, .theme-tree-toggle:focus-visible { outline: 2px solid #ffb3d0; outline-offset: 1px; }
-.theme-tree-list { overflow: auto; min-height: 0; }
+.theme-tree-list { overflow-x: hidden; overflow-y: auto; min-height: 0; }
 .theme-tree-row { display: flex; align-items: center; gap: 4px; min-height: 28px; }
 .theme-tree-toggle { width: 22px; height: 22px; flex: none; border: 1px solid #eadff0; border-radius: 4px; background: #fff; color: #8d7693; font: 14px/1 inherit; cursor: pointer; }
 .theme-tree-leaf { width: 22px; flex: none; }
-.theme-tree-check { display: flex; align-items: center; gap: 6px; min-width: 0; color: #4e4056; font-size: 12px; cursor: pointer; }
+.theme-tree-check { display: flex; align-items: center; gap: 6px; min-width: max-content; color: #4e4056; font-size: 12px; cursor: pointer; }
 .theme-tree-check input { width: 16px; height: 16px; margin: 0; flex: none; }
-.theme-tree-check span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.theme-tree-check span { white-space: nowrap; }
 .theme-tree-pick {
-  flex: 1; min-width: 0; height: 28px; border: 0; border-radius: 6px; background: transparent;
+  flex: none; min-width: max-content; height: 28px; border: 0; border-radius: 6px; background: transparent;
   color: #4e4056; font: inherit; font-size: 12px; text-align: left; cursor: pointer;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  white-space: nowrap;
 }
 .theme-tree-pick:hover, .theme-tree-pick.is-selected { background: #fff0f6; color: #e44586; }
 .theme-tree-pick:focus-visible { outline: 2px solid #ffb3d0; outline-offset: 1px; }

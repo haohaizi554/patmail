@@ -1,6 +1,6 @@
 <script setup lang="ts" generic="T extends string | number">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { filterSelectOptions, highlightAfterKey, placeMenu, selectNeedsSearch, showsGroup, type ThemeSelectOption } from './theme-select'
+import { filterSelectOptions, highlightAfterKey, menuWidthForLabels, placeMenu, selectNeedsSearch, showsGroup, type ThemeSelectOption } from './theme-select'
 
 interface Option extends ThemeSelectOption { value: T }
 
@@ -44,6 +44,10 @@ function optionId(index: number): string {
   return `${listId}-${index}`
 }
 
+function toneClass(tone: string | undefined): string {
+  return tone === 'site' || tone === 'diy' ? `is-tone-${tone}` : ''
+}
+
 function resolvePortal(): HTMLElement | string {
   const node = root.value?.getRootNode()
   if (node instanceof ShadowRoot) {
@@ -62,9 +66,15 @@ function updatePosition(): void {
   const el = trigger.value
   if (!el) return
   const rect = el.getBoundingClientRect()
+  const labels = props.options.flatMap(item => {
+    const text = item.badge ? `${item.badge} ${item.label}` : item.label
+    return item.group ? [text, item.group] : [text]
+  })
   const placed = placeMenu(
     { top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width },
-    { width: window.innerWidth, height: window.innerHeight }
+    { width: window.innerWidth, height: window.innerHeight },
+    240,
+    menuWidthForLabels(labels)
   )
   menuStyle.value = {
     top: `${placed.top}px`,
@@ -199,7 +209,10 @@ onBeforeUnmount(() => {
       @click="opened ? close() : show()"
       @keydown="onKey"
     >
-      <span class="theme-select-value" :class="{ 'is-placeholder': placeholderShown }">{{ shown }}</span>
+      <span class="theme-select-value" :class="{ 'is-placeholder': placeholderShown }">
+        <span v-if="selected?.badge && !placeholderShown" class="theme-select-badge" :class="toneClass(selected.tone)">{{ selected.badge }}</span>
+        <span class="theme-select-label">{{ shown }}</span>
+      </span>
       <svg class="theme-select-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4.2 6 8l4-3.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <Teleport :to="portal">
@@ -213,10 +226,13 @@ onBeforeUnmount(() => {
             :id="optionId(index)"
             role="option"
             :aria-selected="option.value === current"
-            :class="{ 'is-selected': option.value === current, 'is-active': index === highlight, 'is-disabled': option.disabled }"
+            :class="[toneClass(option.tone), { 'is-selected': option.value === current, 'is-active': index === highlight, 'is-disabled': option.disabled }]"
             @mouseenter="highlight = index"
             @click="choose(option)"
-          >{{ option.label }}</li>
+          >
+            <span v-if="option.badge" class="theme-select-badge" :class="toneClass(option.tone)">{{ option.badge }}</span>
+            <span class="theme-select-label">{{ option.label }}</span>
+          </li>
         </template>
         <li v-if="listed.length === 0" class="theme-select-empty" role="presentation">{{ query.trim() ? '没有匹配的选项' : '没有可选项' }}</li>
       </ul>
