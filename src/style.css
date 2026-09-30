@@ -331,9 +331,9 @@ img { max-width: 100%; }
 .dialog textarea { height: auto; padding: 8px 10px; }
 .dialog footer { justify-content: flex-end; gap: 8px; }
 .progress-mask { z-index: 90; }
-.progress-dialog { width: 520px; }
-.progress-log { max-height: 240px; overflow: auto; margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
-.progress-log li { font-size: 13px; line-height: 1.5; color: #243056; }
+.progress-dialog { width: min(760px, calc(100vw - 48px)); }
+.progress-log { max-height: 460px; overflow: auto; margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.progress-log li { font-size: 13px; line-height: 1.5; color: #243056; white-space: pre-wrap; word-break: break-all; }
 
 @media (max-width: 1200px) {
   .quick-grid, .stats-grid, .rule-layout { grid-template-columns: 1fr 1fr; }

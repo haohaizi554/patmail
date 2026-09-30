@@ -464,7 +464,7 @@ function isLimitMailSubmitRequest(value: unknown): boolean {
 function isLimitMailSubmitResponse(value: unknown): boolean {
   if (!isRecord(value) || typeof value.stopped !== 'boolean' || !Array.isArray(value.results) || Object.keys(value).length !== 2) return false
   return value.results.length <= 20 && value.results.every(item => isRecord(item) &&
-    typeof item.procId === 'string' && typeof item.mailId === 'string' && typeof item.message === 'string' && item.message.length <= 400 &&
+    typeof item.procId === 'string' && typeof item.mailId === 'string' && typeof item.message === 'string' && item.message.length <= 8000 &&
     (item.state === 'submitted' || item.state === 'created' || item.state === 'unknown' || item.state === 'failed') &&
     Object.keys(item).length === 4)
 }

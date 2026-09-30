@@ -2,7 +2,7 @@ import { buildLimitMailCustomerParams } from '../api/limit-monitor-params'
 import { isRecord, readClientInfo } from '../api/response-guards'
 import type { EasyTransport } from '../api/transport'
 import { readMailInfo, readSaveMailInfo, SAVE_KEYS, saveParams } from '../mail/easy/contracts'
-import { loadMailContactText } from '../mail/easy/mail-contacts'
+import { loadMailContactText, type MailContactRow } from '../mail/easy/mail-contacts'
 import { planPctRecipients, sheetDisplayName } from './pct-recipients'
 import type { PctTaskRow } from './types'
 import { isQueryGuid } from '../query/query-validator'
@@ -341,6 +341,61 @@ function hintRow(item: LimitMailSubmitItem): PctTaskRow {
   }
 }
 
+const CONTACT_GROUP_LABEL: Record<MailContactRow['group'], string> = {
+  recent: '最近联系人',
+  customer: '客户联系人',
+  case: '案件联系人',
+  sales: '业务联系人',
+  pics: 'IP联系人',
+  agent: '代理人'
+}
+
+function clipProbe(value: string): string {
+  const text = value.trim()
+  if (!text) return '（空）'
+  return text.length > 400 ? `${text.slice(0, 400)}…` : text
+}
+
+/** 一次提交的收件人来源。只观察，不改写入结果。 */
+function recipientProbe(
+  item: LimitMailSubmitItem,
+  rows: MailContactRow[],
+  existingTo: string,
+  existingCc: string,
+  planned: { to: string; cc: string; notes: string[] }
+): string {
+  const lines = [
+    '探针',
+    `规则 ${item.mode}`,
+    `表格技术负责人 ${item.leadName.trim() || '（空）'}`,
+    `表格IPR ${item.iprName.trim() || '（空）'}`,
+    `表格联系人 ${item.contactName.trim() || '（空）'}`,
+    `草稿收件人 ${clipProbe(existingTo)}`,
+    `草稿抄送 ${clipProbe(existingCc)}`
+  ]
+  for (const group of Object.keys(CONTACT_GROUP_LABEL) as MailContactRow['group'][]) {
+    const people = rows.filter(row => row.group === group)
+    const shown = people.slice(0, 12).map(row => `${row.name.trim() || '（无姓名）'}<${row.email.trim() || '无邮箱'}>${row.role.trim() ? `（${row.role.trim()}）` : ''}`)
+    lines.push(`${CONTACT_GROUP_LABEL[group]} ${people.length ? shown.join('；') : '（无）'}${people.length > 12 ? `；另有${people.length - 12}人` : ''}`)
+  }
+  lines.push(`写入收件人 ${clipProbe(planned.to)}`)
+  lines.push(`写入抄送 ${clipProbe(planned.cc)}`)
+  if (planned.notes.length) lines.push(`未对上 ${planned.notes.join('；')}`)
+  const draft = `${existingTo};${existingCc}`.toLowerCase()
+  const seen = new Set<string>()
+  for (const row of rows) {
+    const email = row.email.trim().toLowerCase()
+    if (!email.includes('@') || seen.has(`${row.group}:${email}`)) continue
+    const inTo = planned.to.toLowerCase().includes(email)
+    const inCc = planned.cc.toLowerCase().includes(email)
+    if (!inTo && !inCc) continue
+    seen.add(`${row.group}:${email}`)
+    lines.push(`${inTo ? '收件人' : '抄送'} ${row.name.trim() || '（无姓名）'}<${row.email.trim()}> 来自${CONTACT_GROUP_LABEL[row.group]}${draft.includes(email) ? '，草稿里已有' : ''}`)
+  }
+  const text = lines.join('\n')
+  return text.length > 7000 ? `${text.slice(0, 7000)}\n（探针被截断）` : text
+}
+
 /** 用发文页联系人对上表格人名，把收件人和抄送写进这封草稿。对不上就不保存。 */
 async function writeRecipients(transport: EasyTransport, mailId: string, item: LimitMailSubmitItem): Promise<{ ok: true; note: string } | { ok: false; message: string }> {
   const loaded = await transport.post('getMailInfo', mailInfoParams(mailId))
@@ -358,10 +413,12 @@ async function writeRecipients(transport: EasyTransport, mailId: string, item: L
   const existingCc = cellText(info.row, 'mail_cc', true)
   if (existingTo === null || existingCc === null) return { ok: false, message: '发文草稿的收件人字段读不全，没有改地址。' }
   const plan = planPctRecipients([hintRow(item)], contacts.data.rows, { to: existingTo, cc: existingCc }, new Set(), item.mode)
+  const probe = recipientProbe(item, contacts.data.rows, existingTo, existingCc, plan)
+  console.info(`[patmail recipient probe]\n${probe}`)
   const missing = plan.notes[0] || (!plan.to.includes('@') ? '收件人没有对上邮箱，没有提交。' : '')
   const salesInCc = sales.every(row => plan.cc.toLowerCase().includes(row.email.trim().toLowerCase()))
   if (missing || !plan.to.includes('@') || !salesInCc) {
-    return { ok: false, message: missing || '商务没有写进抄送，没有提交。' }
+    return { ok: false, message: `${missing || '商务没有写进抄送，没有提交。'}\n${probe}` }
   }
   const fields = saveFields(info.row, mailId, plan.to, plan.cc)
   if (!fields) return { ok: false, message: '发文草稿的主题、正文或发件邮箱读不全，没有改地址。' }
@@ -369,7 +426,7 @@ async function writeRecipients(transport: EasyTransport, mailId: string, item: L
   if (!saved.ok) return { ok: false, message: '保存收件人的响应无法确认，没有提交。再点一次会沿用这封发文，不会重新创建。' }
   const status = readSaveMailInfo(saved.data)
   if (status.status !== 'ok') return { ok: false, message: status.status === 'failed' ? 'EASY 拒绝了这次保存。发文已创建，没有提交。' : '保存收件人的响应无法确认，没有提交。再点一次会沿用这封发文，不会重新创建。' }
-  return { ok: true, note: item.mode === 'lead' ? '收件人已写入技术负责人，抄送已含 IPR 和商务。' : '收件人已写入 IPR，抄送已含商务。' }
+  return { ok: true, note: `${item.mode === 'lead' ? '收件人已写入技术负责人，抄送已含 IPR 和商务。' : '收件人已写入 IPR，抄送已含商务。'}\n${probe}` }
 }
 
 async function submitOne(transport: EasyTransport, userId: string, item: LimitMailSubmitItem): Promise<LimitMailSubmitResult> {
@@ -449,7 +506,7 @@ export async function submitLimitMailBatch(transport: EasyTransport, userId: str
   const results: LimitMailSubmitResult[] = []
   for (const item of items) {
     const result = await submitOne(transport, userId, item)
-    results.push(result.message.length > 400 ? { ...result, message: result.message.slice(0, 400) } : result)
+    results.push(result.message.length > 8000 ? { ...result, message: result.message.slice(0, 8000) } : result)
     if (result.state !== 'submitted') return { stopped: true, results }
   }
   return { stopped: false, results }

@@ -333,7 +333,7 @@ async function onSubmitAsk(): Promise<void> {
     logProgress(`正在处理 ${label}。`, index)
     const text = await runLimitMailSubmit(props.bridge, props.userId, item ? [item] : [], gates.value)
     notes.push(text)
-    logProgress(`${label}：${text}`, index + 1)
+    text.split('\n').forEach((line, lineIndex) => logProgress(lineIndex === 0 ? `${label}：${line}` : line, index + 1))
     if (item && text.startsWith('已提交')) {
       confirmedIds.value = confirmedIds.value.filter(id => id !== item.procId)
     }
