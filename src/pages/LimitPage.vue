@@ -15,9 +15,14 @@ const props = defineProps({
   pageIndex: { type: Number, default: 1 },
   pageSize: { type: Number, default: 10 },
   selectable: Boolean,
-  selected: { type: Array, default: () => [] }
+  selected: { type: Array, default: () => [] },
+  gates: { type: Object, default: () => ({}) },
+  checking: Boolean,
+  embedded: Boolean,
+  writesOpen: { type: Boolean, default: true },
+  writesReady: { type: Boolean, default: true }
 })
-const emit = defineEmits(['search', 'page', 'select', 'confirm'])
+const emit = defineEmits(['search', 'page', 'select', 'confirm', 'submit'])
 const ui = inject('ui', null)
 const type = ref('all')
 const caseVolume = ref('')
@@ -36,11 +41,21 @@ const types = [
 const shown = computed(() => props.live ? props.rows : demoRows.value)
 const totalText = computed(() => props.live ? props.total : shown.value.length)
 const totalPages = computed(() => Math.max(1, Math.ceil(totalText.value / props.pageSize)))
-const pageIds = computed(() => shown.value.map(row => row.procId).filter(Boolean))
+const submitTitle = computed(() => {
+  if (!props.writesReady) return '正在读取系统设置里的写开关。'
+  if (!props.writesOpen) return '写开关在系统设置里关着。'
+  return '按已确认勾选的事项创建发文，并提交给当前登录人审核。一次一件，不会结束流程。'
+})
+function canPick(row) {
+  if (props.checking) return false
+  return props.gates[row.procId] !== 'pending'
+}
+const pageIds = computed(() => shown.value.filter(canPick).map(row => row.procId).filter(Boolean))
 const pageAll = computed(() => pageIds.value.length > 0 && pageIds.value.every(id => props.selected.includes(id)))
 
 function toggleRow(id) {
-  if (!id) return
+  const row = shown.value.find(item => item.procId === id)
+  if (!row || !canPick(row)) return
   const next = props.selected.includes(id) ? props.selected.filter(item => item !== id) : [...props.selected, id]
   emit('select', next)
 }
@@ -54,12 +69,33 @@ function togglePage() {
 }
 
 function confirmSelection() {
-  emit('confirm', [...props.selected])
+  const source = props.live ? props.rows : demoRows.value
+  const allowed = new Set(source.filter(canPick).map(row => row.procId))
+  emit('confirm', props.selected.filter(id => allowed.has(id)))
+}
+
+function askSubmit() {
+  emit('submit')
 }
 
 function goPage(page) {
   if (page < 1 || page > totalPages.value || props.loading) return
   emit('page', page)
+}
+
+function flowStatus(row) {
+  const gate = props.gates[row.procId]
+  if (gate === 'pending') return '已提交审核'
+  if (gate === 'done' || gate === 'open') return '还没提交审核'
+  return props.checking ? '正在核对' : '—'
+}
+
+function statusShade(text) {
+  if (text === '还没提交审核') return 'shade-open'
+  if (text === '已经审核通过') return 'shade-done'
+  if (text === '已提交审核') return 'shade-pending'
+  if (text === '库里没有' || text === '没查成') return 'shade-missing'
+  return ''
 }
 
 function search() {
@@ -88,7 +124,7 @@ function reset() {
 </script>
 
 <template>
-  <PageHead title="期限监控" desc="期限监控自己的查询表。和文件查询不是同一张表。" :art="bg('让重复工作变简单.png')" />
+  <PageHead v-if="!embedded" title="期限监控" desc="期限监控自己的查询表。和文件查询不是同一张表。" :art="bg('让重复工作变简单.png')" />
   <slot />
   <section v-if="!hideForm" class="card">
     <div class="filters">
@@ -115,8 +151,9 @@ function reset() {
         <span>{{ pageIndex }} / {{ totalPages }}</span>
         <button class="ghost tiny" type="button" :disabled="pageIndex >= totalPages || loading" @click="goPage(pageIndex + 1)">下一页</button>
       </div>
-      <button class="ghost" type="button" disabled title="这一步会向 EASY 提交发文，写开关还关着。本机任务用上面的「按表格创建任务」。">提交到 EASY</button>
+      <button class="ghost" type="button" :title="submitTitle" @click="askSubmit">提交到 EASY</button>
     </div>
+    <p v-if="checking" class="hint">正在核对发文审核状态。核对完之前不能勾选。</p>
     <p v-if="message" class="hint">{{ message }}</p>
     <p v-else-if="live && !connected" class="hint">尚未连接 EASY。连接后在这里查询期限，不会使用本页地址发请求。</p>
     <table class="grid">
@@ -124,15 +161,18 @@ function reset() {
         <tr>
           <th v-if="selectable"><label class="page-check"><input type="checkbox" :checked="pageAll" :disabled="!pageIds.length" @change="togglePage" />全选</label></th>
           <th>我方文号</th><th>案件名称</th><th>处理事项</th><th>客户</th><th>申请号</th>
-          <th>官方期限</th><th>客户期限</th><th>内部期限</th>
+          <th>官方期限</th><th>客户期限</th><th>内部期限</th><th>流程状态</th>
         </tr>
       </thead>
       <tbody>
         <tr v-if="!shown.length">
-          <td :colspan="selectable ? 9 : 8">{{ loading ? '正在读取期限列表…' : (message ? '查询没有完成，上面有原因。' : '没有可显示的期限记录') }}</td>
+          <td :colspan="selectable ? 10 : 9">{{ loading ? '正在读取期限列表…' : (message ? '查询没有完成，上面有原因。' : '没有可显示的期限记录') }}</td>
         </tr>
-        <tr v-for="row in shown" :key="row.procId">
-          <td v-if="selectable"><input type="checkbox" :checked="selected.includes(row.procId)" @change="toggleRow(row.procId)" /></td>
+        <tr v-for="row in shown" :key="row.procId" :class="{ 'is-pending': gates[row.procId] === 'pending' || checking }">
+          <td v-if="selectable">
+            <input type="checkbox" :checked="selected.includes(row.procId)" :disabled="!canPick(row)" @change="toggleRow(row.procId)" />
+            <span v-if="gates[row.procId] === 'pending'">待审核</span>
+          </td>
           <td>{{ row.caseVolume }}</td>
           <td>{{ row.caseName }}</td>
           <td>{{ row.ctrlProc }}</td>
@@ -141,6 +181,7 @@ function reset() {
           <td>{{ row.legalDueDate }}</td>
           <td>{{ row.cusDueDate }}</td>
           <td>{{ row.intDueDate }}</td>
+          <td :class="statusShade(flowStatus(row))">{{ flowStatus(row) }}</td>
         </tr>
       </tbody>
     </table>

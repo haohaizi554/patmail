@@ -4,7 +4,7 @@ import PageHead from '../../../../src/components/PageHead.vue'
 import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
 import { bg } from '../../../../src/assets'
 import { fieldLabel } from '../../query/field-registry'
-import { caseContactSkills, hasCaseContactSkill, rememberCaseContactCustomer, unlocksCaseContacts } from '../../customer/skills'
+import { CASE_CONTACT_CUSTOMER_NAME, caseContactSkills, hasCaseContactSkill, rememberCaseContactCustomer, unlocksCaseContacts } from '../../customer/skills'
 import { isQueryGuid } from '../../query/query-validator'
 import { clonePctTask } from '../../customer/pct-sheet'
 import {
@@ -26,7 +26,7 @@ import type { MailSender } from '../../customer/mailset'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import type { FileMailStyle, LimitMailStyle, QuerySurfaceId, WorkflowId } from '../../customer/types'
 import { scopeFromConnection, type ExpectedAccountScope } from '../../shared/connection'
-import { packagedPctWorkflow, pctRuntimeFrom, workflowSender } from '../../workflow/catalog'
+import { isRunnableWorkflow, packagedPctWorkflow, pctRuntimeFrom, workflowSender } from '../../workflow/catalog'
 import { confirmDialog } from '../dialog'
 import { useWorkflowCatalog } from '../composables/useWorkflowCatalog'
 import { useWorkspace } from '../composables/useWorkspace'
@@ -165,7 +165,8 @@ const workflowChoices = computed(() => workflowsFor(surface.value).map(item => (
   label: item.id === 'pct-reminder' ? pctName.value : item.label
 })))
 const activeWorkflow = computed(() => {
-  if (workflow.value === 'pct-reminder' && pctDefinition.value) return packagedPctWorkflow(pctDefinition.value)
+  const picked = catalog.value.workflows.find(item => item.id === workflow.value)
+  if (picked && isRunnableWorkflow(picked)) return packagedPctWorkflow(picked)
   return WORKFLOWS.find(item => item.id === workflow.value) ?? null
 })
 
@@ -304,14 +305,14 @@ async function save(goAfter: boolean): Promise<void> {
   formMessage.value = ''
   if (!name.value.trim()) { formMessage.value = '请先填写客户名称。'; return }
   if (!surface.value) { formMessage.value = '请选择查询入口。'; return }
-  if (surface.value === 'limit' && workflow.value !== 'pct-reminder') { formMessage.value = '请选择工作流。'; return }
+  if (surface.value === 'limit' && workflow.value !== 'pct-reminder' && workflow.value !== 'pct-pengcheng') { formMessage.value = '请选择工作流。'; return }
   const styleMatches = surface.value === 'file' ? isFileMailStyle(mailStyle.value) : isLimitMailStyle(mailStyle.value)
   if (!styleMatches) { formMessage.value = '请选择这个查询入口对应的发文模式。'; return }
   const remark = workflowRemark.value.trim().slice(0, 40)
   const twin = customers.value.find(item => item.id !== editingId.value && item.name.trim() === name.value.trim() && (item.workflowId ?? '') === (workflow.value || '') && (item.workflowRemark ?? '') === remark)
   if (twin) { formMessage.value = '已经有一条一样的客户、工作流和备注。换一句备注再存。'; return }
   const existing = editingId.value ? customers.value.find(item => item.id === editingId.value) : null
-  const skills = caseContactSkills(name.value, existing?.skills)
+  const skills = caseContactSkills(name.value)
   const scope = editingId.value ? formScope.value : scopeFromConnection(connection.value)
   if (!scope) { formMessage.value = '还没确认当前登录的人，没有保存。'; return }
   const pickedSender = mailsets.value.find(item => item.id === mailsetId.value)
@@ -328,7 +329,7 @@ async function save(goAfter: boolean): Promise<void> {
       baseTemplateId: sameSurface ? (existing?.baseTemplateId || 'manual') : 'manual',
       overrides: sameSurface ? (existing?.overrides ?? {}) : {},
       ...(sameSurface && existing?.boundQuery ? { boundQuery: existing.boundQuery } : {}),
-      ...(sameSurface && surface.value === 'limit' && workflow.value === 'pct-reminder' && existing?.pctTask ? { pctTask: clonePctTask(existing.pctTask) } : {}),
+      ...(sameSurface && surface.value === 'limit' && (workflow.value === 'pct-reminder' || workflow.value === 'pct-pengcheng') && existing?.pctTask && (existing.workflowId ?? 'pct-reminder') === workflow.value ? { pctTask: clonePctTask(existing.pctTask) } : {}),
       querySurface: surface.value,
       ...(surface.value === 'limit' && workflow.value ? { workflowId: workflow.value } : {}),
       ...(remark ? { workflowRemark: remark } : {}),
@@ -445,7 +446,7 @@ watch(() => connection.value.operatorId, () => {
       <h2>{{ editingId ? '修改客户' : '添加客户' }}</h2>
       <div class="stack-form">
         <label>客户名称 <input v-model="name" type="text" maxlength="80" /></label>
-        <p v-if="unlocksCaseContacts(name)" class="hint">保存「鹏城实验室」后，会打开导出联系人。别的客户没有这项。</p>
+        <p v-if="unlocksCaseContacts(name)" class="hint">保存「{{ CASE_CONTACT_CUSTOMER_NAME }}」后，会打开导出联系人。改成别的名字就会关掉。</p>
         <label>查询入口
           <ThemeSelect :model-value="surface" placeholder="请选择查询入口" :options="surfaceOptions" @update:model-value="surface = $event as QuerySurfaceId | ''" />
         </label>

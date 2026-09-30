@@ -26,6 +26,8 @@ export interface WorkflowNode {
   nodeCode: string
   nodeName: string
   allowSkip: boolean | null
+  /** GetFlowSubmit 节点上的 allow_edit。旧数据可能没有。 */
+  allowEdit?: boolean | null
   userType: string
   parallel: boolean | null
   needAllAudit: boolean | null
@@ -80,7 +82,7 @@ export interface EasyWorkflowSnapshot {
   deptId: string | null
   allowEdit: boolean | null
   availableNodes: WorkflowNode[]
-  /** GetFlowSubmit 的响应正文没有保存。这里的节点来自页面脚本形状，不能当成已核对响应。 */
+  /** 旧的 FlowSubmit 写路径仍关闭。期限监控提交走 MailSubmit，不看这个标记。 */
   submitContract: 'unverified'
   history: WorkflowHistory[]
   activity: WorkflowActivity | null

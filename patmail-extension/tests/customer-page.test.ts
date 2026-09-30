@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { customerDemandParams, customerDirectoryParams, fillSheetEmails, formatCustomerDemandText, loadCustomerDemands, readCustomerDemandPage, readCustomerDirectoryPage } from '../src/customer/customer-page'
+import { inventorCustomers } from '../src/customer/pct-recipients'
 import type { PctTaskRow } from '../src/customer/types'
 import type { ApiResult } from '../src/api/types'
 
@@ -13,7 +14,7 @@ function row(): PctTaskRow {
   return {
     ourVolume: 'PA2518728CND',
     customerVolume: 'CS-1',
-    customerName: '鹏城实验室',
+    customerName: '鹏城国家实验室',
     contactName: '姜颖',
     iprName: '雷群安',
     procLabel: '提醒申请PCT',
@@ -68,7 +69,7 @@ describe('客户资料页', () => {
     if (parsed.state !== 'known') return
     expect(parsed.rows[0]).toEqual({ contactId: customerId, name: '姜颖', email: 'jiang@example.com', contactType: '技术联系人' })
     expect(JSON.stringify(parsed.rows)).not.toContain('13800000000')
-    const filled = fillSheetEmails([row()], parsed.rows)
+    const filled = fillSheetEmails([row()], parsed.rows, inventorCustomers(row().customerName))
     expect(filled.rows[0]?.mailTo).toBe('姜颖(jiang@example.com);')
     expect(filled.rows[0]?.mailCc).toBeUndefined()
     expect(filled.notes.join('')).toContain('多个邮箱')

@@ -10,6 +10,14 @@ export interface PctTaskRow {
   customerName: string
   contactName: string
   iprName: string
+  /** 鹏城专案的技术负责人。括号里的拼音已去掉。邮箱列不读。 */
+  leadName?: string
+  /** 技术负责人是从同客户上一行补上的。 */
+  leadCarried?: true
+  /** 第一发明人是从同客户上一行补上的。页面标（补），对联系人仍用原名。 */
+  contactCarried?: true
+  /** IPR 是从同客户上一行补上的。页面标（补），对联系人仍用原名。 */
+  iprCarried?: true
   procLabel: string
   /** 热加载到的发文类型名称。读不到树时先留空，创建任务前必须补上。 */
   mailTypeLabel: string
@@ -25,7 +33,10 @@ export interface PctTaskRow {
 
 /** 勾选 PCT 提醒后，用表格记下的任务。发文类型只记名称和顺序。 */
 export interface PctTaskDraft {
-  workflowId: 'pct-reminder'
+  /** 勾选时所属的工作流。收件方式看 recipientMode，不看这个编号。 */
+  workflowId: string
+  /** 创建任务时从工作流「谁来收」抄下来的。ipr 发给 IPR，lead 发给技术负责人。 */
+  recipientMode?: 'ipr' | 'lead'
   ctrlProcId: string
   rows: PctTaskRow[]
   confirmedProcIds: string[]
@@ -39,9 +50,9 @@ export interface PctTaskDraft {
   createdAt: string
 }
 /** 已封装的工作流。PCT提醒是第一条。 */
-export type WorkflowId = 'pct-reminder'
+export type WorkflowId = 'pct-reminder' | 'pct-pengcheng'
 
-/** 创建指定客户后默认带上的能力。案件联系人导出目前只给鹏城实验室。 */
+/** 创建指定客户后默认带上的能力。案件联系人导出目前只给鹏城国家实验室，而且只认当前名称。 */
 export type CustomerSkillId = 'case-contacts'
 
 export interface CustomerQueryProfile {

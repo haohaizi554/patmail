@@ -354,7 +354,7 @@ onMounted(() => { if (ready.value) void call({ action: 'load' }) })
 
     <section v-if="pctPlans.length" class="card">
       <h2>PCT 提醒任务</h2>
-      <p class="hint">这些任务来自表格。发文类型按每行的客户文号和我方文号决定。任务记在插件里，还不会提交到 EASY。</p>
+      <p class="hint">这些任务来自表格。发文类型按每行的客户文号和我方文号决定。确认勾选后，上面的「提交到 EASY」会按勾选创建发文并交给当前登录人。</p>
       <table class="grid">
         <thead><tr><th>客户</th><th>任务</th></tr></thead>
         <tbody>

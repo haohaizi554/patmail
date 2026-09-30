@@ -132,7 +132,19 @@ img { max-width: 100%; }
 .grid th { text-align: left; color: #8b95ad; font-weight: 650; height: 36px; background: #fafbfe; }
 .grid td { height: 48px; border-top: 1px solid #f4f6fb; white-space: nowrap; }
 .grid th, .grid td { padding: 0 8px; }
+.grid tr.is-pending td { color: #9aa3b5; }
+.grid td.shade-open { background: #e7f0ff; color: #1d4ed8; }
+.grid td.shade-done { background: #e5f8ee; color: #157a45; }
+.grid td.shade-pending { background: #fff4d6; color: #9a6700; }
+.grid td.shade-missing { background: #ffe4ea; color: #c4234e; }
+.grid tr.is-pending td.shade-open { color: #1d4ed8; }
+.grid tr.is-pending td.shade-done { color: #157a45; }
+.grid tr.is-pending td.shade-pending { color: #9a6700; }
+.grid tr.is-pending td.shade-missing { color: #c4234e; }
+.done-list .shade-done { background: #e5f8ee; color: #157a45; border-radius: 6px; padding: 1px 6px; }
 .grid button { border: 0; background: transparent; color: #3b82f6; padding: 0 4px; }
+.done-list { margin: 8px 0 0; padding-left: 18px; color: #5c6578; font-size: 13px; }
+.done-list li { line-height: 1.7; }
 .grid button.go { color: var(--pink); font-weight: 700; }
 .who { display: flex; align-items: center; gap: 8px; max-width: 280px; }
 .who span { overflow: hidden; text-overflow: ellipsis; }
@@ -318,6 +330,10 @@ img { max-width: 100%; }
 .dialog input, .dialog textarea { display: block; width: 100%; margin-top: 6px; }
 .dialog textarea { height: auto; padding: 8px 10px; }
 .dialog footer { justify-content: flex-end; gap: 8px; }
+.progress-mask { z-index: 90; }
+.progress-dialog { width: 520px; }
+.progress-log { max-height: 240px; overflow: auto; margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.progress-log li { font-size: 13px; line-height: 1.5; color: #243056; }
 
 @media (max-width: 1200px) {
   .quick-grid, .stats-grid, .rule-layout { grid-template-columns: 1fr 1fr; }

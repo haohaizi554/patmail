@@ -16,7 +16,7 @@ export class CustomerQueryService {
     if (input.easyCustomerId && !isQueryGuid(input.easyCustomerId)) throw new Error('原网站客户 ID 必须是已确认的 GUID。')
     if (!input.baseTemplateId.trim()) throw new Error('请选择基础模板。')
     const existing = input.id ? await this.repository.get(input.id) : null
-    const skills = caseContactSkills(name, input.skills ?? existing?.skills)
+    const skills = caseContactSkills(name)
     const profile: CustomerQueryProfile = {
       id: existing?.id ?? input.id ?? `customer-${crypto.randomUUID()}`,
       name,

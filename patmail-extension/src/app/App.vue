@@ -15,6 +15,7 @@ import AcceptancePage from './pages/AcceptancePage.vue'
 import SettingsPage from './pages/SettingsPage.vue'
 import LimitsPage from './pages/LimitsPage.vue'
 import CaseContactsPage from './pages/CaseContactsPage.vue'
+import { CASE_CONTACT_CUSTOMER_NAME } from '../customer/skills'
 import Shell from '../../../src/components/Shell.vue'
 import AppDialog from './components/AppDialog.vue'
 
@@ -46,7 +47,7 @@ function workspaceScroller(): HTMLElement | null {
   return document.querySelector('.workspace')
 }
 const search = ref('')
-const pageName = computed(() => route.value === '/settings' ? '系统设置' : route.value === '/contacts' ? '鹏城实验室' : nav.find(item => item.hash === route.value)?.name ?? '首页')
+const pageName = computed(() => route.value === '/settings' ? '系统设置' : route.value === '/contacts' ? CASE_CONTACT_CUSTOMER_NAME : nav.find(item => item.hash === route.value)?.name ?? '首页')
 const page = computed(() => pages[route.value as keyof typeof pages] ?? HomePage)
 const profileName = computed(() => workspace.connection.value.displayName || '未登录')
 const profileDept = computed(() => workspace.connection.value.sessionStatus === 'authenticated' ? 'EASY 已连接' : '尚未连接')

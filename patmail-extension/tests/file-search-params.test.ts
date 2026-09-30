@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { buildGetSearchFilesParams } from '../src/api/file-search-params'
+import { buildGetSearchFilesFromFields, buildGetSearchFilesParams, closedCaseParam } from '../src/api/file-search-params'
 
 const documentedNames = [...readFileSync(resolve(process.cwd(), '..', 'API', '04-文件查询.md'), 'utf8')
   .matchAll(/^\d+ ([A-Za-z_][A-Za-z_0-9]*)$/gm)].map(match => match[1])
@@ -25,7 +25,18 @@ describe('GetSearchFiles 参数 Builder', () => {
     expect(result.data.get('case_type')).toBe('31D1A147-2931-43B5-94AE-B72B1525BA8A')
     expect(result.data.get('is_pat')).toBe('0')
     expect(result.data.get('customer')).toBe('')
+    expect(result.data.get('is_close')).toBe('')
     expect(result.data.has('order_by_search')).toBe(false)
+  })
+
+  it('keeps closed cases unless the form explicitly excludes them', () => {
+    expect(closedCaseParam(undefined)).toBe('')
+    expect(closedCaseParam('是')).toBe('')
+    expect(closedCaseParam('1')).toBe('1')
+    const included = buildGetSearchFilesFromFields({ case_volume: 'PA-1', is_close: '是' }, { pageIndex: 1, pageSize: 20 }, undefined, () => 1)
+    const excluded = buildGetSearchFilesFromFields({ case_volume: 'PA-1', is_close: '1' }, { pageIndex: 1, pageSize: 20 }, undefined, () => 1)
+    expect(included.ok && included.data.get('is_close')).toBe('')
+    expect(excluded.ok && excluded.data.get('is_close')).toBe('1')
   })
 
   it('maps UI filters, preserves Chinese and special characters, and removes only application-number dots', () => {

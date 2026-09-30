@@ -3,7 +3,7 @@ import { computed, inject, onActivated, onMounted, ref } from 'vue'
 import { PCL_ORIGIN } from '../../api/config'
 import { downloadContactWorkbook } from '../../case-contact/xlsx'
 import type { CaseContactRow } from '../../case-contact/query'
-import { hasCaseContactSkill, rememberedCaseContactCustomer } from '../../customer/skills'
+import { CASE_CONTACT_CUSTOMER_NAME, hasCaseContactSkill, rememberedCaseContactCustomer } from '../../customer/skills'
 import { splitCaseVolumes } from '../../customer/volume-list'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useWorkspace } from '../composables/useWorkspace'
@@ -32,7 +32,7 @@ onActivated(syncCustomer)
 async function run(): Promise<void> {
   const volumes = splitCaseVolumes(text.value)
   if (!bridge || !ready.value) {
-    message.value = onPcl.value ? '还没有读到鹏城实验室的登录。请刷新那个 EASY 页面。' : '请先打开鹏城实验室的 EASY 并刷新页面。'
+    message.value = onPcl.value ? `还没有读到${CASE_CONTACT_CUSTOMER_NAME}的登录。请刷新那个 EASY 页面。` : `请先打开${CASE_CONTACT_CUSTOMER_NAME}的 EASY 并刷新页面。`
     return
   }
   if (volumes.length === 0) {
@@ -72,14 +72,14 @@ async function run(): Promise<void> {
   <section v-if="!customer" class="card contact-sheet">
     <p class="crumb"><a href="#/customers">客户管理</a></p>
     <h1>导出联系人还没打开</h1>
-    <p class="empty">先创建客户「鹏城实验室」并保存。保存后才会出现这项能力，别的客户没有。</p>
+    <p class="empty">先创建客户「{{ CASE_CONTACT_CUSTOMER_NAME }}」并保存。改成别的名字后，这项会关掉。</p>
   </section>
   <section v-else class="card contact-sheet">
     <p class="crumb"><a href="#/customers">客户管理</a> / {{ customer.name }}</p>
     <h1>导出技术负责人和第一发明人邮箱</h1>
     <p v-if="ready" class="hint">已检测到登录：{{ who }}。邮箱取著录项目里第一位发明人。</p>
-    <p v-else-if="onPcl" class="empty">鹏城实验室页面已打开，还没有读到登录。请刷新那个页面。</p>
-    <p v-else class="empty">请先打开鹏城实验室的 EASY 并刷新页面，这里才会读到登录。</p>
+    <p v-else-if="onPcl" class="empty">{{ CASE_CONTACT_CUSTOMER_NAME }}页面已打开，还没有读到登录。请刷新那个页面。</p>
+    <p v-else class="empty">请先打开{{ CASE_CONTACT_CUSTOMER_NAME }}的 EASY 并刷新页面，这里才会读到登录。</p>
     <form class="stack-form" @submit.prevent="run">
       <label>客户案号
         <textarea v-model="text" rows="8" placeholder="一行一个。也可以用分号或空格分开。" />

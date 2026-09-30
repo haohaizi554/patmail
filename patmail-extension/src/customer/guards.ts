@@ -40,12 +40,20 @@ function shortText(value: unknown, max: number): value is string {
   return typeof value === 'string' && value.length <= max
 }
 
+function isTaskWorkflowId(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-z][a-z0-9-]{0,40}$/.test(value)
+}
+
 function isPctRow(value: unknown): value is PctTaskRow {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const row = value as Record<string, unknown>
   if (!shortText(row.ourVolume, 80) || !row.ourVolume.trim()) return false
   if (!shortText(row.customerVolume, 80) || !shortText(row.customerName, 80)) return false
   if (!shortText(row.contactName, 80) || !shortText(row.iprName, 80) || !shortText(row.procLabel, 80)) return false
+  if (row.contactCarried !== undefined && row.contactCarried !== true) return false
+  if (row.iprCarried !== undefined && row.iprCarried !== true) return false
+  if (row.leadName !== undefined && !shortText(row.leadName, 80)) return false
+  if (row.leadCarried !== undefined && row.leadCarried !== true) return false
   if (!shortText(row.mailTypeLabel, 80) || !row.mailTypeLabel.trim()) return false
   if (row.mailTypeId !== undefined && (typeof row.mailTypeId !== 'string' || !isQueryGuid(row.mailTypeId))) return false
   if (row.mailTypeRadioIndex !== undefined && row.mailTypeRadioIndex !== 1 && row.mailTypeRadioIndex !== 3) return false
@@ -57,10 +65,11 @@ function isPctRow(value: unknown): value is PctTaskRow {
 export function isPctTask(value: unknown): value is PctTaskDraft {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const task = value as Record<string, unknown>
-  if (task.workflowId !== 'pct-reminder') return false
+  if (!isTaskWorkflowId(task.workflowId)) return false
+  if (task.recipientMode !== undefined && task.recipientMode !== 'ipr' && task.recipientMode !== 'lead') return false
   if (typeof task.ctrlProcId !== 'string' || !isQueryGuid(task.ctrlProcId)) return false
-  if (!Array.isArray(task.rows) || task.rows.length < 1 || task.rows.length > 300 || !task.rows.every(isPctRow)) return false
-  if (!Array.isArray(task.confirmedProcIds) || task.confirmedProcIds.length > 300) return false
+  if (!Array.isArray(task.rows) || task.rows.length < 1 || task.rows.length > 5000 || !task.rows.every(isPctRow)) return false
+  if (!Array.isArray(task.confirmedProcIds) || task.confirmedProcIds.length > 5000) return false
   if (!task.confirmedProcIds.every(item => typeof item === 'string' && isQueryGuid(item))) return false
   if (task.mailsetId !== undefined && (typeof task.mailsetId !== 'string' || !isQueryGuid(task.mailsetId))) return false
   if (task.mailsetLabel !== undefined && (typeof task.mailsetLabel !== 'string' || task.mailsetLabel.length > 160)) return false

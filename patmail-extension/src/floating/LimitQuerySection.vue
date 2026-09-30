@@ -219,19 +219,28 @@ async function loadPickers(force: boolean): Promise<void> {
   }
 }
 
-watch(() => props.seedToken, () => {
+function applySeed(): void {
   if (!props.seed) return
   values.value = { ...props.seed }
   selectedId.value = ''
+  const hidden = new Set(LIMIT_BLOCKS.filter(block => block.more).flatMap(block => block.cells.flatMap(cell => {
+    if (cell.kind === 'dates') return [cell.start, cell.end, cell.empty].filter((item): item is string => Boolean(item))
+    return [cell.key]
+  })))
+  if (Object.entries(props.seed).some(([key, value]) => hidden.has(key) && value.trim())) showMore.value = true
   message.value = '已载入绑定的查询条件。可以再改，改完重新查询。'
-})
+}
+
+watch(() => props.seedToken, () => {
+  applySeed()
+}, { immediate: true })
 watch(() => props.userId, () => {
   templates.value = []
-  values.value = {}
   selectedId.value = ''
   pickers.value = {}
   pickersReady.value = false
   checkMessage.value = ''
+  applySeed()
   if (props.userId) {
     activateOptionFallback(props.userId)
     void hydrateOptionFallback(props.userId)

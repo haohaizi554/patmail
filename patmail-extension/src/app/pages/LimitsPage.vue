@@ -3,7 +3,6 @@ import { computed, inject, onActivated, onMounted, ref, watch } from 'vue'
 import LimitPage from '../../../../src/pages/LimitPage.vue'
 import LimitQuerySection from '../../floating/LimitQuerySection.vue'
 import BindQueryBar from '../components/BindQueryBar.vue'
-import EmptyGuide from '../components/EmptyGuide.vue'
 import type { LimitMonitorResult, LimitMonitorRow } from '../../api/limit-monitor-types'
 import { isLimitMonitorType, type LimitMonitorQuery } from '../../api/limit-monitor-params'
 import { PCT_RESUME_KEY, PENDING_CUSTOMER_KEY, applyBoundQuery, matchPctMailTypes, querySnapshot } from '../../customer/mail-flow'
@@ -12,8 +11,10 @@ import { fetchMailTypeNodes } from '../../customer/mail-type-load'
 import { fetchMailSenders } from '../../customer/mailset-load'
 import type { MailSender } from '../../customer/mailset'
 import { fillSheetEmails } from '../../customer/customer-page'
-import { applyPctMailTypes, clonePctTask, matchSheetCtrlProcs, pctRowsFromTable, summarizePctTask, volumesOf } from '../../customer/pct-sheet'
+import { applyPctMailTypes, clonePctTask, matchSheetCtrlProcs, pctRowsFromTable, readWorkflowTask, summarizePctTask, volumesOf, writeWorkflowTask } from '../../customer/pct-sheet'
+import { limitMailItems, runLimitMailSubmit } from '../../customer/limit-mail-submit'
 import { planPctRecipients, currentMailId, sheetRowsOnMail } from '../../customer/pct-recipients'
+import { inventorCustomerNames, pctRuntimeFrom, recipientModeForTask, workflowSender } from '../../workflow/catalog'
 import { isPctTask } from '../../customer/guards'
 import type { PctTaskDraft, PctTaskRow } from '../../customer/types'
 import { joinCaseVolumes, splitCaseVolumes } from '../../customer/volume-list'
@@ -21,15 +22,17 @@ import { readXlsxRows } from '../../customer/xlsx-table'
 import { isQueryGuid } from '../../query/query-validator'
 import { scopeFromConnection } from '../../shared/connection'
 import { MessageType, type MessageBridge } from '../../shared/message'
-import { pctRuntimeFrom, workflowSender } from '../../workflow/catalog'
 import { useWorkflowCatalog } from '../composables/useWorkflowCatalog'
 import { useWorkspace } from '../composables/useWorkspace'
 import { infoDialog } from '../dialog'
+import { useWriteSwitch } from '../../settings/use-write-switch'
 
+const { open: writesOpen, ready: writesReady } = useWriteSwitch()
 const bridge = inject<MessageBridge>('bridge')
 const { connection, customers, rules, call } = useWorkspace()
 const { catalog } = useWorkflowCatalog()
 const pctDefinition = computed(() => catalog.value.workflows.find(item => item.id === 'pct-reminder') ?? null)
+const specials = computed(() => inventorCustomerNames(pctDefinition.value))
 const pctConfig = computed(() => pctRuntimeFrom(pctDefinition.value))
 const workflowMailbox = computed(() => workflowSender(pctDefinition.value))
 const connected = computed(() => connection.value.sessionStatus === 'authenticated')
@@ -37,6 +40,9 @@ const loading = ref(false)
 const savingTask = ref(false)
 const message = ref('')
 const rows = ref<LimitMonitorRow[]>([])
+const gates = ref<Record<string, 'open' | 'pending' | 'done'>>({})
+const checkingGates = ref(false)
+let gateToken = 0
 const total = ref(0)
 const pageIndex = ref(1)
 const pageSize = ref(10)
@@ -84,6 +90,7 @@ const pctCustomer = computed(() => {
   const marked = customers.value.filter(item => item.workflowId === 'pct-reminder' && item.querySurface === 'limit')
   return marked.find(item => item.id === pending) ?? marked[0] ?? null
 })
+const workflowTask = ref<PctTaskDraft | null>(readWorkflowTask())
 const boundFields = computed(() => {
   const draft = querySnapshot(draftFields.value)
   if (Object.keys(draft).length) return draft
@@ -170,9 +177,67 @@ async function requestPage(query: LimitMonitorQuery): Promise<LimitMonitorResult
   return response.payload.data
 }
 
+async function markSendGates(items: LimitMonitorRow[]): Promise<void> {
+  const token = ++gateToken
+  if (!bridge || !items.length) {
+    gates.value = {}
+    checkingGates.value = false
+    return
+  }
+  const current = bridge
+  checkingGates.value = true
+  const jobs = new Map<string, { caseId: string; procId: string }>()
+  for (const row of items) {
+    if (isQueryGuid(row.caseId) && isQueryGuid(row.procId)) jobs.set(`${row.caseId}|${row.procId}`, { caseId: row.caseId, procId: row.procId })
+  }
+  const resolved = new Map<string, 'open' | 'pending' | 'done'>()
+  const queue = [...jobs.values()]
+  let failed = 0
+  async function worker(): Promise<void> {
+    while (queue.length && token === gateToken) {
+      const job = queue.shift()
+      if (!job) return
+      const response = await current.request({ type: MessageType.ReadCaseBusFlow, payload: { caseId: job.caseId, procId: job.procId } })
+      if (token !== gateToken) return
+      if (response.type === MessageType.CaseBusFlowResult && response.payload.ok) {
+        resolved.set(`${job.caseId}|${job.procId}`, response.payload.data.gate)
+      } else {
+        failed += 1
+        resolved.set(`${job.caseId}|${job.procId}`, 'pending')
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, Math.max(queue.length, 1)) }, () => worker()))
+  if (token !== gateToken) return
+  const next: Record<string, 'open' | 'pending' | 'done'> = {}
+  let unchecked = 0
+  for (const row of items) {
+    if (!isQueryGuid(row.caseId) || !isQueryGuid(row.procId)) {
+      unchecked += 1
+      continue
+    }
+    const gate = resolved.get(`${row.caseId}|${row.procId}`)
+    if (gate) next[row.procId] = gate
+    else unchecked += 1
+  }
+  gates.value = next
+  checkingGates.value = false
+  selected.value = selected.value.filter(id => next[id] === 'open' || next[id] === 'done')
+  const pending = items.filter(row => next[row.procId] === 'pending').length
+  const bits = [
+    pending ? `待审核 ${pending} 个，已标灰，不能勾选。` : '',
+    failed ? `${failed} 件没有读到发文流程，先按待审核处理。` : '',
+    unchecked ? `${unchecked} 件没有核对到发文流程，不按还没提交审核计算。` : ''
+  ].filter(Boolean)
+  if (bits.length) message.value = [message.value, ...bits].filter(Boolean).join('')
+}
+
 async function search(input: { type: string; caseVolume?: string; applicationNo?: string; customerName?: string; ctrlProcId?: string; fields?: Record<string, string>; templateId?: string; reset?: boolean; page?: number }): Promise<void> {
   if (input.reset) {
     rows.value = []
+    gates.value = {}
+    checkingGates.value = false
+    gateToken += 1
     total.value = 0
     message.value = ''
     pageIndex.value = 1
@@ -216,9 +281,12 @@ async function search(input: { type: string; caseVolume?: string; applicationNo?
   try {
     const data = await requestPage({ ...query, pageIndex: targetPage, pageSize: pageSize.value })
     rows.value = data.items
+    gates.value = {}
+    checkingGates.value = data.items.length > 0
     total.value = data.total
     pageIndex.value = targetPage
     message.value = data.items.length ? '' : '这个条件下没有期限记录。'
+    void markSendGates(data.items)
   } catch (error) {
     message.value = typeof error === 'string' ? error : '期限查询失败，请重试。'
   } finally {
@@ -240,9 +308,12 @@ async function showCollected(query: Omit<LimitMonitorQuery, 'pageIndex' | 'pageS
       items.push(...next.items)
     }
     rows.value = items
+    gates.value = {}
+    checkingGates.value = items.length > 0
     total.value = items.length
     pageIndex.value = 1
     message.value = items.length ? `一起查完，共 ${items.length} 件。` : '这个条件下没有期限记录。'
+    void markSendGates(items)
   } catch (error) {
     message.value = typeof error === 'string' ? error : '期限查询失败，请重试。'
   } finally {
@@ -264,9 +335,55 @@ function onSelect(ids: string[]): void {
   selected.value = ids
 }
 
+function onSubmitAsk(): void {
+  if (!writesReady.value) {
+    message.value = '正在读取系统设置里的写开关。'
+    return
+  }
+  if (!writesOpen.value) {
+    message.value = '写开关在系统设置里关着，没有提交到 EASY。'
+    return
+  }
+  if (!bridge || !connected.value) {
+    message.value = '尚未连接 EASY。'
+    return
+  }
+  const task = readWorkflowTask()
+  const planned = limitMailItems({
+    procIds: confirmedIds.value.length ? confirmedIds.value : (task?.confirmedProcIds ?? []),
+    rows: rows.value,
+    sheetRows: task?.rows ?? [],
+    mode: recipientModeForTask(task, catalog.value.workflows)
+  })
+  if (!planned.ok) {
+    message.value = planned.message
+    return
+  }
+  message.value = '正在创建发文并提交给当前登录人。'
+  void runLimitMailSubmit(bridge, connection.value.operatorId, planned.items).then(text => {
+    message.value = text
+  })
+}
+
 async function onConfirm(ids: string[]): Promise<void> {
-  const procIds = ids.filter(item => isQueryGuid(item))
+  const open = new Set(rows.value.filter(row => {
+    const gate = gates.value[row.procId]
+    return gate === 'open' || gate === 'done'
+  }).map(row => row.procId))
+  const procIds = ids.filter(item => isQueryGuid(item) && open.has(item))
+  if (!procIds.length && ids.length) {
+    message.value = checkingGates.value ? '还在核对发文审核状态，先不能确认。' : '已提交审核的不能勾选。'
+    return
+  }
   confirmedIds.value = procIds
+  const stored = readWorkflowTask()
+  if (stored) {
+    const next = clonePctTask({ ...stored, confirmedProcIds: procIds })
+    writeWorkflowTask(next)
+    workflowTask.value = next
+    message.value = `已确认勾选 ${procIds.length} 件，写进这次工作流任务。任务记在插件里，还不会提交到 EASY。`
+    return
+  }
   const customer = pctCustomer.value
   if (!customer?.pctTask) {
     message.value = `已确认勾选 ${procIds.length} 件。创建任务时会带上这些处理事项。任务记在插件里，还不会提交到 EASY。`
@@ -507,7 +624,7 @@ async function appendSheetContacts(): Promise<void> {
     const notes = contacts.payload.data.message ? [contacts.payload.data.message] : []
     if (!baseTo.trim()) baseTo = addresses.payload.data.to
     if (!baseCc.trim()) baseCc = addresses.payload.data.cc
-    const plan = planPctRecipients([row], contacts.payload.data.rows, { to: baseTo, cc: baseCc })
+    const plan = planPctRecipients([row], contacts.payload.data.rows, { to: baseTo, cc: baseCc }, specials.value, recipientModeForTask(workflowTask.value, catalog.value.workflows))
     sheetRows.value = sheetRows.value.map(item => item.ourVolume === row.ourVolume ? { ...item, mailTo: plan.to, mailCc: plan.cc } : item)
     activeVolume.value = row.ourVolume
     message.value = [...notes, ...plan.notes, `已追加到文号 ${row.ourVolume} 这一行。加载这封发文时原网站填上的地址还在前面。`].filter(Boolean).join('')
@@ -517,7 +634,8 @@ async function appendSheetContacts(): Promise<void> {
 }
 
 function restoreSheet(force = false): void {
-  const task = pctCustomer.value?.pctTask
+  workflowTask.value = readWorkflowTask()
+  const task = workflowTask.value ?? pctCustomer.value?.pctTask
   if (!task || (sheetRows.value.length && !force)) return
   sheetRows.value = task.rows.map(row => ({ ...row }))
   if (task.mailsetId) mailsetId.value = task.mailsetId
@@ -538,7 +656,7 @@ async function resumeQuery(): Promise<void> {
   if (!caseVolume || !isQueryGuid(ctrl)) return
   restoreSheet(true)
   if (!connected.value) {
-    message.value = '任务已经记在这个客户上。连上 EASY 之后，可以用我方文号再查一次。'
+    message.value = '任务已经记下。连上 EASY 之后，可以用我方文号再查一次。'
     return
   }
   seedQuery(splitCaseVolumes(caseVolume), ctrl)
@@ -550,17 +668,13 @@ onActivated(() => { void resumeQuery() })
 
 async function createTask(): Promise<void> {
   const customer = pctCustomer.value
-  if (!customer) {
-    message.value = '先在客户管理把查询入口选成期限监控，并选择 PCT提醒。'
-    return
-  }
   if (!sheetRows.value.length) {
     message.value = '先传入 PCT 表格。'
     return
   }
   sheetRows.value = applyPctMailTypes(sheetRows.value, mailNodes.value, pctConfig.value)
   let emailNote = ''
-  if (bridge && isQueryGuid(customer.easyCustomerId ?? '')) {
+  if (bridge && customer && isQueryGuid(customer.easyCustomerId ?? '')) {
     const directory = await bridge.request({ type: MessageType.ReadCustomerDirectory, payload: { customerId: customer.easyCustomerId ?? '' } })
     if (directory.type === MessageType.Error) {
       emailNote = directory.payload.message
@@ -569,7 +683,7 @@ async function createTask(): Promise<void> {
       if (!payload.ok) {
         emailNote = payload.error.message
       } else {
-        const filled = fillSheetEmails(sheetRows.value, payload.data.rows)
+        const filled = fillSheetEmails(sheetRows.value, payload.data.rows, specials.value, recipientModeForTask(workflowTask.value, catalog.value.workflows))
         sheetRows.value = filled.rows
         const matched = filled.rows.filter(row => (row.mailTo ?? '').includes('@') || (row.mailCc ?? '').includes('@')).length
         emailNote = [payload.data.complete ? '' : (payload.data.message || '客户联系人没有读全。'), matched ? `已为 ${matched} 行补上客户联系人里唯一的邮箱。` : '', ...filled.notes].filter(Boolean).join('')
@@ -597,14 +711,15 @@ async function createTask(): Promise<void> {
   const chosenId = mailsetId.value || rules.value?.defaultSender?.mailsetId || ''
   const picked = mailsets.value.find(item => item.id === chosenId)
   const fromRules = rules.value?.defaultSender?.mailsetId === chosenId ? rules.value.defaultSender : null
-  const fromCustomer = customer.mailsetId === chosenId && customer.mailsetLabel
+  const fromCustomer = customer && customer.mailsetId === chosenId && customer.mailsetLabel
     ? { mailsetId: customer.mailsetId, label: customer.mailsetLabel }
     : null
   const sender = picked
     ? { mailsetId: picked.id, label: picked.label }
     : fromRules ?? fromCustomer
   const task: PctTaskDraft = {
-    workflowId: 'pct-reminder',
+    workflowId: workflowTask.value?.workflowId && /^[a-z][a-z0-9-]{0,40}$/.test(workflowTask.value.workflowId) ? workflowTask.value.workflowId : 'pct-reminder',
+    recipientMode: recipientModeForTask(workflowTask.value, catalog.value.workflows),
     ctrlProcId: ctrl,
     rows: sheetRows.value,
     confirmedProcIds: confirmedIds.value.filter(item => isQueryGuid(item)),
@@ -618,6 +733,21 @@ async function createTask(): Promise<void> {
     return
   }
   savingTask.value = true
+  if (!customer || workflowTask.value) {
+    const saved = clonePctTask(task)
+    writeWorkflowTask(saved)
+    workflowTask.value = saved
+    sessionStorage.removeItem(PENDING_CUSTOMER_KEY)
+    savingTask.value = false
+    submittedFields.value = fields
+    const savedText = sender
+      ? `已按表格创建任务，发件人是 ${sender.label}。${summarizePctTask(task)}任务记在插件里，还不会提交到 EASY。`
+      : `已按表格创建任务。这次没有发件人，规则里也还没设默认。${summarizePctTask(task)}任务记在插件里，还不会提交到 EASY。`
+    seedQuery(volumes, ctrl)
+    await search({ type: 'all', caseVolume, ctrlProcId: ctrl, fields: { case_volume: caseVolume, ctrl_proc: ctrl } })
+    message.value = `${savedText}${emailNote ? ` ${emailNote}` : ''}${message.value ? ` ${message.value}` : ''}`
+    return
+  }
   const next = applyBoundQuery(customer, {
     surface: 'limit',
     fields,
@@ -651,7 +781,7 @@ async function createTask(): Promise<void> {
 </script>
 
 <template>
-  <LimitPage live hide-form selectable :selected="selected" :rows="rows" :total="sheetMerged ? rows.length : total" :loading="loading" :message="message" :connected="connected" :page-index="pageIndex" :page-size="shownPageSize" @page="goPage" @select="onSelect" @confirm="onConfirm">
+  <LimitPage live hide-form selectable :writes-open="writesOpen" :writes-ready="writesReady" :selected="selected" :rows="rows" :gates="gates" :checking="checkingGates" :total="sheetMerged ? rows.length : total" :loading="loading" :message="message" :connected="connected" :page-index="pageIndex" :page-size="shownPageSize" @page="goPage" @select="onSelect" @confirm="onConfirm" @submit="onSubmitAsk">
     <section v-if="!connected" class="card"><p class="empty">尚未确认 EASY 用户，不能读取期限模板。</p></section>
     <template v-else>
       <LimitQuerySection :bridge="bridge" :user-id="connection.operatorId" :can-search="connected && !loading" :seed="seed" :seed-token="seedToken" @search="search" @draft="draftFields = $event" />
@@ -665,8 +795,8 @@ async function createTask(): Promise<void> {
         </div>
         <p class="hint">传入 xlsx 后，按表格里的处理事项到原网站对上，再用我方文号查询。</p>
         <p v-if="mailTypeMessage" class="hint">{{ mailTypeMessage }}</p>
-        <p v-if="pctCustomer" class="hint">当前客户：{{ pctCustomer.name }}<template v-if="pctCustomer.pctTask">。已有任务：{{ summarizePctTask(pctCustomer.pctTask) }}</template></p>
-        <EmptyGuide v-else text="还没有走 PCT提醒 的客户。去客户管理建一个，查询入口选期限监控，工作流选 PCT提醒。" action="去创建客户" hash="/customers" />
+        <p v-if="workflowTask" class="hint">这次按工作流记下：{{ summarizePctTask(workflowTask) }}</p>
+        <p v-else-if="pctCustomer" class="hint">当前客户：{{ pctCustomer.name }}<template v-if="pctCustomer.pctTask">。已有任务：{{ summarizePctTask(pctCustomer.pctTask) }}</template></p>
         <div class="pct-sheet">
           <div class="pct-sheet-side">
             <label>发件人
@@ -685,7 +815,7 @@ async function createTask(): Promise<void> {
               <button class="ghost" type="button" :disabled="loading || savingTask" @click="querySheet('batch')">所有文号一起查询</button>
               <button class="ghost" type="button" :disabled="loading || savingTask" @click="querySheet('each')">逐个文号查询</button>
             </div>
-            <p class="hint">没改的话用发文映射里保存的默认发件人。这里改一次，会记在这次任务上，并记住到这个客户。</p>
+            <p class="hint">没改的话用工作流或发文映射里保存的发件人。这里改一次，记在这次任务上。</p>
             <p v-if="!senderTouched && !pctCustomer?.mailsetId && workflowMailbox && mailsetId === workflowMailbox.id" class="hint">当前沿用工作流里选的：{{ workflowMailbox.label }}</p>
             <p v-else-if="!senderTouched && !pctCustomer?.mailsetId && rules?.defaultSender && mailsetId === rules.defaultSender.mailsetId" class="hint">当前沿用默认：{{ rules.defaultSender.label }}</p>
             <p v-if="mailsetMessage" class="hint">{{ mailsetMessage }}</p>
@@ -698,7 +828,7 @@ async function createTask(): Promise<void> {
             <label>抄送<span v-if="activeRow">（{{ activeRow.ourVolume }}）</span>
               <textarea :value="activeRow?.mailCc ?? ''" rows="3" maxlength="4000" placeholder="名称(邮箱);" :disabled="!activeRow" @input="writeActive('mailCc', ($event.target as HTMLTextAreaElement).value)" />
             </label>
-            <p class="hint">外部表格的一行是一个发文任务。打开这一行已经加载的发文后追加：只用这一行的第一客户联系人和客户联系人(IPR)。这封发文加载时填上的地址留在前面。</p>
+            <p class="hint">打开这一行已经加载的发文后追加。PCT提醒收件人是 IPR、抄送是商务。PCT鹏城专案收件人是技术负责人、抄送是 IPR 和商务。这封发文加载时填上的地址留在前面。同一客户里收件人或抄送不同的分成另一封。查询结果里，待审核的标灰不能勾选，已经审核完成的不列出。</p>
             <button class="ghost" type="button" :disabled="loading || savingTask || appendingContacts || !sheetRows.length" @click="appendSheetContacts">{{ appendingContacts ? '正在追加…' : '按表格追加联系人' }}</button>
           </div>
         </div>

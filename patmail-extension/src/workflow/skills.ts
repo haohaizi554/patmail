@@ -35,8 +35,8 @@ export const SKILLS: SkillTemplate[] = [
       field('col_our', '我方文号那一列', '我方文号', '没有这一列就读不了表。'),
       field('col_customer_volume', '客户文号那一列', '客户文号', '用来判断用贵方案号还是我方案号。'),
       field('col_customer_name', '客户名称那一列', '客户名称', '记在这一行上。'),
-      field('col_contact', '收件人那一列', '第一客户联系人', '这一行的收件人从这里取。'),
-      field('col_ipr', '抄送人那一列', '客户联系人(IPR)', '这一行的抄送从这里取。'),
+      field('col_contact', '第一客户联系人那一列', '第一客户联系人', '记在这一行上。默认发文不拿它当收件人。'),
+      field('col_ipr', 'IPR 那一列', '客户联系人(IPR)', '默认发文的收件人从这里取。'),
       field('col_proc', '事项那一列', '处理事项', '用这一列的名字，到系统里的事项列表对上。')
     ]
   },
@@ -73,9 +73,9 @@ export const SKILLS: SkillTemplate[] = [
   {
     id: 'send-style',
     title: '几件合成一封',
-    blurb: '同一客户合成一封',
+    blurb: '同一客户、同一收件人合成一封',
     tint: 'mint',
-    detail: '这一条用同客户合并发文。同一客户的几件合成一封。',
+    detail: '同一客户里，收件人和抄送都相同的几件合成一封。收件人或抄送不同就分开。',
     params: [
       field('style_1_label', '发文方式', '同客户合并发文', '从名单里点一种。'),
       field('style_1_value', '同客户合并发文的记号', '1', '程序用来记住这一种。', true),
@@ -88,13 +88,13 @@ export const SKILLS: SkillTemplate[] = [
   {
     id: 'people',
     title: '谁来收',
-    blurb: '收件人和抄送从表格里来',
+    blurb: '发给 IPR，抄送商务',
     tint: 'pink',
-    detail: '可以按每一行改。表格里的人加在后面，系统里已经填好的地址留在前面。',
+    detail: '收件人是表格里的 IPR，抄送是发文页的商务。',
     params: [
-      field('to_role', '收件人是', '第一发明人（技术联系人）', '地址仍从收件人那一列读。'),
-      field('cc_business_role', '抄送里的商务', '商务', '写在说明里。'),
-      field('cc_ipr_role', '抄送里的联系人', 'IPR', '地址仍从抄送人那一列读。')
+      field('recipient_mode', '收件方式', 'ipr', 'ipr 是表格 IPR 收、商务抄送。lead 是技术负责人收、IPR 和商务抄送。', true),
+      field('to_role', '收件人', 'IPR', '从表格「客户联系人(IPR)」读。'),
+      field('cc_business_role', '抄送', '商务', '从发文页的商务联系人读，不从表格读。')
     ]
   },
   {

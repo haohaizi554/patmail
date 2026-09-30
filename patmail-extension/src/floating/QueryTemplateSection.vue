@@ -5,7 +5,7 @@ import type { NormalizedDictionary } from '../api/dictionaries'
 import type { HistoryQueryOption } from '../api/query-history'
 import type { CustomerQueryProfile } from '../customer/types'
 import { fieldGroup, fieldLabel, parseQueryXml, resolveQueryTemplate } from '../query'
-import { PAGE_OPTIONS, queryBlocks, type QueryCell, type QuerySection } from '../query/form-layout'
+import { PAGE_OPTIONS, cellKeys, queryBlocks, type QueryCell, type QuerySection } from '../query/form-layout'
 import { cellsFromLiveFields } from '../query/live-fields'
 import { buildQueryXml } from '../query/query-xml'
 import { describeFormCheck, fallbackFields, formFieldKey, hiddenFormFields, mergeFormFields, overlayFieldOptions, pageSelectOptions } from '../query/form-page'
@@ -35,7 +35,9 @@ const props = withDefaults(defineProps<{
   origin?: string
   /** 模板页负责新建和修改。文件管理只选用模板并查询。 */
   manage?: boolean
-}>(), { manage: true })
+  seed?: Record<string, string> | null
+  seedToken?: number
+}>(), { manage: true, seed: null, seedToken: 0 })
 const emit = defineEmits<{ search: [query: FileSearchQuery] }>()
 
 const historyOptions = ref<HistoryQueryOption[]>([])
@@ -54,6 +56,7 @@ const baseName = ref('')
 const temporary = ref<Record<string, string>>({})
 const temporaryActive = ref<Record<string, boolean>>({})
 const openExtra = ref<Record<string, boolean>>({})
+const collapsedByUser = ref<Record<string, boolean>>({})
 const pageFields = ref<FileSearchFormField[] | undefined>(undefined)
 const hotExtra = ref<{ case: QueryCell[]; file: QueryCell[] } | null>(null)
 const hotLoaded = ref(false)
@@ -106,7 +109,7 @@ watch(hotSentinel, node => {
   hotObserver = null
   if (!node || typeof IntersectionObserver === 'undefined') return
   hotObserver = new IntersectionObserver(entries => {
-    if (entries.some(entry => entry.isIntersecting)) void ensureHotFields(true)
+    if (entries.some(entry => entry.isIntersecting)) void ensureHotFields(false)
   }, { rootMargin: '160px' })
   hotObserver.observe(node)
 })
@@ -118,7 +121,10 @@ watch(selectedBaseId, () => { saveNameDirty.value = false })
 const businessFields = FILE_SEARCH_REQUEST_FIELDS.filter(field => !FILE_SEARCH_SYSTEM_FIELDS.has(field))
 const formSections = computed(() => queryBlocks(pageHidden.value).map(block => {
   const live = block.title === '案件条件' ? hotExtra.value?.case : hotExtra.value?.file
-  return live?.length ? { ...block, extra: live } : block
+  if (!live?.length) return block
+  const known = new Set([...block.cells, ...block.extra].flatMap(cellKeys))
+  const added = live.filter(cell => cellKeys(cell).every(key => !known.has(key)))
+  return added.length ? { ...block, extra: [...block.extra, ...added] } : block
 }))
 function shownCells(block: QuerySection): QueryCell[] {
   return openExtra.value[block.title] ? [...block.cells, ...block.extra] : block.cells
@@ -126,12 +132,20 @@ function shownCells(block: QuerySection): QueryCell[] {
 function openAllExtra(): void {
   const copy = { ...openExtra.value }
   for (const block of formSections.value) {
-    if (block.extra.length) copy[block.title] = true
+    if (!block.extra.length || collapsedByUser.value[block.title]) continue
+    copy[block.title] = true
   }
   openExtra.value = copy
 }
 function toggleExtra(title: string): void {
   const opening = !openExtra.value[title]
+  if (opening) {
+    const kept = { ...collapsedByUser.value }
+    delete kept[title]
+    collapsedByUser.value = kept
+  } else {
+    collapsedByUser.value = { ...collapsedByUser.value, [title]: true }
+  }
   openExtra.value = { ...openExtra.value, [title]: opening }
   if (opening) void ensureHotFields(false)
 }
@@ -260,6 +274,7 @@ function optionsFor(key: string): { value: string; label: string; parent?: strin
   if (current && !options.some(item => item.value === current)) {
     options = [{ value: current, label: storedLabel(key, current) }, ...options]
   }
+  if (key === 'is_close') return [{ value: '', label: '是' }, { value: '1', label: '否' }]
   return [{ value: '', label: '不限' }, ...options]
 }
 function treeChoices(key: string): { value: string; label: string; parent?: string }[] {
@@ -443,6 +458,7 @@ function resetBase(): void {
   displayValues.value = {}
   baseFields.value = {}
   baseName.value = ''
+  collapsedByUser.value = {}
   restoreTemplate()
 }
 function startApply(id: string): void {
@@ -898,7 +914,37 @@ async function checkAgainstPage(): Promise<void> {
 }
 function search(): void {
   if (!canSubmit.value) return
-  emit('search', { resolvedFields: { ...resolved.value.fields }, pageIndex: 1, pageSize: props.pageSize })
+  const fields = { ...resolved.value.fields }
+  if (fields.is_close !== undefined) fields.is_close = fields.is_close.trim() === '1' || fields.is_close.trim() === '否' ? '1' : ''
+  emit('search', { resolvedFields: fields, pageIndex: 1, pageSize: props.pageSize })
+}
+
+function applySeed(): void {
+  const seed = props.seed
+  if (!seed || !props.seedToken) return
+  const nextActive = { ...temporaryActive.value }
+  const next = { ...temporary.value }
+  for (const [key, value] of Object.entries(seed)) {
+    if (!isFileSearchBusinessField(key)) continue
+    const text = value.trim()
+    if (key === 'is_close') {
+      if (text === '1' || text === '否') {
+        nextActive[key] = true
+        next[key] = '1'
+      }
+      continue
+    }
+    if (!text || text.length > 4000) continue
+    nextActive[key] = true
+    next[key] = text
+  }
+  temporaryActive.value = nextActive
+  temporary.value = next
+  const copy = { ...openExtra.value }
+  for (const block of formSections.value) {
+    if (extraFilled(block, next)) copy[block.title] = true
+  }
+  openExtra.value = copy
 }
 
 watch(() => [props.userId, props.mode] as const, () => {
@@ -923,6 +969,7 @@ watch(() => [props.userId, props.mode] as const, () => {
   saveNameDirty.value = false
   hotAbort?.abort()
   void reloadLocal()
+  applySeed()
   if (!props.userId) return
   activateOptionFallback(props.userId)
   void hydrateOptionFallback(props.userId)
@@ -931,12 +978,13 @@ watch(() => [props.userId, props.mode] as const, () => {
   })
   void loadHistory(false)
 }, { immediate: true })
+watch(() => props.seedToken, () => { applySeed() })
 watch(selectedCaseTypeId, id => { void loadFileTypes(id) }, { immediate: true })
 watch(resolved, (next) => {
   const copy = { ...openExtra.value }
   let changed = false
   for (const block of formSections.value) {
-    if (copy[block.title] || !extraFilled(block, next.fields)) continue
+    if (copy[block.title] || collapsedByUser.value[block.title] || !extraFilled(block, next.fields)) continue
     copy[block.title] = true
     changed = true
   }

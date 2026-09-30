@@ -32,7 +32,7 @@ export const PAGE_OPTIONS: Record<string, { value: string; label: string }[]> = 
     { value: '849F2D30-DDAA-4718-AD1E-1951DE67913D', label: '调查案' }
   ],
   is_close: [
-    { value: '是', label: '是' },
+    { value: '', label: '是' },
     { value: '1', label: '否' }
   ],
   file_status: [

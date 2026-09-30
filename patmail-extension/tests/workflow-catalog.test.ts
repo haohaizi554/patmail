@@ -3,10 +3,15 @@ import { matchPctMailTypes, pctVolumeSlot } from '../src/customer/mail-flow'
 import { pctRowsFromTable } from '../src/customer/pct-sheet'
 import {
   defaultPctWorkflow,
+  defaultPengchengWorkflow,
   defaultWorkflowCatalog,
+  duplicateWorkflow,
+  isRunnableWorkflow,
   normalizeWorkflowCatalog,
   packagedPctWorkflow,
   pctRuntimeFrom,
+  recipientModeForTask,
+  recipientModeOf,
   workflowFromSkills,
   workflowSender
 } from '../src/workflow/catalog'
@@ -33,8 +38,11 @@ const nodes = [
 describe('PCT 工作流目录', () => {
   it('PCT提醒是第一条默认工作流', () => {
     const catalog = defaultWorkflowCatalog()
-    expect(catalog.workflows[0]?.id).toBe('pct-reminder')
+    expect(catalog.workflows.map(item => item.id)).toEqual(['pct-reminder', 'pct-pengcheng'])
+    expect(catalog.workflows[0]?.system).toBe(true)
     expect(catalog.workflows[0]?.label).toBe('PCT提醒')
+    expect(catalog.workflows[1]?.label).toBe('PCT鹏城专案')
+    expect(catalog.workflows[1]?.steps.find(step => step.id === 'recipients')?.params.find(param => param.id === 'recipient_mode')?.value).toBe('lead')
     expect(catalog.workflows[0]?.steps.map(step => step.id)).toEqual([
       'entry', 'sheet', 'proc', 'mail-type', 'mail-style', 'recipients', 'sender', 'review', 'query'
     ])
@@ -52,7 +60,7 @@ describe('PCT 工作流目录', () => {
         edited
       ]
     })
-    expect(normalized.workflows.map(item => item.id)).toEqual(['pct-reminder', 'later'])
+    expect(normalized.workflows.map(item => item.id)).toEqual(['pct-reminder', 'pct-pengcheng', 'later'])
     const savedSheet = normalized.workflows[0]?.steps.find(step => step.id === 'sheet')
     expect(savedSheet?.params.find(param => param.id === 'col_our')?.value).toBe('内部编号')
     expect(normalized.workflows[0]?.steps.some(step => step.id === 'proc')).toBe(true)
@@ -94,6 +102,18 @@ describe('PCT 工作流目录', () => {
     expect(matchPctMailTypes(nodes).customerVolume?.name).toBe('提醒申请PCT（贵方案号）-深圳市')
   })
 
+  it('收件方式写在工作流参数上，副本沿用，不看流程名字', () => {
+    expect(recipientModeOf(defaultPctWorkflow())).toBe('ipr')
+    expect(recipientModeOf(defaultPengchengWorkflow())).toBe('lead')
+    const copy = duplicateWorkflow(defaultPengchengWorkflow(), ['pct-reminder', 'pct-pengcheng'], ['PCT提醒', 'PCT鹏城专案'])
+    expect(copy.id).not.toBe('pct-pengcheng')
+    expect(recipientModeOf(copy)).toBe('lead')
+    expect(isRunnableWorkflow(copy)).toBe(true)
+    expect(isRunnableWorkflow(workflowFromSkills('半条', ['people'], []))).toBe(false)
+    expect(recipientModeForTask({ workflowId: copy.id, recipientMode: 'ipr' }, [copy])).toBe('ipr')
+    expect(recipientModeForTask({ workflowId: 'pct-pengcheng' }, [defaultPengchengWorkflow()])).toBe('lead')
+  })
+
   it('每一步都挂着能看懂的本领，记号藏着，页面文案不带黑话', () => {
     const flow = defaultPctWorkflow()
     expect(flow.steps.map(step => step.skillId)).toEqual([
@@ -124,8 +144,83 @@ describe('PCT 工作流目录', () => {
     expect(created.label).toBe('周末提醒')
     expect(created.steps.map(step => step.skillId)).toEqual(['read-sheet', 'match-letter'])
     const normalized = normalizeWorkflowCatalog({ workflows: [created, defaultPctWorkflow()] })
-    expect(normalized.workflows.map(item => item.id)).toEqual(['pct-reminder', 'flow-1'])
-    expect(normalized.workflows[1]?.steps[0]?.params.find(param => param.id === 'col_our')?.value).toBe('我方文号')
+    expect(normalized.workflows.map(item => item.id)).toEqual(['pct-reminder', 'pct-pengcheng', 'flow-1'])
+    expect(normalized.workflows[2]?.steps[0]?.params.find(param => param.id === 'col_our')?.value).toBe('我方文号')
+  })
+
+  it('默认 PCT 的谁来收只是发给 IPR、抄送商务', () => {
+    const normalized = normalizeWorkflowCatalog({
+      workflows: [{
+        id: 'pct-reminder',
+        label: 'PCT博望',
+        summary: '',
+        steps: [{
+          id: 'recipients',
+          skillId: 'people',
+          title: '谁来收',
+          detail: '旧说明',
+          params: [
+            { id: 'inventor_customers', label: '发给第一发明人的客户', value: '某客户', help: '' },
+            { id: 'to_role', label: '这些客户的收件人', value: '第一发明人（技术联系人）', help: '' },
+            { id: 'cc_business_role', label: '其他客户的抄送', value: '商务', help: '' },
+            { id: 'cc_ipr_role', label: '这些客户的抄送', value: 'IPR', help: '' }
+          ]
+        }]
+      }]
+    })
+    const fresh = normalized.workflows[0]?.steps.find(step => step.id === 'recipients')
+    expect(fresh?.detail).toBe('收件人是表格里的 IPR，抄送是发文页的商务。')
+    expect(fresh?.params.filter(param => !param.hidden).map(param => [param.label, param.value])).toEqual([
+      ['收件人', 'IPR'],
+      ['抄送', '商务']
+    ])
+    expect(normalized.workflows[0]?.label).toBe('PCT提醒')
+    const copy = normalizeWorkflowCatalog({
+      workflows: [{
+        id: 'flow-1',
+        label: '旧副本',
+        summary: '',
+        steps: [{
+          id: 'extra-step-1',
+          skillId: 'people',
+          title: '谁来收',
+          detail: '旧说明',
+          params: [
+            { id: 'inventor_customers', label: '发给第一发明人的客户', value: '某客户', help: '' },
+            { id: 'to_role', label: '这些客户的收件人', value: '第一发明人（技术联系人）', help: '' }
+          ]
+        }]
+      }]
+    })
+    const copied = copy.workflows.find(item => item.id === 'flow-1')?.steps[0]
+    expect(copied?.params.filter(param => !param.hidden).map(param => [param.label, param.value])).toEqual([
+      ['收件人', 'IPR'],
+      ['抄送', '商务']
+    ])
+    expect(copied?.params.find(param => param.id === 'recipient_mode')).toMatchObject({ value: 'ipr', hidden: true })
+  })
+
+  it('工作流条数不封顶，副本可以改而且能再读出来', () => {
+    const extras = Array.from({ length: 9 }, (_, index) => ({
+      id: `flow-${index + 1}`,
+      label: `第${index + 1}条`,
+      summary: '',
+      steps: []
+    }))
+    const normalized = normalizeWorkflowCatalog({ workflows: extras })
+    expect(normalized.workflows).toHaveLength(11)
+    expect(normalized.workflows[0]?.id).toBe('pct-reminder')
+    const copy = duplicateWorkflow(defaultPctWorkflow(), normalized.workflows.map(item => item.id), normalized.workflows.map(item => item.label))
+    expect(copy.system).toBe(false)
+    expect(copy.label).toBe('PCT提醒 副本')
+    expect(copy.id).toBe('flow-10')
+    expect(copy.steps[0]?.id.startsWith('extra-step-')).toBe(true)
+    const again = normalizeWorkflowCatalog({ workflows: [...normalized.workflows, copy] })
+    const saved = again.workflows.find(item => item.id === copy.id)
+    expect(saved?.steps[0]?.skillId).toBe('start')
+    expect(saved?.steps.find(step => step.skillId === 'people')?.params.find(param => param.id === 'cc_business_role')?.value).toBe('商务')
+    const second = duplicateWorkflow(copy, again.workflows.map(item => item.id), again.workflows.map(item => item.label))
+    expect(second.label).toBe('PCT提醒 副本2')
   })
 
   it('点名的发文类型优先，名单里没有时仍按词来对', () => {

@@ -2,6 +2,8 @@ import { isPctTask } from './guards'
 import { isQueryGuid } from '../query/query-validator'
 import { resolvePctRuntime, type PctRuntimeConfig } from '../workflow/pct-config'
 import { pctMailTypeFor, pctVolumeSlot } from './mail-flow'
+import { sheetDisplayName } from './pct-recipients'
+import { normalizeCustomerName } from './skills'
 import type { PctTaskDraft, PctTaskRow } from './types'
 import { joinCaseVolumes, splitCaseVolumes } from './volume-list'
 
@@ -23,6 +25,7 @@ export function pctRowsFromTable(table: string[][], mailTypes: Array<{ id: strin
   const name = column(runtime.columns.customerName)
   const contact = column(runtime.columns.contactName)
   const ipr = column(runtime.columns.iprName)
+  const lead = runtime.columns.leadName ? column(runtime.columns.leadName) : -1
   const rows: PctTaskRow[] = []
   let skipped = 0
   for (const source of table.slice(1)) {
@@ -40,28 +43,82 @@ export function pctRowsFromTable(table: string[][], mailTypes: Array<{ id: strin
       customerName: cell(source, name),
       contactName: cell(source, contact),
       iprName: cell(source, ipr),
+      ...(lead >= 0 ? { leadName: sheetDisplayName(cell(source, lead)) } : {}),
       procLabel: cell(source, proc),
       mailTypeLabel: picked?.name ?? '',
       ...(picked ? { mailTypeId: picked.id, mailTypeRadioIndex: picked.radioIndex } : { mailTypeRadioIndex: slot.radioIndex })
     })
-    if (rows.length >= 300) break
+    if (rows.length >= 5000) break
   }
-  if (!rows.length) return { rows: [], notice: skipped ? '表格里没有同时带我方文号、并能判断发文类型的行。' : '表格里没有数据行。' }
-  const other = rows.filter(row => row.procLabel && row.procLabel !== runtime.procLabel).length
+  const carried = carryCustomerContacts(rows)
+  if (!carried.rows.length) return { rows: [], notice: skipped ? '表格里没有同时带我方文号、并能判断发文类型的行。' : '表格里没有数据行。' }
+  const other = carried.rows.filter(row => row.procLabel && row.procLabel !== runtime.procLabel).length
   const notice = [
-    `读到 ${rows.length} 行。`,
+    `读到 ${carried.rows.length} 行。`,
+    carried.filled ? `同客户后面空着的联系人，沿用了该客户最近一行。` : '',
+    runtime.columns.leadName && lead < 0 ? `表格没有「${runtime.columns.leadName}」这一列。` : '',
     other ? `其中 ${other} 行的处理事项不是「${runtime.procLabel}」。` : '',
     skipped ? `跳过 ${skipped} 行没有文号的记录。` : ''
   ].filter(Boolean).join('')
-  return { rows, notice }
+  return { rows: carried.rows, notice }
+}
+
+/** 同一客户的联系人常常只写在第一行。空行沿用该客户往上最近一行里已经写过的称呼。 */
+function carryCustomerContacts(rows: PctTaskRow[]): { rows: PctTaskRow[]; filled: number } {
+  const remembered = new Map<string, { contactName: string; iprName: string; leadName: string }>()
+  let filled = 0
+  const next = rows.map(row => {
+    const key = normalizeCustomerName(row.customerName)
+    if (!key) return row
+    const previous = remembered.get(key)
+    const contactName = row.contactName.trim() || previous?.contactName || ''
+    const iprName = row.iprName.trim() || previous?.iprName || ''
+    const leadName = (row.leadName ?? '').trim() || previous?.leadName || ''
+    const contactCarried = !row.contactName.trim() && Boolean(contactName)
+    const iprCarried = !row.iprName.trim() && Boolean(iprName)
+    const leadCarried = row.leadName !== undefined && !(row.leadName ?? '').trim() && Boolean(leadName)
+    remembered.set(key, { contactName, iprName, leadName })
+    if (!contactCarried && !iprCarried && !leadCarried) return row
+    filled += 1
+    return {
+      ...row,
+      contactName,
+      iprName,
+      ...(row.leadName !== undefined || leadCarried ? { leadName } : {}),
+      ...(contactCarried ? { contactCarried: true as const } : {}),
+      ...(iprCarried ? { iprCarried: true as const } : {}),
+      ...(leadCarried ? { leadCarried: true as const } : {})
+    }
+  })
+  return { rows: next, filled }
+}
+
+export const PCT_WORKFLOW_TASK_KEY = 'patmail.pctWorkflowTask'
+
+export function readWorkflowTask(): PctTaskDraft | null {
+  if (typeof sessionStorage === 'undefined') return null
+  try {
+    const raw = sessionStorage.getItem(PCT_WORKFLOW_TASK_KEY)
+    if (!raw) return null
+    const parsed: unknown = JSON.parse(raw)
+    return isPctTask(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+export function writeWorkflowTask(task: PctTaskDraft): void {
+  sessionStorage.setItem(PCT_WORKFLOW_TASK_KEY, JSON.stringify(clonePctTask(task)))
 }
 
 export function clonePctTask(task: PctTaskDraft): PctTaskDraft {
+  const workflowId = /^[a-z][a-z0-9-]{0,40}$/.test(task.workflowId) ? task.workflowId : 'pct-reminder'
   return {
-    workflowId: 'pct-reminder',
+    workflowId,
     ctrlProcId: task.ctrlProcId,
     createdAt: task.createdAt,
     confirmedProcIds: [...task.confirmedProcIds],
+    ...(task.recipientMode === 'ipr' || task.recipientMode === 'lead' ? { recipientMode: task.recipientMode } : {}),
     ...(task.mailsetId && task.mailsetLabel ? { mailsetId: task.mailsetId, mailsetLabel: task.mailsetLabel } : {}),
     ...(task.mailTo ? { mailTo: task.mailTo } : {}),
     ...(task.mailCc ? { mailCc: task.mailCc } : {}),
@@ -84,6 +141,10 @@ export function applyPctMailTypes(rows: PctTaskRow[], mailTypes: Array<{ id: str
     if (!prev) return row
     return {
       ...row,
+      ...(prev.leadName !== undefined ? { leadName: prev.leadName } : {}),
+      ...(prev.leadCarried ? { leadCarried: true as const } : {}),
+      ...(prev.contactCarried ? { contactCarried: true as const } : {}),
+      ...(prev.iprCarried ? { iprCarried: true as const } : {}),
       ...(prev.mailTo ? { mailTo: prev.mailTo } : {}),
       ...(prev.mailCc ? { mailCc: prev.mailCc } : {})
     }
@@ -122,6 +183,8 @@ export function buildPctTask(input: {
   confirmedProcIds: string[]
   sender?: { mailsetId: string; label: string }
   createdAt: string
+  workflowId?: string
+  recipientMode?: 'ipr' | 'lead'
 }): { ok: true; task: PctTaskDraft } | { ok: false; message: string } {
   if (!isQueryGuid(input.ctrlProcId)) {
     return {
@@ -131,11 +194,13 @@ export function buildPctTask(input: {
         : '处理事项还没对上原网站。'
     }
   }
+  const workflowId = input.workflowId && /^[a-z][a-z0-9-]{0,40}$/.test(input.workflowId) ? input.workflowId : 'pct-reminder'
   const task: PctTaskDraft = {
-    workflowId: 'pct-reminder',
+    workflowId,
     ctrlProcId: input.ctrlProcId,
     rows: input.rows,
     confirmedProcIds: input.confirmedProcIds.filter(item => isQueryGuid(item)),
+    ...(input.recipientMode === 'ipr' || input.recipientMode === 'lead' ? { recipientMode: input.recipientMode } : {}),
     ...(input.sender ? { mailsetId: input.sender.mailsetId, mailsetLabel: input.sender.label } : {}),
     createdAt: input.createdAt
   }

@@ -29,13 +29,15 @@ export function rowsFromSheetXml(xml: string, shared: string[]): string[][] {
   const rows: string[][] = []
   for (const match of xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
     const cells: string[] = []
-    for (const cell of match[1].matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)) {
-      const ref = cell[1].match(/\br="([A-Z]+\d+)"/i)?.[1] ?? ''
+    for (const cell of match[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+      const attrs = cell[1]
+      const body = cell[2] ?? ''
+      const ref = attrs.match(/\br="([A-Z]+\d+)"/i)?.[1] ?? ''
       const index = ref ? columnIndex(ref) : cells.length
       if (index < 0 || index > 80) continue
-      const kind = cell[1].match(/\bt="([^"]+)"/)?.[1] ?? ''
-      const value = cell[2].match(/<v>([\s\S]*?)<\/v>/)?.[1] ?? ''
-      const inline = [...cell[2].matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map(item => decodeXml(item[1])).join('')
+      const kind = attrs.match(/\bt="([^"]+)"/)?.[1] ?? ''
+      const value = body.match(/<v>([\s\S]*?)<\/v>/)?.[1] ?? ''
+      const inline = [...body.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map(item => decodeXml(item[1])).join('')
       let text = ''
       if (kind === 's') text = shared[Number(value)] ?? ''
       else if (kind === 'inlineStr') text = inline
@@ -44,7 +46,7 @@ export function rowsFromSheetXml(xml: string, shared: string[]): string[][] {
       cells[index] = text.trim()
     }
     if (cells.some(item => item)) rows.push(cells)
-    if (rows.length >= 301) break
+    if (rows.length >= 5000) break
   }
   return rows
 }

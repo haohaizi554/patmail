@@ -134,6 +134,9 @@ const bridge: MessageBridge = {
       case MessageType.SearchLimitMonitor:
         return { type: MessageType.SearchLimitMonitorResult,
           payload: await easyRuntime.searchLimitMonitor(message.payload.query) }
+      case MessageType.SubmitLimitMail:
+        return { type: MessageType.SubmitLimitMailResult,
+          payload: await easyRuntime.submitLimitMails(message.payload.userId, message.payload.items) }
       case MessageType.ExportCaseContacts:
         return { type: MessageType.ExportCaseContactsResult,
           payload: await easyRuntime.exportCaseContacts(message.payload.volumes) }
@@ -148,6 +151,12 @@ const bridge: MessageBridge = {
       case MessageType.ReadCaseDemands:
         return { type: MessageType.CaseDemandResult,
           payload: await easyRuntime.readCaseDemands(message.payload.caseId, signal) }
+      case MessageType.ReadCaseBusFlow:
+        return { type: MessageType.CaseBusFlowResult,
+          payload: await easyRuntime.readCaseBusFlow(message.payload.caseId, message.payload.procId, signal) }
+      case MessageType.LookupIcFlow:
+        return { type: MessageType.LookupIcFlowResult,
+          payload: await easyRuntime.lookupIcFlow(message.payload.rows) }
       case MessageType.ReadCustomerDemands:
         return { type: MessageType.CustomerDemandResult,
           payload: await easyRuntime.readCustomerDemands(message.payload.customerId, signal) }

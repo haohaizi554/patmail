@@ -10,7 +10,8 @@ import { isMessage, MessageType, type AppMessage, type BackgroundResponse } from
 import { hydrateWriteSwitch, watchWriteSwitch } from '../settings/write-switch'
 
 watchWriteSwitch()
-await hydrateWriteSwitch()
+// 扩展 Service Worker 不能用顶层 await，否则 Chrome 直接拒绝启动，工具栏点击没有监听。
+void hydrateWriteSwitch()
 
 const CALL_CHANNEL = 'patmail-call'
 const RESULT_CHANNEL = 'patmail-result'

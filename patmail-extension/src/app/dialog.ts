@@ -17,6 +17,39 @@ const state = reactive({
 
 let settle: ((confirmed: boolean) => void) | null = null
 
+export const progressDialog = reactive({
+  open: false,
+  title: '',
+  lines: [] as string[],
+  done: 0,
+  total: 1,
+  finished: false
+})
+
+export function beginProgress(title: string, total: number): void {
+  progressDialog.title = title
+  progressDialog.lines = []
+  progressDialog.done = 0
+  progressDialog.total = Math.max(total, 1)
+  progressDialog.finished = false
+  progressDialog.open = true
+}
+
+export function logProgress(line: string, done?: number): void {
+  progressDialog.lines.push(line)
+  if (done !== undefined) progressDialog.done = done
+}
+
+export function endProgress(): void {
+  progressDialog.finished = true
+  progressDialog.done = progressDialog.total
+}
+
+export function closeProgress(): void {
+  if (!progressDialog.finished) return
+  progressDialog.open = false
+}
+
 export function dialogState() {
   return state
 }

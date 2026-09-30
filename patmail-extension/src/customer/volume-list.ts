@@ -9,7 +9,7 @@ export function splitCaseVolumes(text: string): string[] {
     if (!volume || volume.length > 80 || seen.has(volume)) continue
     seen.add(volume)
     output.push(volume)
-    if (output.length >= 300) break
+    if (output.length >= 5000) break
   }
   return output
 }

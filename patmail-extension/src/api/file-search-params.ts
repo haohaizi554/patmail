@@ -121,6 +121,12 @@ export function buildGetSearchFilesParams(
 
 const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor'])
 
+/** 页面「是否包含结案」：空字符串是「是」，结案文件仍在结果里。`1` 才是「否」，结案会被丢掉。 */
+export function closedCaseParam(value: string | undefined): string {
+  const text = value?.trim() ?? ''
+  return text === '1' || text === '否' ? '1' : ''
+}
+
 const PRECISE_FILTERS = new Set([
   'case_volume', 'app_no', 'file_name', 'file_name_batch', 'case_volume_customer',
   'pub_no', 'issue_no', 'inventor_name', 'case_name', 'contact_name_zf',
@@ -202,6 +208,7 @@ export function buildGetSearchFilesFromFields(
     if ((!specified || blankDefault) && field === 'fileclass') value = environment.fileClass
     if ((!specified || blankDefault) && field === 'case_type') value = environment.caseTypeId
     if (field === 'app_no') value = value.trim().replace(/\./g, '')
+    if (field === 'is_close') value = closedCaseParam(value)
     values[field] = value
   }
   values.pageIndex = String(page.pageIndex)

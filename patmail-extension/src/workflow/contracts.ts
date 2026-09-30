@@ -40,6 +40,7 @@ export function lastStatusParams(mailId: string, flowType: string): URLSearchPar
   params.set('Call', 'GetFlowLastStatus')
   params.set('obj_id', mailId)
   params.set('flow_type', flowType)
+  params.set('log_pagename', FLOW_PAGE)
   return params
 }
 
@@ -221,26 +222,28 @@ export function readUrgency(data: unknown): { ok: true; items: WorkflowUrgency[]
   return { ok: true, items }
 }
 
-/** 节点字段来自页面脚本。响应正文未保存，调用方必须把结果标成未核对。 */
-export function readFlowSubmit(data: unknown): { ok: true; nodes: WorkflowNode[]; contract: 'unverified' } | { ok: false; message: string } {
+/** 2026-09-30 的响应已核对：Result 是节点数组，allow_skip 可以是空字符串，is_parallel 与 need_all_audit 是 0 或 1。 */
+export function readFlowSubmit(data: unknown): { ok: true; nodes: WorkflowNode[]; contract: 'verified' } | { ok: false; message: string } {
   if (!isRecord(data)) return { ok: false, message: 'GetFlowSubmit 响应无效。' }
   const client = readClientInfo(data.ClientInfo)
   if (!client.ok || client.data.IsLogin === false) return { ok: false, message: '读取下一节点时登录已失效。' }
-  if (!Array.isArray(data.Result)) return { ok: false, message: 'GetFlowSubmit 的 Result 不是数组。响应正文尚未核对。' }
+  if (!Array.isArray(data.Result)) return { ok: false, message: 'GetFlowSubmit 的 Result 不是数组。' }
   const nodes = data.Result.flatMap(item => {
     if (!isRecord(item) || typeof item.node_id !== 'string' || !isQueryGuid(item.node_id)) return []
     const people = reviewersOf(item)
     const node: WorkflowNode = {
       listId: text(item, 'list_id'), seq: typeof item.seq === 'number' ? item.seq : null, next: text(item, 'next'),
       nodeId: item.node_id, nodeCode: text(item, 'node_code'), nodeName: text(item, 'node_name_zh_cn'),
-      allowSkip: typeof item.allow_skip === 'boolean' ? item.allow_skip : null, userType: text(item, 'user_type'),
+      allowSkip: typeof item.allow_skip === 'boolean' ? item.allow_skip : null,
+      allowEdit: typeof item.allow_edit === 'boolean' ? item.allow_edit : null,
+      userType: text(item, 'user_type'),
       parallel: item.is_parallel === 1 ? true : item.is_parallel === 0 ? false : null,
       needAllAudit: item.need_all_audit === 1 ? true : item.need_all_audit === 0 ? false : null,
       reviewers: people.reviewers, reviewerFormat: people.reviewerFormat
     }
     return [node]
   })
-  return { ok: true, nodes, contract: 'unverified' }
+  return { ok: true, nodes, contract: 'verified' }
 }
 
 export function readLastStatus(data: unknown): { ok: true; present: boolean; token: string | null } | { ok: false; message: string } {

@@ -1,6 +1,7 @@
 import { isRecord, readClientInfo } from '../api/response-guards'
 import { apiError, type ApiResult } from '../api/types'
 import { appendRecipientField } from '../mail/easy/contracts'
+import { sheetRecipientNames, type PctRecipientMode } from './pct-recipients'
 import { isQueryGuid } from '../query/query-validator'
 import type { PctTaskRow } from './types'
 
@@ -245,7 +246,12 @@ function oneEmail(contacts: CustomerDirectoryContact[], name: string): { status:
 }
 
 /** 表格里还是称呼时，用客户资料页联系人补上唯一邮箱。对上多个就不选。 */
-export function fillSheetEmails(rows: PctTaskRow[], contacts: CustomerDirectoryContact[]): { rows: PctTaskRow[]; notes: string[] } {
+export function fillSheetEmails(
+  rows: PctTaskRow[],
+  contacts: CustomerDirectoryContact[],
+  specials: ReadonlySet<string> = new Set(),
+  mode: PctRecipientMode = 'ipr'
+): { rows: PctTaskRow[]; notes: string[] } {
   const ambiguous: string[] = []
   let missed = 0
   const next = rows.map(row => {
@@ -259,8 +265,9 @@ export function fillSheetEmails(rows: PctTaskRow[], contacts: CustomerDirectoryC
       else missed += 1
       return current
     }
-    mailTo = apply(row.contactName, mailTo)
-    mailCc = apply(row.iprName, mailCc)
+    const names = sheetRecipientNames(row, specials, mode)
+    mailTo = apply(names.to, mailTo)
+    mailCc = apply(names.cc, mailCc)
     return {
       ...row,
       ...(mailTo ? { mailTo } : {}),

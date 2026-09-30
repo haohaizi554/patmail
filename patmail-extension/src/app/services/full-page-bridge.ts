@@ -5,10 +5,11 @@ import { sendToBackground } from '../../utils/runtime'
 export function createFullPageBridge(): MessageBridge {
   return {
     async request(message): Promise<ContentResponse> {
-      const contactExport = message.type === MessageType.ExportCaseContacts
+      const contactExport = message.type === MessageType.ExportCaseContacts || message.type === MessageType.LookupIcFlow
       const slow = contactExport || message.type === MessageType.SearchFiles || message.type === MessageType.SearchLimitMonitor
         || message.type === MessageType.ListMailProcesses || message.type === MessageType.ListFlowReviewers
         || message.type === MessageType.ReadCaseDemands
+        || message.type === MessageType.ReadCaseBusFlow
         || message.type === MessageType.ReadCustomerDemands
         || message.type === MessageType.ReadCustomerDirectory
         || message.type === MessageType.ReadMailContacts

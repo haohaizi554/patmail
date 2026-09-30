@@ -60,16 +60,19 @@ describe('案件联系人导出', () => {
     ])
   })
 
-  it('只有创建鹏城实验室才默认解锁导出', () => {
-    expect(caseContactSkills('鹏城实验室')).toEqual(['case-contacts'])
-    expect(caseContactSkills(' 鹏城 实验室 ')).toEqual(['case-contacts'])
+  it('只有当前名称是鹏城国家实验室才解锁导出', () => {
+    expect(caseContactSkills('鹏城国家实验室')).toEqual(['case-contacts'])
+    expect(caseContactSkills(' 鹏城 国家 实验室 ')).toEqual(['case-contacts'])
+    expect(caseContactSkills('鹏城实验室')).toBeUndefined()
     expect(caseContactSkills('其他客户')).toBeUndefined()
-    expect(hasCaseContactSkill({ name: '鹏城实验室' })).toBe(true)
+    expect(hasCaseContactSkill({ name: '鹏城国家实验室' })).toBe(true)
     expect(hasCaseContactSkill({ name: '其他客户' })).toBe(false)
-    expect(caseContactSkills('改名以后', ['case-contacts'])).toEqual(['case-contacts'])
-    expect(caseContactExportBlock('http://183.36.43.66:88', [{ name: '鹏城实验室' }])).toContain('鹏城实验室的 EASY')
+    expect(hasCaseContactSkill({ name: '改名以后' })).toBe(false)
+    expect(caseContactSkills('改名以后')).toBeUndefined()
+    expect(caseContactExportBlock('http://183.36.43.66:88', [{ name: '鹏城国家实验室' }])).toContain('鹏城国家实验室的 EASY')
     expect(caseContactExportBlock(PCL_ORIGIN, [{ name: '其他客户' }])).toContain('先创建客户')
-    expect(caseContactExportBlock(PCL_ORIGIN, [{ name: '鹏城实验室' }])).toBe('')
+    expect(caseContactExportBlock(PCL_ORIGIN, [{ name: '鹏城实验室' }])).toContain('先创建客户')
+    expect(caseContactExportBlock(PCL_ORIGIN, [{ name: '鹏城国家实验室' }])).toBe('')
     expect(isCustomerProfile({
       id: 'customer-1', name: '鹏城实验室', baseTemplateId: 'manual', overrides: {},
       skills: ['case-contacts'], enabled: true,

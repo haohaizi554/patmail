@@ -201,7 +201,8 @@
 .sea-card em { font-style: normal; color: #ff5c98; font-size: 12px; font-weight: 700; }
 .sea-badge { display: inline-flex; width: fit-content; background: #ffe4ef; color: #ff3f86; border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 700; }
 .sea-add { border: 2px dashed #ffb3d0; background: #fffafd; box-shadow: none; }
-.sea-remove { position: absolute; right: 12px; bottom: 12px; z-index: 1; border: 0; background: transparent; color: #e45b92; font: inherit; font-size: 12px; cursor: pointer; }
+.sea-actions { display: flex; gap: 12px; margin-top: 8px; }
+.sea-remove { position: static; z-index: 1; border: 0; background: transparent; color: #e45b92; font: inherit; font-size: 12px; cursor: pointer; padding: 0; }
 .flow-value .theme-select { flex: 1; min-width: 0; width: 100%; }
 .flow-fixed { margin: 0; color: #3d3550; font-weight: 400; }
 .flow-head { min-height: 0; align-items: center; }

@@ -6,6 +6,7 @@ export interface PctRuntimeConfig {
     customerName: string
     contactName: string
     iprName: string
+    leadName: string
     procLabel: string
   }
   procLabel: string
@@ -30,6 +31,7 @@ export const DEFAULT_PCT_RUNTIME: PctRuntimeConfig = {
     customerName: '客户名称',
     contactName: '第一客户联系人',
     iprName: '客户联系人(IPR)',
+    leadName: '',
     procLabel: '处理事项'
   },
   procLabel: '提醒申请PCT',
@@ -87,6 +89,7 @@ export function resolvePctRuntime(input?: PctRuntimeInput | null): PctRuntimeCon
       customerName: filled(columns.customerName, base.columns.customerName),
       contactName: filled(columns.contactName, base.columns.contactName),
       iprName: filled(columns.iprName, base.columns.iprName),
+      leadName: asText(columns.leadName),
       procLabel: filled(columns.procLabel, base.columns.procLabel)
     },
     procLabel: filled(source.procLabel, base.procLabel),

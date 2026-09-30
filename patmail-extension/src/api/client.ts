@@ -1,6 +1,7 @@
 import { isLiveWriteCall } from '../automation/live-readonly-policy'
 import { extractReadonlyEvidence, readonlyContract } from '../automation/readonly-contracts'
 import { CURRENT_ENVIRONMENT, PCL_ORIGIN, trustedOrigin } from './config'
+import { CASE_CONTACT_CUSTOMER_NAME } from '../customer/skills'
 import { isWriteSwitchOpen } from '../settings/write-switch'
 import { DictionaryService } from './dictionaries'
 import type { DictionaryLoadRequest, DictionarySnapshot } from './dictionaries'
@@ -28,12 +29,15 @@ import { WorkflowStore } from '../workflow/store'
 import type { WorkflowView } from '../workflow/types'
 import type { PlanInput } from '../workflow/planner'
 import { loadCaseDemandText, type CaseDemandAsset } from '../mail/easy/case-demand'
+import { loadPctSendGate, type IcFlowAsk, type IcFlowHit, type PctSendGate } from '../customer/pct-flow-status'
+import { lookupIcFlow } from '../customer/ic-flow-lookup'
 import { loadCustomerDemands, loadCustomerDirectory, type CustomerDemandAsset, type CustomerDirectoryAsset } from '../customer/customer-page'
 import { listParams, readMailInfo } from '../mail/easy/contracts'
 import { loadMailContactText, type MailContactAsset } from '../mail/easy/mail-contacts'
 import { isQueryGuid } from '../query/query-validator'
 import { EasyMailReadService } from '../mail/easy/read-service'
 import type { ExistingMailDiagnostic } from '../shared/message'
+import { submitLimitMailBatch, type LimitMailSubmitItem, type LimitMailSubmitResult } from '../customer/limit-mail-submit'
 import { loadCaseContacts } from '../case-contact/load'
 import type { CaseContactExport } from '../case-contact/query'
 import { EasyTransport, type EasyOperation, type TransportOptions } from './transport'
@@ -414,6 +418,30 @@ export class EasyRuntime {
     })()
   }
 
+  /** 案件查询按我方文号找案子，再读这条处理事项的发文流程。期限监控里结束的事项也能对上。 */
+  lookupIcFlow(rows: IcFlowAsk[]): Promise<ApiResult<{ items: IcFlowHit[] }>> {
+    return (async (): Promise<ApiResult<{ items: IcFlowHit[] }>> => {
+      if (!(await this.confirmAccountRead())) {
+        return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
+      }
+      const result = await lookupIcFlow(rows, (operation, params) => this.transport.post(operation, params))
+      if (!result.ok && result.error.code === 'SESSION_EXPIRED') this.session.expire()
+      return result
+    })()
+  }
+
+  /** 案件页流程图。用来看这一件处理事项的发文是待审核还是已经结束。 */
+  readCaseBusFlow(caseId: string, procId: string, signal?: AbortSignal): Promise<ApiResult<{ gate: PctSendGate }>> {
+    return (async (): Promise<ApiResult<{ gate: PctSendGate }>> => {
+      if (!(await this.confirmAccountRead())) {
+        return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
+      }
+      const result = await loadPctSendGate(caseId, procId, (params, next) => this.transport.post('caseBusFlow', params, next), signal)
+      if (!result.ok && result.error.code === 'SESSION_EXPIRED') this.session.expire()
+      return result
+    })()
+  }
+
   /** 客户资料页要求表。只认客户编号，不打开邮件页，也不改要求。 */
   readCustomerDemands(customerId: string, signal?: AbortSignal): Promise<ApiResult<CustomerDemandAsset>> {
     return this.readCustomerPage(customerId, (params, next) => this.transport.post('customerPageDemand', params, next), loadCustomerDemands, signal)
@@ -532,7 +560,7 @@ export class EasyRuntime {
   exportCaseContacts(volumes: string[]): Promise<ApiResult<CaseContactExport>> {
     return (async (): Promise<ApiResult<CaseContactExport>> => {
       if (trustedOrigin(this.pageOrigin) !== PCL_ORIGIN) {
-        return apiError('INVALID_ORIGIN', '案件联系人只能在鹏城实验室的 EASY 上读取。')
+        return apiError('INVALID_ORIGIN', `案件联系人只能在${CASE_CONTACT_CUSTOMER_NAME}的 EASY 上读取。`)
       }
       if (!(await this.confirmAccountRead())) {
         return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
@@ -545,7 +573,7 @@ export class EasyRuntime {
       if (!result.ok && result.error.code === 'SESSION_EXPIRED') {
         const again = await this.checkSession()
         if (again.ok && again.data.status === 'authenticated') {
-          return apiError('BUSINESS_ERROR', '当前账号已登录。案件查询没有被原网站接受，请刷新鹏城实验室页面后再试一次。')
+          return apiError('BUSINESS_ERROR', `当前账号已登录。案件查询没有被原网站接受，请刷新${CASE_CONTACT_CUSTOMER_NAME}页面后再试一次。`)
         }
         this.session.expire()
       }
@@ -573,6 +601,10 @@ export class EasyRuntime {
       }
       return result
     })()
+  }
+
+  submitLimitMails(userId: string, items: LimitMailSubmitItem[]): Promise<{ stopped: boolean; results: LimitMailSubmitResult[] }> {
+    return submitLimitMailBatch(this.transport, userId, items)
   }
 
   cancelLimitMonitor(): void {
