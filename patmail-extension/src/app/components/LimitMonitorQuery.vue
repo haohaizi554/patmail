@@ -328,8 +328,10 @@ async function onSubmitAsk(): Promise<void> {
     const item = planned.items[index]
     const row = involved.find(entry => entry.procId === item?.procId)
     const label = row?.caseVolume || item?.procId || ''
+    logProgress(`正在核对 ${label} 的发文流程。`, index)
+    if (row) await markSendGates([row], true)
     logProgress(`正在处理 ${label}。`, index)
-    const text = await runLimitMailSubmit(props.bridge, props.userId, item ? [item] : [])
+    const text = await runLimitMailSubmit(props.bridge, props.userId, item ? [item] : [], gates.value)
     notes.push(text)
     logProgress(`${label}：${text}`, index + 1)
     if (item && text.startsWith('已提交')) {

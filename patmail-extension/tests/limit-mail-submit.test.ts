@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { EasyTransport } from '../src/api/transport'
 import {
-  buildMailSubmit, limitMailItems, pickMailSubmitNodes, readLimitMailCustomer, readMailSubmit, submitLimitMailBatch,
+  buildMailSubmit, limitMailItems, nextLimitMailAttempt, pickMailSubmitNodes, readLimitMailCustomer, readMailSubmit, submitLimitMailBatch,
   type LimitMailSubmitItem
 } from '../src/customer/limit-mail-submit'
 import type { WorkflowNode } from '../src/workflow/types'
@@ -289,5 +289,16 @@ describe('limit mail submit', () => {
       current, next: { ...current, nodeId: next, nodeCode: 'END', listId: list2, seq: 9 },
       reviewer: { id: user, name: '本人' }, urgencyId: urgency
     }).params).toBeNull()
+  })
+
+  it('结束流程后回传还没提交审核时，不再沿用上次已提交的记录', () => {
+    const item = draft()
+    const mark = { procId: proc, mailId: mail, state: 'submitted' as const }
+    const again = nextLimitMailAttempt(item, mark, 'done')
+    expect(again.action).toBe('send')
+    if (again.action === 'send') expect(again.item.mailId).toBeUndefined()
+    expect(nextLimitMailAttempt(item, mark, 'open').action).toBe('send')
+    expect(nextLimitMailAttempt(item, mark, 'pending')).toEqual({ action: 'skip', reason: 'pending' })
+    expect(nextLimitMailAttempt(item, mark, undefined)).toEqual({ action: 'skip', reason: 'remembered' })
   })
 })

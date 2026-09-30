@@ -226,6 +226,30 @@ export function writeLimitMailMark(mark: LimitMailMark): void {
   sessionStorage.setItem(LEDGER_KEY, JSON.stringify(marks.slice(-100)))
 }
 
+export function forgetLimitMailMark(procId: string): void {
+  const marks = readLimitMailLedger().filter(item => item.procId.toLowerCase() !== procId.toLowerCase())
+  sessionStorage.setItem(LEDGER_KEY, JSON.stringify(marks.slice(-100)))
+}
+
+/** 结束流程后回传是还没提交审核时，不再沿用上次的发文。还在审核里才跳过。 */
+export function nextLimitMailAttempt(
+  item: LimitMailSubmitItem,
+  mark: LimitMailMark | undefined,
+  gate: 'open' | 'pending' | 'done' | undefined
+): { action: 'send'; item: LimitMailSubmitItem } | { action: 'skip'; reason: 'pending' | 'remembered' } | { action: 'stop'; message: string } {
+  if (gate === 'open' || gate === 'done') {
+    const fresh = { ...item }
+    delete fresh.mailId
+    return { action: 'send', item: fresh }
+  }
+  if (mark?.state === 'submitted') return { action: 'skip', reason: gate === 'pending' ? 'pending' : 'remembered' }
+  if (mark?.state === 'unknown') {
+    return { action: 'stop', message: '有一件发文的创建或提交结果还没确认，没有再次创建，也没有再次提交。' }
+  }
+  if (mark?.state === 'created' && mark.mailId) return { action: 'send', item: { ...item, mailId: mark.mailId } }
+  return { action: 'send', item }
+}
+
 function failed(procId: string, message: string, mailId = ''): LimitMailSubmitResult {
   return { procId, mailId, state: 'failed', message }
 }
@@ -439,22 +463,30 @@ export function summarizeLimitMailSubmit(results: LimitMailSubmitResult[], stopp
   return stopped ? `${head}${last.message}` : head
 }
 
-export async function runLimitMailSubmit(bridge: MessageBridge, userId: string, items: LimitMailSubmitItem[]): Promise<string> {
+export async function runLimitMailSubmit(
+  bridge: MessageBridge,
+  userId: string,
+  items: LimitMailSubmitItem[],
+  gates: Record<string, 'open' | 'pending' | 'done'> = {}
+): Promise<string> {
   const ledger = readLimitMailLedger()
   const pending: LimitMailSubmitItem[] = []
-  const skipped: string[] = []
+  let skipReason: 'pending' | 'remembered' | '' = ''
   for (const item of items) {
     const mark = ledger.find(entry => entry.procId.toLowerCase() === item.procId.toLowerCase())
-    if (mark?.state === 'submitted') {
-      skipped.push(item.procId)
+    const next = nextLimitMailAttempt(item, mark, gates[item.procId])
+    if (next.action === 'stop') return next.message
+    if (next.action === 'skip') {
+      skipReason = next.reason
       continue
     }
-    if (mark?.state === 'unknown') {
-      return '有一件发文的创建或提交结果还没确认，没有再次创建，也没有再次提交。'
-    }
-    pending.push(mark?.state === 'created' && mark.mailId ? { ...item, mailId: mark.mailId } : item)
+    if (mark && (gates[item.procId] === 'open' || gates[item.procId] === 'done')) forgetLimitMailMark(item.procId)
+    pending.push(next.item)
   }
-  if (!pending.length) return skipped.length ? '这些事项已经提交过，没有再创建。' : '没有要提交的事项。'
+  if (!pending.length) {
+    if (skipReason === 'pending') return '这些事项还在审核里，没有再创建。'
+    return skipReason ? '这些事项已经提交过，没有再创建。' : '没有要提交的事项。'
+  }
   const response = await bridge.request({ type: MessageType.SubmitLimitMail, payload: { userId, items: pending } })
   if (response.type === MessageType.Error) return response.payload.message
   if (response.type !== MessageType.SubmitLimitMailResult) return '提交返回了意外结果，没有继续。'

@@ -360,7 +360,7 @@ function onSubmitAsk(): void {
     return
   }
   message.value = '正在创建发文并提交给当前登录人。'
-  void runLimitMailSubmit(bridge, connection.value.operatorId, planned.items).then(text => {
+  void runLimitMailSubmit(bridge, connection.value.operatorId, planned.items, gates.value).then(text => {
     message.value = text
   })
 }
