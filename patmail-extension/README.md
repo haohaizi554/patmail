@@ -1,10 +1,12 @@
 # PatMail Chrome Extension
 
-PatMail Manifest V3、Vue 3、TypeScript、Vite 插件。Phase 1 的 L2 表单语义扫描器保留；Phase 2.1 新增只读 EASY 登录状态检测和文件查询；Phase 2.2 在同一套 API Runtime 上读取历史查询模板，并在本机保存查询模板和客户覆盖。插件不提交原网站表单，不写入或删除原网站历史模板，也不保存扫描结果。
+PatMail 是 Manifest V3、Vue 3、TypeScript、Vite 插件。它绑在已经登录的 EASY 标签页上：只读查询走原站会话，发文任务在写开关打开时创建发文并提交给当前登录人审核。
+
+工作台是 `app.html`。浮窗用来看连接状态和打开工作台。请求路径是 `app.html → Service Worker → 已绑定的 EASY 标签页 → EASY 接口`。HTTP 由内容脚本发出，插件自己不保存 EASY 登录态。
 
 ## 安装、构建和加载
 
-需要 Node.js 20.19+ 或 22.12+、pnpm，以及 Chrome 114+：
+需要 Node.js 20.19+ 或 22.12+、pnpm，以及 Chrome 114+。
 
 ```sh
 cd patmail-extension
@@ -12,106 +14,107 @@ pnpm install
 pnpm test
 pnpm typecheck
 pnpm build
-pnpm test:e2e
 ```
 
-打开 `chrome://extensions`，启用开发者模式，选择「加载已解压的扩展程序」，加载本目录的 `dist/`。修改源码后重新构建，在扩展管理页刷新扩展，并刷新目标网页。EASY 现场验收清单见 [docs/phase2-1-acceptance.md](docs/phase2-1-acceptance.md)；原扫描器验收见 [docs/phase1-acceptance.md](docs/phase1-acceptance.md)。
+打开 `chrome://extensions`，启用开发者模式，选择「加载已解压的扩展程序」，加载本目录的 `dist/`。改完源码要重新构建，再在扩展管理页刷新 PatMail，并刷新已登录的 EASY 标签页，然后重新打开工作台。只运行构建不会换掉浏览器里已经加载的后台。
+
+`pnpm test:e2e` 用真实 Chromium 加载 `dist/`。`pnpm test:e2e:limits` 只验期限查询，并拦截整个 EASY Origin，不会打到线上。Playwright 只在测试依赖里，正式 `dist/` 没有浏览器驱动。
+
+Manifest 对 `http://183.36.43.66:88/*`、`https://ip.pcl.ac.cn:81/*`、`http://127.0.0.1/*` 和 `http://localhost/*` 注入内容脚本。后两个只给本地页面用。业务请求只信任固定的 EASY 源。权限是 `tabs` 和 `storage`，没有 `scripting`、`activeTab` 或 `<all_urls>`。
+
+## 工作台
+
+在 EASY 页面刷新后，右侧浮窗可以打开工作台。左侧页面：
+
+| 页面 | 做什么 |
+|---|---|
+| 首页 | 连接和入口 |
+| 文件管理 | 按文号、申请号、客户或附件名查文件 |
+| 期限监控 | `GetLimitMonitorCaseList`。可按表格文号把还没结束的事项查出来 |
+| 客户管理 | 本机客户资料。期限发文方式、查询模板覆盖记在这里 |
+| 发文映射 | 本机发文规则 |
+| 发文任务 | 自选文件发文，或按工作流传入表格后提交到 EASY |
+| 发文记录 | 本机执行记录 |
+| 文件查询模板 | 本机查询模板。历史模板从原站只读加载 |
+| 邮件草稿 | 本机草稿预览 |
+| 工作流 | PCT 提醒、鹏城专案和特例客户 |
+| 系统设置 | 头像菜单进入。写开关在这里 |
+
+查询条件下面的提示只放当前查询或确认勾选的一句说明。提交结果不堆在这里。
 
 ### 查询没有发出时
 
-完整工作台的请求路径是 `app.html → Service Worker → 已绑定的 EASY 标签页 → EASY 接口`。HTTP 请求由 EASY 页面里的 Content Script 发起，因此应在**已绑定的 EASY 标签页**打开 Network，期限查询筛选 `Report.ashx`，检查 POST 表单里的 `Call=GetLimitMonitorCaseList`、`is_first=false` 和实际条件。仅查看 `app.html` 的 Network 不能判断 EASY 请求是否已发出。
+在**已绑定的 EASY 标签页**打开 Network。期限查询筛选 `Report.ashx`，看 POST 里的 `Call=GetLimitMonitorCaseList`、`is_first=false` 和实际条件。只看 `app.html` 的 Network 不能判断请求有没有发出。
 
-更新本地构建后，依次重新加载 PatMail 扩展、刷新已登录的 EASY 标签页，再重新打开 PatMail 工作台。仅运行构建不会更新浏览器中已加载的扩展后台。若页面提示后台无法识别消息、消息通道关闭或页面脚本不认识请求，按上述顺序更新三个运行上下文后重试。查询条件区的下拉选项读取提示与结果区的查询错误分开显示；下拉加载失败不等于查询结果为空。
+下拉加载失败和查询结果为空是两件事，分开显示。页面若提示后台无法识别消息、消息通道关闭或页面脚本不认识请求，按「重新构建 → 刷新扩展 → 刷新 EASY 标签页 → 重新打开工作台」做一遍。
 
-`pnpm test:e2e:limits` 单独验证期限查询：真实 Chromium 加载 `dist/`，填写客户名称并点击查询，检查请求参数、结果渲染、会话失效及 HTTP 错误。测试拦截整个 EASY Origin，不会调用线上服务；它也包含在 `pnpm test:e2e` 中。
+## 发文任务
 
-Manifest 目前仅对 `http://183.36.43.66:88/*`、`http://127.0.0.1/*` 和 `http://localhost/*` 自动注入；后两者只供本地页面扫描开发和验收，业务 API Runtime 仅信任固定 EASY Origin。浏览器内部页、其他网站及 `file://` 不在授权范围内。Popup 使用 `tabs` 读取活动标签页并发送消息；`storage` 只保存 PatMail 本地查询模板、客户配置和发文规则。没有 `scripting`、`activeTab` 或 `<all_urls>` 权限。EASY 主机显式限定 88 端口，本地地址允许所有端口。Chrome 的 host permission 忽略路径段，因此它是主机/端口级授权；content script 再按匹配规则自动注入。参见 [Chrome 匹配模式文档](https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns)。
+主路径是「按工作流发文」。
 
-## 使用方式
+1. 工作流里选好 PCT 提醒或鹏城专案，并有发文类型。
+2. 发文任务传入 `.xlsx`。读客户、我方文号、处理事项、IPR、技术负责人、第一联系人。邮箱列不读。
+3. 上方期限监控只列出还没结束的事项。表格文号另走案件查询，结束的事项也能对上。
+4. 勾选审核状态为「还没提交审核」的事项，确认后点「提交到 EASY」。
 
-在授权页面刷新后，右侧出现 360×600 的 PatMail 浮窗。拖动标题栏移动，右上角可收起、展开或关闭；关闭只卸载当前页面实例，刷新后重新出现，也可从 Popup 点「打开浮窗」。EASY 页面默认显示「文件查询」。查询来源默认是手动查询：确认已登录后可输入我方文号、申请号、客户名称或附件名称，查询并翻页。切到历史模板或客户模板后，先预览最终条件，再点查询。查询不要求原站的 FileSearch iframe 已打开；没有有效筛选条件不会发全量请求。本地页面只显示扫描功能。
+合并和原站期限监控的「同客户合并」同一套键：先看客户，客户名称为空时这一行单独成封；再看这一行的收件人和抄送。相同的合成一封，一次 `LimitMailCustomer`，`_file_ids` 用分号连接，`mailstyle=1`。不同 IPR、不同客户、不同抄送保持多封。
 
-「页面扫描」仍可获取控件数量、可见/隐藏数量和语义识别数量；「查看 DOM」展开最多 20 个控件的调试预览；「复制 JSON」复制完整 PageSnapshot V2。大页面不会自动把完整 JSON 渲染在浮窗中。
+地址从发文页联系人对上，不从表格邮箱列抄。
 
-本地验收页的真实 Chromium 回归可运行：
+| 模式 | 收件人 | 抄送 |
+|---|---|---|
+| PCT 提醒（`ipr`） | 表格 IPR | 发文页商务 |
+| 鹏城专案（`lead`） | 技术负责人，去掉末尾拼音括号 | IPR 和发文页商务 |
+| 工作流里写下的特例客户 | 第一发明人 | IPR |
 
-```sh
-pnpm exec playwright install chromium
-pnpm test:e2e
-```
+写入前去掉原站预填的 `chenjch02@pcl.ac.cn`。对不上邮箱、对上多个邮箱、没有商务邮箱，或发明人没有可用邮箱时，这一封不提交。回传后这些事项的审核状态是「异常」。同一次回传里的状态刷新不会把「异常」改掉。换一张表或换一条工作流会清掉。
 
-Playwright 只属于测试依赖，正式扩展 `dist/` 中没有浏览器驱动或自动点击逻辑。
+提交给当前登录人。审核人 GUID 必须就是当前用户，不能改选别人。下一节点是结束、并行审核或需要全部审核时不提交。`NeedConfirmFillAgency` 不代为确认。响应无法确认时不自动再创建、不自动再提交。不调用 `EndEmailFlowd`，所以插件提交不等于审核通过。
 
-## 当前目录
+进度弹窗：
+
+- 每一行左边是 `HH:mm:ss`。
+- 进度条右边是百分比。
+- 最底下实时统计成功、失败、异常的件数。某封失败导致后面没再跑时，多一项跳过。
+- 全部结束后，日志最后一行是 `统计：成功 n 件，失败 n 件，异常 n 件`。
+- 件数按处理事项计，不按信封计。
+
+一次可以提交超过 20 件。页面按封逐次请求，避免一整批挤在同一次消息里。审核状态回传的案件查询一次最多 40 件。
+
+写开关键是 `patmail.writeSwitch.v1`，存在 `chrome.storage.local`。没存过时默认打开。扩展进程要等读取结束，读完之前视为关闭。关闭后 `LimitMailCustomer`、保存收件人和 `MailSubmit` 都不会发。
+
+提交账本在当前标签页的 `sessionStorage`（`patmail.limitMailSubmit.v1`），只留最近 500 条。还在审核里的事项会跳过。已经创建但没提交的草稿会沿用，不会再 `LimitMailCustomer` 一次。流程回到「还没提交审核」或「已经审核通过」后，不再沿用上一次的发文编号。
+
+## 目录
 
 ```text
 patmail-extension/
 ├── manifest.json
 ├── package.json
-├── pnpm-workspace.yaml
-├── pnpm-lock.yaml
-├── vite.config.ts
-├── vite.content.config.ts
-├── vitest.config.ts
+├── vite.config.ts              # 工作台、后台、弹窗
+├── vite.content.config.ts      # 内容脚本
 ├── src/
-│   ├── background/index.ts
-│   ├── content/
-│   │   ├── index.ts
-│   │   ├── injector.ts
-│   │   ├── scanner.ts
-│   │   ├── control-scanner.ts
-│   │   ├── label-resolver.ts
-│   │   ├── semantic-resolver.ts
-│   │   ├── visibility.ts
-│   │   └── attribute-reader.ts
-│   ├── floating/
-│   │   ├── main.ts
-│   │   ├── App.vue
-│   │   ├── DebugViewer.vue
-│   │   ├── copySnapshot.ts
-│   │   ├── usePanelDrag.ts
-│   │   ├── style.css
-│   │   ├── FileSearchPanel.vue
-│   │   └── QueryTemplateSection.vue
-│   ├── popup/{main.ts,App.vue,index.html}
-│   ├── shared/{types.ts,message.ts,guards.ts}
-│   ├── utils/runtime.ts
-│   ├── api/  # 只读 EASY API Runtime，含历史模板读取
-│   ├── query/  # QueryXml、字段注册表复用、三层合并
-│   ├── customer/  # 本地客户查询配置
-│   ├── storage/  # chrome.storage.local 查询模板包
-│   ├── schema/  # 查询表单和文件描述树
-│   ├── mail/  # 发文规则、分组和本地草稿预览
-│   └── services/  # 页面扫描入口
+│   ├── app/                    # app.html 工作台页面和进度弹窗
+│   ├── background/             # 唯一写租约、任务和证据的地方
+│   ├── content/                # 在 EASY 页发起请求
+│   ├── customer/               # 表格、收件人、合并和期限发文提交
+│   ├── api/                    # EASY 参数和响应判断
+│   ├── mail/                   # 规则、签名、草稿
+│   ├── workflow/               # 流程节点、审核人、工作流目录
+│   ├── floating/               # 页面浮窗
+│   ├── popup/
+│   ├── settings/               # 写开关
+│   └── shared/message.ts       # 页面与内容脚本的消息
 ├── tests/
-│   ├── scanner.test.ts
-│   ├── semantic-scanner.test.ts
-│   ├── message.test.ts
-│   ├── injector.test.ts
-│   ├── extension.e2e.mjs
-│   ├── easy-*.test.ts
-│   ├── file-search-*.test.ts
-│   ├── query-template.test.ts
-│   ├── phase2-3.test.ts
-│   ├── phase2-4.test.ts
-│   └── fixtures/page.html
-├── docs/
-│   ├── phase1-acceptance.md
-│   ├── phase1-closure-report.md
-│   ├── phase2-1-{architecture,api-contract,acceptance,report}.md
-│   ├── phase2-2-{architecture,query-xml,template-merge,acceptance,report}.md
-│   ├── phase2-3-{architecture,dictionary-contract,business-schema,acceptance,report}.md
-│   ├── phase2-3-closure.md
-│   └── phase2-4-{architecture,business-rules,mail-draft-model,acceptance,report}.md
-└── dist/  # 构建产物，加载此目录
+└── dist/                       # 加载这个目录
 ```
+
+工作台外壳和样式在仓库上一级的 `src/`。接口原文在仓库上一级的 `API/`。
 
 ## 数据与边界
 
-`SCAN_PAGE` 返回 `PageSnapshot` V2：`version`、`page`、`controls`、`stats`、`iframes`、`scannedAt`。每个原生 input/select/textarea/button 提供状态、标签、候选语义名称和置信度。候选优先级为显式 label、aria-label、title、placeholder、邻近文本、name、id；没有 EASY 字段映射。扫描原生 select 的现有 option，不主动展开控件。
+浮窗仍可做页面扫描。扫描只看当前顶层 document，不进 iframe。敏感值和 URL 上的认证参数会遮住。扫描结果只在当页内存里。
 
-扫描只访问当前顶层 document，不进入 iframe、业务页面的 ShadowRoot 或 closed ShadowRoot。返回 iframe 的安全 src 和同源判断，留待下一阶段设计。插件宿主与 ShadowRoot 都被排除。敏感控件值、敏感属性名对应的值被遮蔽，页面 URL 的认证类查询参数被遮蔽，hash 不输出；扫描结果只在当前页面内存中，复制动作由用户触发。可见性表示有布局尺寸且自身及祖先未被 CSS/hidden 隐藏，不表示控件一定处在当前滚动视口。
+文件查询、期限列表、案件查询、案件流程、客户要求和联系人读取使用当前浏览器会话。写回原站的路径是发文任务和期限监控上的「提交到 EASY」，以及写开关打开时允许的邮件保存。没有任意 `Call` 入口。删除文件、上传、下载和结束发文流程不在这条提交里。
 
-浮窗 DOM/CSS 在独立 ShadowRoot 内，宿主以手动 Popover 放入顶层，避免目标页面 `transform`、`filter` 等影响固定定位。消息在扩展上下文中传递，Background Service Worker 负责连通性响应；没有向网页全局变量暴露消息总线。
-
-查询仍只调用 `GetUserModel`、`GetSearchFiles`、`SearchQueryHisList`、`IPGetBasicData`、`GetFlowdirection`、`LoadFileTypeByCaseType`、`GetFieldColumn`、`LoadListColumn` 和 `LoadMailType`。Phase 2.5 另把邮件读取和 `MailCustomer`、`SaveMailInfo`、`SaveMailRalteCaseFile` 放进同一白名单；真实写操作默认关闭，页面消息不能打开它。没有任意 Call 入口，也不调用流程提交、发送、删除或下载。查询模板和客户配置写在 `chrome.storage.local`。发文规则和执行记录按用户 GUID 分开保存。见 [Phase 2.5 报告](docs/phase2-5-report.md)。2026-09-24 已核对登录态和手工文件查询。历史模板、字典树、发文类型、草稿规划和真实创建保存尚未在真实 EASY 会话里点过。
+本机配置在 `chrome.storage.local`：查询模板、客户、发文规则、工作流、写开关。发文规则和执行记录按用户 GUID 分开。提交账本不进 `chrome.storage`，关标签页就没了。
