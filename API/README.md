@@ -23,6 +23,8 @@ Content-Type：`application/x-www-form-urlencoded; charset=UTF-8`
 | [09-期限监控.md](09-期限监控.md) | LimitMonitorInit / GetLimitMonitorCaseList / LimitMailCustomer |
 | [10-邮件签名.md](10-邮件签名.md) | GetMailSignatureSettingList / GetSignatureset / GetSignature / Getmailset |
 | [11-客户要求.md](11-客户要求.md) | 客户资料页 GetCustomerlist / GetCustomerDemand，不发文 |
+| [12-案件流程图.md](12-案件流程图.md) | 用 GetCaseBusFlow 读子流程停在哪个节点。样本不是状态枚举 |
+| [13-案件查询.md](13-案件查询.md) | ICSearchList。按案件查，结束的事项仍能对上案子 |
 
 ## 接口清单
 
@@ -56,15 +58,21 @@ Content-Type：`application/x-www-form-urlencoded; charset=UTF-8`
 | 下载 | BaseInfo.ashx / FileHandler.ashx | DownLoad | 页面步骤已核对，未下载文件 |
 | 客户发文 | Notice.ashx | MailCustomer | 成功只看 `objid`，原文未保存，未重新调用 |
 | 期限监控列表 | Report.ashx | GetLimitMonitorCaseList | 请求和只读响应已核对 |
-| 期限监控发文 | Notice.ashx | LimitMailCustomer | 成功看 `NeedConfirmFillAgency` 或 `objid`，原文未保存 |
-| 保存邮件 | Mail.ashx | SaveMailInfo | 成功只看 `ClientInfo.Status`，原文未保存 |
-| 关联文件 | Mail.ashx | SaveMailRalteCaseFile | `file_ids` 为分号拼接，成功只看 `ClientInfo.Result` |
+| 期限监控发文 | Notice.ashx | LimitMailCustomer | 成功看 `Status=true` 且 `objid`。`Result=false` 仍可成功。`NeedConfirmFillAgency` 要停 |
+| 保存邮件 | Mail.ashx | SaveMailInfo | 成功只看 `ClientInfo.Status`。这次 `Result=false` |
+| 关联文件 | Mail.ashx | SaveMailRalteCaseFile | 空 `file_ids` 时 `Status=true`、`Result=false`，页面仍继续 |
 | 邮件页读取 | Mail.ashx | GetMailInfo / GetMailCase / GetMailFile 等 | 只读响应已核对 |
 | 上传 | UploadFile.aspx | CommUpload | 页面入口已核对，未上传 |
-| 流程信息 | Common.ashx | GetFlowInfo / GetFlowHistory / GetUrgencyList | 只读响应已核对 |
-| 流程节点 | Common.ashx | GetFlowSubmit | 节点字段已由 `IhgFlow.js` 核对，那次响应是空的 502 |
-| 流程提交 | Common.ashx | FlowSubmit | 成功只看 `ClientInfo.Result`，未调用 |
-| 结束发文流程 | Mail.ashx | EndEmailFlowd | 参数已由 `mail.js` 核对，未调用 |
+| 流程信息 | Common.ashx | GetFlowInfo / GetFlowHistory / GetUrgencyList | 只读响应已核对。这是发文邮件审批，不是案件页流程图 |
+| 案件流程状态 | CaseInfo.ashx | GetCaseBusFlow | 只读响应已核对。当前节点是 `order_by=2`，结束看 `node_code` 是否为 `END` |
+| 案件查询 | CaseInfo.ashx | ICSearchList | 只读响应已核对。`is_proc=false` 按案件出数，结束的事项仍在 |
+| 查询页点行 | BaseInfo.ashx | GetCaseInfo | 只读响应已核对。只返回三个字段，不是案件详情 |
+| 流程节点办理结果 | CaseInfo.ashx | GetFlowNodeInfo | 只读响应已核对。只描述已办节点的这一步，不代表整条流程 |
+| 处理事项表 | CaseInfo.ashx | GetProcList | 只读响应已核对。没有子流程节点 |
+| 流程节点 | Common.ashx | GetFlowSubmit | 响应已核对。起始、审核、结束三个节点。`Result=false` 仍有节点数组 |
+| 发文提交审核 | Mail.ashx | MailSubmit | 成功看 `ClientInfo.Result=true`。`finishdate=false`，评分和期限为空 |
+| 通用流程提交 | Common.ashx | FlowSubmit | 页面脚本有这组参数。这次发文没有调用 |
+| 结束发文流程 | Mail.ashx | EndEmailFlowd | 参数已由 `mail.js` 核对，这次没有调用 |
 | 个人签名名单 | Login.ashx | GetMailSignatureSettingList | 请求和长度已核对，响应正文未保存 |
 | 个人签名正文 | Login.ashx | GetSignatureset | 请求和长度已核对，响应正文未保存 |
 | 签名页代理机构 | CaseInfo.ashx | GetAencyList | 请求和长度已核对，响应正文未保存 |
