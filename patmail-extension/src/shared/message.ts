@@ -138,7 +138,7 @@ export type ContentRequest =
   | Request<'CHECK_SESSION'> | Request<'CANCEL_SESSION_CHECK'>
   | Request<'CANCEL_FILE_SEARCH'> | Response<'SEARCH_FILES', { query: FileSearchQuery; continuation?: { querySessionId: string } }>
   | Response<'SEARCH_LIMIT_MONITOR', { query: LimitMonitorQuery }>
-  | Response<'SUBMIT_LIMIT_MAIL', { userId: string; items: Array<{ procId: string; mailTypeId: string; mailStyle: '1'; mailId?: string; mode: 'ipr' | 'lead'; customerName: string; contactName: string; iprName: string; leadName: string }> }>
+  | Response<'SUBMIT_LIMIT_MAIL', { userId: string; items: Array<{ procId: string; procIds?: string[]; mailTypeId: string; mailStyle: '1'; mailId?: string; mode: 'ipr' | 'lead'; inventor?: boolean; customerName: string; contactName: string; iprName: string; leadName: string }> }>
   | Response<'EXPORT_CASE_CONTACTS', { volumes: string[] }>
   | Response<'LIST_MAIL_PROCESSES', { query: ProcessListQuery }>
   | Response<'OPEN_EASY_FORM', { target: ProcessOpenTarget }>
@@ -445,25 +445,30 @@ function isAccountReviewerResult(value: unknown): value is ApiResult<AccountRevi
 function isLimitMailSubmitItem(value: unknown): boolean {
   if (!isRecord(value)) return false
   const keys = Object.keys(value)
-  const allowed = ['procId', 'mailTypeId', 'mailStyle', 'mailId', 'mode', 'customerName', 'contactName', 'iprName', 'leadName']
+  const allowed = ['procId', 'procIds', 'mailTypeId', 'mailStyle', 'mailId', 'mode', 'inventor', 'customerName', 'contactName', 'iprName', 'leadName']
   if (!keys.every(key => allowed.includes(key))) return false
   if (!keys.includes('mode') || !keys.includes('customerName') || !keys.includes('contactName') || !keys.includes('iprName') || !keys.includes('leadName')) return false
   if (value.mode !== 'ipr' && value.mode !== 'lead') return false
+  if (value.inventor !== undefined && value.inventor !== true && value.inventor !== false) return false
   if (!isShortText(value.customerName, 120) || !isShortText(value.contactName, 80) || !isShortText(value.iprName, 80) || !isShortText(value.leadName, 80)) return false
   if (!value.iprName.trim()) return false
   if (value.mode === 'lead' && !value.leadName.trim()) return false
-  return isQueryGuid(String(value.procId)) && isQueryGuid(String(value.mailTypeId)) && value.mailStyle === '1' &&
-    (value.mailId === undefined || isQueryGuid(String(value.mailId)))
+  if (!isQueryGuid(String(value.procId)) || !isQueryGuid(String(value.mailTypeId)) || value.mailStyle !== '1') return false
+  if (value.mailId !== undefined && !isQueryGuid(String(value.mailId))) return false
+  if (value.procIds === undefined) return true
+  return Array.isArray(value.procIds) && value.procIds.length > 0 && value.procIds.length <= 500 &&
+    value.procIds.every(id => isQueryGuid(String(id))) &&
+    value.procIds.some(id => String(id).toLowerCase() === String(value.procId).toLowerCase())
 }
 
 function isLimitMailSubmitRequest(value: unknown): boolean {
   if (!isRecord(value) || !isQueryGuid(String(value.userId)) || !Array.isArray(value.items)) return false
-  return value.items.length > 0 && value.items.length <= 20 && value.items.every(isLimitMailSubmitItem) && Object.keys(value).length === 2
+  return value.items.length > 0 && value.items.every(isLimitMailSubmitItem) && Object.keys(value).length === 2
 }
 
 function isLimitMailSubmitResponse(value: unknown): boolean {
   if (!isRecord(value) || typeof value.stopped !== 'boolean' || !Array.isArray(value.results) || Object.keys(value).length !== 2) return false
-  return value.results.length <= 20 && value.results.every(item => isRecord(item) &&
+  return value.results.every(item => isRecord(item) &&
     typeof item.procId === 'string' && typeof item.mailId === 'string' && typeof item.message === 'string' && item.message.length <= 8000 &&
     (item.state === 'submitted' || item.state === 'created' || item.state === 'unknown' || item.state === 'failed') &&
     Object.keys(item).length === 4)

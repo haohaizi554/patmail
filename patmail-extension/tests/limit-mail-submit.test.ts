@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { EasyTransport } from '../src/api/transport'
 import {
-  buildMailSubmit, limitMailItems, nextLimitMailAttempt, pickMailSubmitNodes, readLimitMailCustomer, readMailSubmit, submitLimitMailBatch,
+  buildMailSubmit, dropPrefilledNoticeRecipient, limitMailItems, nextLimitMailAttempt, pickMailSubmitNodes, readLimitMailCustomer, readMailSubmit, submitLimitMailBatch,
   type LimitMailSubmitItem
 } from '../src/customer/limit-mail-submit'
 import type { WorkflowNode } from '../src/workflow/types'
@@ -116,6 +116,13 @@ function transport(handlers: Record<string, (params: URLSearchParams) => unknown
 }
 
 describe('limit mail submit', () => {
+  it('drops the prefilled notice address from recipients and copies', () => {
+    expect(dropPrefilledNoticeRecipient('chenjch02@pcl.ac.cn;高宇(gaoy@pcl.ac.cn);')).toBe('高宇(gaoy@pcl.ac.cn);')
+    expect(dropPrefilledNoticeRecipient('陈嘉成<chenjch02@pcl.ac.cn>;李克军(likj@pcl.ac.cn);')).toBe('李克军(likj@pcl.ac.cn);')
+    expect(dropPrefilledNoticeRecipient('chenjch02@pcl.ac.cn')).toBe('')
+    expect(dropPrefilledNoticeRecipient('高宇(gaoy@pcl.ac.cn);')).toBe('高宇(gaoy@pcl.ac.cn);')
+  })
+
   it('reads a created mail from objid even when ClientInfo.Result is false', () => {
     expect(readLimitMailCustomer({ ClientInfo: client(), objid: mail })).toEqual({ ok: true, mailId: mail })
     const confirm = readLimitMailCustomer({ NeedConfirmFillAgency: true, ClientInfo: client({ Message: '请确认代理机构' }) })
@@ -265,6 +272,61 @@ describe('limit mail submit', () => {
     expect(result.results[0]?.message).toContain('没有这个人')
     expect(calls.some(item => item.startsWith('saveMailInfo'))).toBe(false)
     expect(calls.some(item => item.startsWith('mailSubmit'))).toBe(false)
+  })
+
+  it('merges the same customer and the same recipients into one create', async () => {
+    const planned = limitMailItems({
+      procIds: [proc, proc2],
+      rows: [{ procId: proc, caseVolume: 'PA1' }, { procId: proc2, caseVolume: 'PA2' }],
+      sheetRows: [
+        { ourVolume: 'PA1', mailTypeId: mailType, customerName: '甲客户', iprName: '雷工' },
+        { ourVolume: 'PA2', mailTypeId: mailType, customerName: '甲客户', iprName: '雷工' }
+      ],
+      mode: 'ipr'
+    })
+    expect(planned.ok && planned.items).toHaveLength(1)
+    if (!planned.ok) return
+    const calls: string[] = []
+    let fileIds = ''
+    const result = await submitLimitMailBatch(transport({
+      limitMailCustomer: params => {
+        fileIds = params.get('_file_ids') ?? ''
+        return { ClientInfo: client(), objid: mail }
+      },
+      ...contacts(),
+      saveMailInfo: () => ({ ClientInfo: client({ Result: false, Status: true }) }),
+      getFlowInfo: () => flowInfo(),
+      getFlowSubmit: () => nodes([user]),
+      getUrgencyList: () => ({ ClientInfo: client(), UrgencyList: [{ urgency_id: urgency, urgency_code: 'CM', urgency_name: '普通', seq: 1 }] }),
+      getFlowLastStatus: () => ({ ClientInfo: client(), last_status: null }),
+      mailSubmit: () => ({ ClientInfo: client({ Result: true }) })
+    }, calls), user, planned.items)
+    expect(fileIds).toBe(`${proc};${proc2}`)
+    expect(calls.filter(item => item.startsWith('limitMailCustomer'))).toHaveLength(1)
+    expect(calls.filter(item => item.startsWith('mailSubmit'))).toHaveLength(1)
+    expect(result.results.map(item => item.procId)).toEqual([proc, proc2])
+    expect(result.results.every(item => item.state === 'submitted' && item.message.includes('合成一封'))).toBe(true)
+    const split = limitMailItems({
+      procIds: [proc, proc2],
+      rows: [{ procId: proc, caseVolume: 'PA1' }, { procId: proc2, caseVolume: 'PA2' }],
+      sheetRows: [
+        { ourVolume: 'PA1', mailTypeId: mailType, customerName: '甲客户', iprName: '雷工' },
+        { ourVolume: 'PA2', mailTypeId: mailType, customerName: '甲客户', iprName: '王工' }
+      ],
+      mode: 'ipr'
+    })
+    expect(split.ok && split.items).toHaveLength(2)
+  })
+
+  it('accepts more than twenty confirmed items', () => {
+    const procIds = Array.from({ length: 21 }, (_, index) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(index + 1).padStart(12, '0')}`)
+    const planned = limitMailItems({
+      procIds,
+      rows: procIds.map((procId, index) => ({ procId, caseVolume: `PA${index + 1}` })),
+      sheetRows: procIds.map((_, index) => ({ ourVolume: `PA${index + 1}`, mailTypeId: mailType, iprName: '雷工' })),
+      mode: 'ipr'
+    })
+    expect(planned.ok && planned.items).toHaveLength(21)
   })
 
   it('refuses a volume that has no single mail type', () => {

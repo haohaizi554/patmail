@@ -22,7 +22,7 @@ import { isQueryGuid } from '../../query/query-validator'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { scopeFromConnection } from '../../shared/connection'
 import { useWorkspace } from '../composables/useWorkspace'
-import { endProgress, logProgress } from '../dialog'
+import { endProgress, logProgress, progressSummaryLine } from '../dialog'
 import { packagedPctWorkflow, pctRuntimeFrom, workflowSender, type WorkflowCatalog, type WorkflowDefinition } from '../../workflow/catalog'
 
 const props = defineProps<{
@@ -61,6 +61,7 @@ const limitNote = ref('')
 const icPhase = ref<'idle' | 'run' | 'done' | 'fail'>('idle')
 const icNote = ref('')
 const icByKey = ref<Record<string, { found: boolean; gate: '' | 'open' | 'pending' | 'done' }>>({})
+const abnormalKeys = ref(new Set<string>())
 const confirmedProcIds = ref<string[]>([])
 let sheetQueryToken = 0
 
@@ -135,6 +136,7 @@ const unmatched = computed(() => rows.value.filter(row => !row.mailTypeId))
 
 watch(workflowId, () => {
   rows.value = []
+  abnormalKeys.value = new Set()
   sheetName.value = ''
   sheetNotice.value = ''
   previews.value = []
@@ -164,6 +166,7 @@ async function onSheet(event: Event): Promise<void> {
   cards.value = []
   progress.value = []
   status.value = ''
+  abnormalKeys.value = new Set()
   resetLimit()
   if (!file) return
   sheetName.value = file.name
@@ -250,6 +253,7 @@ function statusShade(text: string): string {
   if (text === '还没提交审核') return 'shade-open'
   if (text === '已经审核通过') return 'shade-done'
   if (text === '已提交审核') return 'shade-pending'
+  if (text === '异常') return 'shade-abnormal'
   if (text === '库里没有' || text === '没查成') return 'shade-missing'
   return ''
 }
@@ -278,6 +282,12 @@ function limitReview(row: PctTaskRow): string {
 }
 
 function sheetStatus(row: PctTaskRow): { found: string; review: string } {
+  const base = sheetReview(row)
+  if (abnormalKeys.value.has(icKey(row.ourVolume, row.procLabel))) return { found: base.found || '有', review: '异常' }
+  return base
+}
+
+function sheetReview(row: PctTaskRow): { found: string; review: string } {
   const fromLimit = limitReview(row)
   const hit = icByKey.value[icKey(row.ourVolume, row.procLabel)]
   if (hit) {
@@ -656,8 +666,9 @@ async function rememberConfirmed(procIds: string[]): Promise<void> {
   }
 }
 
-async function onRefreshStatus(targets: Array<{ caseVolume: string; procLabel: string }>): Promise<void> {
-  const unique = targets.filter(item => item.caseVolume.trim() && item.procLabel.trim())
+async function onRefreshStatus(payload: { targets: Array<{ caseVolume: string; procLabel: string }>; abnormal: Array<{ caseVolume: string; procLabel: string }> }): Promise<void> {
+  abnormalKeys.value = new Set(payload.abnormal.map(item => icKey(item.caseVolume, item.procLabel)))
+  const unique = payload.targets.filter(item => item.caseVolume.trim() && item.procLabel.trim())
   try {
     if (!bridge || connection.value.sessionStatus !== 'authenticated') {
       logProgress('还没连上 EASY，案件状态没有回传。')
@@ -691,6 +702,7 @@ async function onRefreshStatus(targets: Array<{ caseVolume: string; procLabel: s
       logProgress(`${item.caseVolume}：${status.review || status.found || '没对上'}`)
     }
   } finally {
+    logProgress(progressSummaryLine())
     endProgress()
   }
 }
@@ -739,6 +751,7 @@ function definitionHint(item: WorkflowDefinition | null): string {
         :case-volume="queryCaseVolume"
         :sheet-rows="rows"
         :recipient-mode="recipientMode"
+        :inventor-customers="[...specials]"
         @result="onLimitResult"
         @confirm="onSheetConfirm"
         @refresh-status="onRefreshStatus"

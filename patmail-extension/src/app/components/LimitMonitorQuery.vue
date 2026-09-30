@@ -5,8 +5,8 @@ import LimitQuerySection from '../../floating/LimitQuerySection.vue'
 import type { LimitMonitorResult, LimitMonitorRow } from '../../api/limit-monitor-types'
 import { isLimitMonitorType, type LimitMonitorQuery } from '../../api/limit-monitor-params'
 import { clonePctTask, readWorkflowTask, writeWorkflowTask } from '../../customer/pct-sheet'
-import { limitMailItems, runLimitMailSubmit } from '../../customer/limit-mail-submit'
-import { beginProgress, endProgress, logProgress } from '../dialog'
+import { limitMailItems, limitMailLetterLabel, limitMailProcIds, runLimitMailSubmit } from '../../customer/limit-mail-submit'
+import { beginProgress, classifySubmitText, logProgress, tallyProgress } from '../dialog'
 import { splitCaseVolumes } from '../../customer/volume-list'
 import { isQueryGuid } from '../../query/query-validator'
 import { MessageType, type MessageBridge } from '../../shared/message'
@@ -19,8 +19,9 @@ const props = defineProps<{
   seed?: Record<string, string> | null
   seedToken?: number
   caseVolume?: string
-  sheetRows?: Array<{ ourVolume: string; mailTypeId?: string; customerName?: string; contactName?: string; iprName?: string; leadName?: string }>
+  sheetRows?: Array<{ ourVolume: string; mailTypeId?: string; customerName?: string; contactName?: string; iprName?: string; leadName?: string; mailTo?: string; mailCc?: string }>
   recipientMode?: 'ipr' | 'lead'
+  inventorCustomers?: string[]
 }>()
 
 const { open: writesOpen, ready: writesReady } = useWriteSwitch()
@@ -28,7 +29,7 @@ const { open: writesOpen, ready: writesReady } = useWriteSwitch()
 const emit = defineEmits<{
   confirm: [procIds: string[]]
   result: [payload: { items: LimitMonitorRow[]; gates: Record<string, 'open' | 'pending' | 'done'>; checking: boolean; message: string }]
-  refreshStatus: [targets: Array<{ caseVolume: string; procLabel: string }>]
+  refreshStatus: [payload: { targets: Array<{ caseVolume: string; procLabel: string }>; abnormal: Array<{ caseVolume: string; procLabel: string }> }]
 }>()
 
 const loading = ref(false)
@@ -314,36 +315,54 @@ async function onSubmitAsk(): Promise<void> {
     procIds: confirmedIds.value.length ? confirmedIds.value : (task?.confirmedProcIds ?? []),
     rows: rows.value,
     sheetRows: props.sheetRows?.length ? props.sheetRows : (task?.rows ?? []),
-    mode: props.recipientMode ?? (task?.recipientMode === 'lead' || task?.recipientMode === 'ipr' ? task.recipientMode : 'ipr')
+    mode: props.recipientMode ?? (task?.recipientMode === 'lead' || task?.recipientMode === 'ipr' ? task.recipientMode : 'ipr'),
+    specials: new Set(props.inventorCustomers ?? [])
   })
   if (!planned.ok) {
     message.value = planned.message
     return
   }
   message.value = '正在创建发文并提交给当前登录人。'
-  const involved = rows.value.filter(row => planned.items.some(item => item.procId === row.procId))
+  const involved = rows.value.filter(row => planned.items.some(item => limitMailProcIds(item).includes(row.procId)))
   beginProgress('提交到 EASY', planned.items.length + 1)
-  const notes: string[] = []
-  for (let index = 0; index < planned.items.length; index += 1) {
-    const item = planned.items[index]
-    const row = involved.find(entry => entry.procId === item?.procId)
-    const label = row?.caseVolume || item?.procId || ''
-    logProgress(`正在核对 ${label} 的发文流程。`, index)
-    if (row) await markSendGates([row], true)
-    logProgress(`正在处理 ${label}。`, index)
+  const abnormal: Array<{ caseVolume: string; procLabel: string }> = []
+  let cursor = 0
+  let halted = false
+  for (; cursor < planned.items.length; cursor += 1) {
+    const item = planned.items[cursor]
+    const letterRows = item ? involved.filter(entry => limitMailProcIds(item).includes(entry.procId)) : []
+    const label = item ? limitMailLetterLabel(item, id => letterRows.find(entry => entry.procId === id)?.caseVolume ?? '') : ''
+    logProgress(`正在核对 ${label} 的发文流程。`, cursor)
+    if (letterRows.length) await markSendGates(letterRows, true)
+    logProgress(`正在处理 ${label}。`, cursor)
     const text = await runLimitMailSubmit(props.bridge, props.userId, item ? [item] : [], gates.value)
-    notes.push(text)
-    text.split('\n').forEach((line, lineIndex) => logProgress(lineIndex === 0 ? `${label}：${line}` : line, index + 1))
-    if (item && text.startsWith('已提交')) {
-      confirmedIds.value = confirmedIds.value.filter(id => id !== item.procId)
+    const kind = classifySubmitText(text)
+    tallyProgress(kind, item ? limitMailProcIds(item).length : 0)
+    if (kind === 'abnormal') {
+      for (const row of letterRows) abnormal.push({ caseVolume: row.caseVolume, procLabel: row.ctrlProc })
     }
-    if (/无法确认|没有再次|写开关|没有提交到审核人|登录已失效/.test(text) && !text.startsWith('已提交')) break
+    text.split('\n').forEach((line, lineIndex) => logProgress(lineIndex === 0 ? `${label}：${line}` : line, cursor + 1))
+    if (item && kind === 'success') {
+      const sent = new Set(limitMailProcIds(item).map(id => id.toLowerCase()))
+      confirmedIds.value = confirmedIds.value.filter(id => !sent.has(id.toLowerCase()))
+    }
+    if (kind === 'failed' && /无法确认|没有再次|写开关|没有提交到审核人|登录已失效/.test(text)) {
+      halted = true
+      break
+    }
+  }
+  if (halted) {
+    const left = planned.items.slice(cursor + 1).reduce((sum, item) => sum + limitMailProcIds(item).length, 0)
+    tallyProgress('skipped', left)
   }
   emit('confirm', confirmedIds.value)
   logProgress('正在回传所涉及案件的审核状态。', planned.items.length)
   await markSendGates(involved, true)
-  emit('refreshStatus', involved.map(row => ({ caseVolume: row.caseVolume, procLabel: row.ctrlProc })))
-  message.value = notes.filter(Boolean).join('')
+  emit('refreshStatus', {
+    targets: involved.map(row => ({ caseVolume: row.caseVolume, procLabel: row.ctrlProc })),
+    abnormal
+  })
+  message.value = ''
   publish()
 }
 

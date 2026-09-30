@@ -77,17 +77,20 @@ describe('期限监控', () => {
     expect(result).toMatchObject({ ok: false, error: { code: 'INVALID_RESPONSE' } })
   })
 
-  it('builds one proc mail request and refuses to guess a multi-id separator', () => {
+  it('joins checked proc ids with a semicolon', () => {
+    const one = '945c4477-80b5-4423-bdec-b2391351c681'
+    const two = '8d67261c-a944-4ac4-9d0b-6f10d6e98e8b'
     const params = buildLimitMailCustomerParams({
-      procId: '945c4477-80b5-4423-bdec-b2391351c681',
-      mailTypeId: '8d67261c-a944-4ac4-9d0b-6f10d6e98e8b'
+      procIds: [one, two],
+      mailTypeId: '71d067a3-d1a3-4d4b-87f9-38ea9d96bf70'
     })
     expect(params.ok).toBe(true)
     if (params.ok) {
       expect(params.data.get('Call')).toBe('LimitMailCustomer')
-      expect(params.data.get('_file_ids')).toBe('945c4477-80b5-4423-bdec-b2391351c681')
+      expect(params.data.get('_file_ids')).toBe(`${one};${two}`)
+      expect(params.data.get('mailstyle')).toBe('1')
       expect(params.data.has('_file_names')).toBe(false)
     }
-    expect(buildLimitMailCustomerParams({ procId: 'not-a-guid', mailTypeId: '8d67261c-a944-4ac4-9d0b-6f10d6e98e8b' }).ok).toBe(false)
+    expect(buildLimitMailCustomerParams({ procId: 'not-a-guid', mailTypeId: two }).ok).toBe(false)
   })
 })

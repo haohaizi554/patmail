@@ -17,14 +17,32 @@ const state = reactive({
 
 let settle: ((confirmed: boolean) => void) | null = null
 
+export interface ProgressLine {
+  time: string
+  text: string
+}
+
+export interface ProgressCounts {
+  success: number
+  failed: number
+  abnormal: number
+  skipped: number
+}
+
 export const progressDialog = reactive({
   open: false,
   title: '',
-  lines: [] as string[],
+  lines: [] as ProgressLine[],
   done: 0,
   total: 1,
-  finished: false
+  finished: false,
+  counts: { success: 0, failed: 0, abnormal: 0, skipped: 0 } as ProgressCounts
 })
+
+function progressClock(date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
 
 export function beginProgress(title: string, total: number): void {
   progressDialog.title = title
@@ -32,11 +50,35 @@ export function beginProgress(title: string, total: number): void {
   progressDialog.done = 0
   progressDialog.total = Math.max(total, 1)
   progressDialog.finished = false
+  progressDialog.counts.success = 0
+  progressDialog.counts.failed = 0
+  progressDialog.counts.abnormal = 0
+  progressDialog.counts.skipped = 0
   progressDialog.open = true
 }
 
+/** 一封提交结果归到成功、失败、异常或跳过。对不上邮箱算异常。 */
+export function classifySubmitText(text: string): keyof ProgressCounts {
+  if (text.startsWith('已提交')) return 'success'
+  if (/对上邮箱|没有商务邮箱|对上了多个邮箱|没有可用的.+邮箱/.test(text)) return 'abnormal'
+  if (/还在审核里|已经提交过|没有要提交/.test(text)) return 'skipped'
+  return 'failed'
+}
+
+export function tallyProgress(kind: keyof ProgressCounts, count = 1): void {
+  if (count <= 0) return
+  progressDialog.counts[kind] += count
+}
+
+export function progressSummaryLine(): string {
+  const counts = progressDialog.counts
+  const parts = [`成功 ${counts.success} 件`, `失败 ${counts.failed} 件`, `异常 ${counts.abnormal} 件`]
+  if (counts.skipped) parts.push(`跳过 ${counts.skipped} 件`)
+  return `统计：${parts.join('，')}。`
+}
+
 export function logProgress(line: string, done?: number): void {
-  progressDialog.lines.push(line)
+  progressDialog.lines.push({ time: progressClock(), text: line })
   if (done !== undefined) progressDialog.done = done
 }
 

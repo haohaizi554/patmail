@@ -122,17 +122,18 @@ export function buildLimitMonitorParams(
   return { ok: true, data: params }
 }
 
-/** 单个处理事项创建发文。多个 ID 的分隔符抓包没出现，这里不猜测。写开关关闭时调用方不得发送。 */
-export function buildLimitMailCustomerParams(input: { procId: string; mailTypeId: string; mailStyle?: string }): ApiResult<URLSearchParams> {
-  const procId = input.procId.trim()
+/** 勾选的处理事项一次性创建。`LimitMonitor.js` 用分号拼 `proc_id`，弹层原样放进 `_file_ids`。写开关关闭时调用方不得发送。 */
+export function buildLimitMailCustomerParams(input: { procId?: string; procIds?: string[]; mailTypeId: string; mailStyle?: string }): ApiResult<URLSearchParams> {
+  const ids = (input.procIds?.length ? input.procIds : input.procId ? [input.procId] : []).map(id => id.trim())
   const mailTypeId = input.mailTypeId.trim()
   const mailStyle = input.mailStyle ?? '1'
-  if (!GUID.test(procId)) return apiError('INVALID_QUERY', '处理事项必须使用内部 ID。')
+  if (!ids.length || ids.some(id => !GUID.test(id))) return apiError('INVALID_QUERY', '处理事项必须使用内部 ID。')
+  if (new Set(ids.map(id => id.toLowerCase())).size !== ids.length) return apiError('INVALID_QUERY', '处理事项重复，没有创建。')
   if (!GUID.test(mailTypeId)) return apiError('INVALID_QUERY', '发文类型必须使用内部 ID。')
   if (!/^[1-6]$/.test(mailStyle)) return apiError('INVALID_QUERY', '发文合并方式无效。')
   const params = new URLSearchParams()
   params.set('Call', 'LimitMailCustomer')
-  params.set('_file_ids', procId)
+  params.set('_file_ids', ids.join(';'))
   params.set('mailstyle', mailStyle)
   params.set('mailtype', mailTypeId)
   params.set('log_pagename', 'LimitMonitor.aspx')

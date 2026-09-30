@@ -12,7 +12,7 @@ import { fetchMailSenders } from '../../customer/mailset-load'
 import type { MailSender } from '../../customer/mailset'
 import { fillSheetEmails } from '../../customer/customer-page'
 import { applyPctMailTypes, clonePctTask, matchSheetCtrlProcs, pctRowsFromTable, readWorkflowTask, summarizePctTask, volumesOf, writeWorkflowTask } from '../../customer/pct-sheet'
-import { limitMailItems, runLimitMailSubmit } from '../../customer/limit-mail-submit'
+import { limitMailItems, limitMailLetterLabel, limitMailProcIds, runLimitMailSubmit } from '../../customer/limit-mail-submit'
 import { planPctRecipients, currentMailId, sheetRowsOnMail } from '../../customer/pct-recipients'
 import { inventorCustomerNames, pctRuntimeFrom, recipientModeForTask, workflowSender } from '../../workflow/catalog'
 import { isPctTask } from '../../customer/guards'
@@ -335,7 +335,7 @@ function onSelect(ids: string[]): void {
   selected.value = ids
 }
 
-function onSubmitAsk(): void {
+async function onSubmitAsk(): Promise<void> {
   if (!writesReady.value) {
     message.value = '正在读取系统设置里的写开关。'
     return
@@ -349,20 +349,33 @@ function onSubmitAsk(): void {
     return
   }
   const task = readWorkflowTask()
+  const flow = catalog.value.workflows.find(item => item.id === task?.workflowId) ?? pctDefinition.value
   const planned = limitMailItems({
     procIds: confirmedIds.value.length ? confirmedIds.value : (task?.confirmedProcIds ?? []),
     rows: rows.value,
     sheetRows: task?.rows ?? [],
-    mode: recipientModeForTask(task, catalog.value.workflows)
+    mode: recipientModeForTask(task, catalog.value.workflows),
+    specials: inventorCustomerNames(flow)
   })
   if (!planned.ok) {
     message.value = planned.message
     return
   }
-  message.value = '正在创建发文并提交给当前登录人。'
-  void runLimitMailSubmit(bridge, connection.value.operatorId, planned.items, gates.value).then(text => {
-    message.value = text
-  })
+  const notes: string[] = []
+  for (let index = 0; index < planned.items.length; index += 1) {
+    const item = planned.items[index]
+    if (!item) continue
+    const label = limitMailLetterLabel(item, id => rows.value.find(entry => entry.procId === id)?.caseVolume ?? '')
+    message.value = `正在提交 ${index + 1}/${planned.items.length}（${label}）。`
+    const text = await runLimitMailSubmit(bridge, connection.value.operatorId, [item], gates.value)
+    notes.push(text)
+    if (text.startsWith('已提交')) {
+      const sent = new Set(limitMailProcIds(item).map(id => id.toLowerCase()))
+      confirmedIds.value = confirmedIds.value.filter(id => !sent.has(id.toLowerCase()))
+    }
+    if (/无法确认|没有再次|写开关|没有提交到审核人|登录已失效/.test(text) && !text.startsWith('已提交')) break
+  }
+  message.value = notes.filter(Boolean).join('')
 }
 
 async function onConfirm(ids: string[]): Promise<void> {

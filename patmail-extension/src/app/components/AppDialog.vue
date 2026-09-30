@@ -50,10 +50,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         <h3 id="progress-title">{{ progress.title }}</h3>
         <button v-if="progress.finished" type="button" aria-label="关闭" @click="closeProgress">×</button>
       </header>
-      <div class="send-bar" aria-hidden="true"><span :style="{ width: progressPercent + '%' }"></span></div>
+      <div class="progress-meter" role="progressbar" :aria-valuenow="progressPercent" aria-valuemin="0" aria-valuemax="100" :aria-valuetext="`${progressPercent}%`">
+        <div class="send-bar"><span :style="{ width: progressPercent + '%' }"></span></div>
+        <strong>{{ progressPercent }}%</strong>
+      </div>
       <ol class="progress-log">
-        <li v-for="(line, index) in progress.lines" :key="index">{{ line }}</li>
+        <li v-for="(line, index) in progress.lines" :key="index">
+          <time :datetime="line.time">{{ line.time }}</time>
+          <span>{{ line.text }}</span>
+        </li>
       </ol>
+      <p class="progress-tally" role="status">
+        <span class="is-success">成功 {{ progress.counts.success }} 件</span>
+        <span class="is-failed">失败 {{ progress.counts.failed }} 件</span>
+        <span class="is-abnormal">异常 {{ progress.counts.abnormal }} 件</span>
+        <span v-if="progress.counts.skipped" class="is-skipped">跳过 {{ progress.counts.skipped }} 件</span>
+      </p>
       <footer v-if="progress.finished">
         <button type="button" class="solid" @click="closeProgress">知道了</button>
       </footer>
