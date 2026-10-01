@@ -3,6 +3,7 @@ import { computed, inject, ref, watch } from 'vue'
 import PageHead from '../../../../src/components/PageHead.vue'
 import { bg } from '../../../../src/assets'
 import { PROCESS_SPECS, type ProcessKind, type ProcessListRow } from '../../api/mail-process'
+import { filterProcessRows } from '../../api/process-list-search'
 import { describeTaskRecord } from '../record-status'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useWorkspace } from '../composables/useWorkspace'
@@ -19,6 +20,8 @@ const total = ref(0)
 const totals = ref<Partial<Record<ProcessKind, number>>>({})
 const page = ref(1)
 const pageSize = 10
+const catalogSize = 100
+const catalogCap = 1000
 const query = ref('')
 const message = ref('')
 const loading = ref(false)
@@ -32,6 +35,8 @@ interface ListSlot {
 
 const slots = ref<Partial<Record<ProcessKind, ListSlot>>>({})
 const pending = new Map<string, Promise<string>>()
+const catalogs = new Map<ProcessKind, { rows: ProcessListRow[], total: number }>()
+const catalogEpoch = new Map<ProcessKind, number>()
 let viewEpoch = 0
 
 const placeholders: Record<ProcessKind, string> = {
@@ -88,34 +93,72 @@ async function fetchList(target: ProcessKind, nextPage: number, searchKey: strin
   return job
 }
 
-async function requestList(target: ProcessKind, nextPage: number, searchKey: string): Promise<string> {
-  if (!bridge || !ready.value) return '尚未连接 EASY。'
+async function readPage(target: ProcessKind, nextPage: number, size: number): Promise<{ ok: true, items: ProcessListRow[], total: number, pageIndex: number } | { ok: false, message: string }> {
+  if (!bridge || !ready.value) return { ok: false, message: '尚未连接 EASY。' }
   const response = await bridge.request({
     type: MessageType.ListMailProcesses,
-    payload: { query: { kind: target, searchKey, pageIndex: nextPage, pageSize } }
+    payload: { query: { kind: target, searchKey: '', pageIndex: nextPage, pageSize: size } }
   })
+  if (response.type === MessageType.Error) return { ok: false, message: response.payload.message }
+  if (response.type !== MessageType.ListMailProcessesResult) return { ok: false, message: '流程列表返回了意外结果。' }
+  if (!response.payload.ok) return { ok: false, message: textFor(response.payload.error.code, response.payload.error.message) }
+  if (response.payload.data.kind !== target) return { ok: false, message: '流程列表类型和当前页签不一致。' }
+  return { ok: true, items: response.payload.data.items, total: response.payload.data.total, pageIndex: response.payload.data.pageIndex }
+}
+
+async function requestList(target: ProcessKind, nextPage: number, searchKey: string): Promise<string> {
+  const pageResult = await readPage(target, nextPage, pageSize)
   const visible = () => kind.value === target && query.value.trim() === searchKey
-  if (response.type === MessageType.Error) {
-    if (visible()) message.value = response.payload.message
-    return response.payload.message
+  if (!pageResult.ok) {
+    if (visible()) message.value = pageResult.message
+    return pageResult.message
   }
-  if (response.type !== MessageType.ListMailProcessesResult) {
-    const text = '流程列表返回了意外结果。'
-    if (visible()) message.value = text
-    return text
-  }
-  if (!response.payload.ok) {
-    const text = textFor(response.payload.error.code, response.payload.error.message)
-    if (visible()) message.value = text
-    return text
-  }
-  if (response.payload.data.kind !== target) {
-    const text = '流程列表类型和当前页签不一致。'
-    if (visible()) message.value = text
-    return text
-  }
-  remember(target, searchKey, response.payload.data.pageIndex, response.payload.data.items, response.payload.data.total)
+  remember(target, searchKey, pageResult.pageIndex, pageResult.items, pageResult.total)
   return ''
+}
+
+async function fillCatalog(target: ProcessKind, epoch: number): Promise<string> {
+  const first = await readPage(target, 1, catalogSize)
+  if (catalogEpoch.get(target) !== epoch) return ''
+  if (!first.ok) return first.message
+  const listRows = [...first.items]
+  let index = 2
+  while (listRows.length < first.total && listRows.length < catalogCap) {
+    const next = await readPage(target, index, catalogSize)
+    if (catalogEpoch.get(target) !== epoch) return ''
+    if (!next.ok) return next.message
+    if (next.items.length === 0) break
+    listRows.push(...next.items)
+    index += 1
+  }
+  if (catalogEpoch.get(target) !== epoch) return ''
+  catalogs.set(target, { rows: listRows, total: first.total })
+  totals.value = { ...totals.value, [target]: first.total }
+  return ''
+}
+
+async function ensureCatalog(target: ProcessKind, force: boolean): Promise<string> {
+  if (!force && catalogs.has(target)) return ''
+  const epoch = (catalogEpoch.get(target) ?? 0) + 1
+  catalogEpoch.set(target, epoch)
+  catalogs.delete(target)
+  return fillCatalog(target, epoch)
+}
+
+function showMatches(target: ProcessKind, searchKey: string, nextPage: number): void {
+  const catalog = catalogs.get(target)
+  if (!catalog || kind.value !== target || query.value.trim() !== searchKey) return
+  const matched = filterProcessRows(catalog.rows, target, searchKey)
+  const lastPage = Math.max(1, Math.ceil(matched.length / pageSize))
+  const safePage = Math.min(Math.max(1, nextPage), lastPage)
+  rows.value = matched.slice((safePage - 1) * pageSize, safePage * pageSize)
+  total.value = matched.length
+  page.value = safePage
+  totals.value = { ...totals.value, [target]: catalog.total }
+  const matchedText = `匹配到 ${matched.length} 条。`
+  message.value = catalog.rows.length < catalog.total
+    ? `${matchedText}这一页签共 ${catalog.total} 条，这次只读了前 ${catalog.rows.length} 条。`
+    : matchedText
 }
 
 function switchKind(next: ProcessKind): void {
@@ -153,10 +196,30 @@ async function load(nextPage = page.value, force = true): Promise<void> {
   }
   const epoch = ++viewEpoch
   const searchKey = query.value.trim()
-  if (!force && showCached(kind.value, searchKey, nextPage)) return
+  const target = kind.value
+  if (searchKey) {
+    loading.value = true
+    message.value = ''
+    rows.value = []
+    total.value = 0
+    const error = await ensureCatalog(target, force)
+    if (viewEpoch !== epoch || kind.value !== target || query.value.trim() !== searchKey) {
+      if (viewEpoch === epoch) loading.value = false
+      return
+    }
+    if (error) {
+      message.value = error
+      loading.value = false
+      return
+    }
+    showMatches(target, searchKey, nextPage)
+    loading.value = false
+    return
+  }
+  if (!force && showCached(target, '', nextPage)) return
   loading.value = true
   message.value = ''
-  await fetchList(kind.value, nextPage, searchKey)
+  await fetchList(target, nextPage, '')
   if (viewEpoch === epoch) loading.value = false
 }
 
@@ -166,20 +229,26 @@ async function loadAll(): Promise<void> {
     return
   }
   const epoch = ++viewEpoch
-  const searchKey = query.value.trim()
   loading.value = true
   message.value = ''
   const current = kind.value
-  await Promise.all(specs.map(spec => fetchList(spec.kind, 1, searchKey).then(() => {
-    if (viewEpoch === epoch && spec.kind === current) loading.value = false
+  await Promise.all(specs.map(spec => fetchList(spec.kind, 1, '').then(() => {
+    if (viewEpoch === epoch && spec.kind === current && !query.value.trim()) loading.value = false
   })))
-  if (viewEpoch === epoch) loading.value = false
+  if (viewEpoch !== epoch) return
+  if (query.value.trim()) {
+    await load(1, true)
+    return
+  }
+  loading.value = false
 }
 
 watch(ready, (ok) => {
   if (!ok) {
     slots.value = {}
     totals.value = {}
+    catalogs.clear()
+    catalogEpoch.clear()
     rows.value = []
     total.value = 0
     return
@@ -196,7 +265,7 @@ watch(ready, (ok) => {
         {{ spec.label }}<small v-if="totals[spec.kind] != null"> ({{ totals[spec.kind] }})</small>
       </button>
     </div>
-    <p class="hint">列表来自 EASY 待办流程。这里只读取，不会提交或结束流程。</p>
+    <p class="hint">列表来自 EASY 待办流程。搜索会先读完当前页签，再在本地匹配：发文看主题、客户和收件人，提案看名称、客户和文号，递交看文号、客户和案件。</p>
     <div class="filters">
       <label class="grow"><input v-model="query" :placeholder="placeholders[kind]" @keydown.enter="load(1)" /></label>
       <button type="button" class="ghost" :disabled="loading" @click="load(1)">{{ loading ? '查询中' : '查询' }}</button>
@@ -206,7 +275,7 @@ watch(ready, (ok) => {
     <p v-else-if="message" class="hint">{{ message }}</p>
     <p v-if="staleBackground" class="hint">三个页签都会带上流程类型。正在运行的后台还是移动列表之前的版本，所以会整条拒绝。</p>
     <button v-if="staleBackground" type="button" class="solid" @click="reloadExtension">重新加载扩展</button>
-    <p v-else-if="!loading && rows.length === 0" class="empty">这次没有查到待办。换个条件再查，或点刷新。</p>
+    <p v-else-if="!loading && !message && rows.length === 0" class="empty">{{ query.trim() ? '当前页签里没有匹配到这个词。' : '这次没有查到待办。换个条件再查，或点刷新。' }}</p>
     <table v-if="ready && rows.length" class="grid">
       <thead>
         <tr>
@@ -224,9 +293,9 @@ watch(ready, (ok) => {
     <div v-if="total > pageSize" class="pager">
       <span>共 {{ total }} 条</span>
       <div>
-        <button type="button" :disabled="page <= 1 || loading" @click="load(page - 1)">上一页</button>
+        <button type="button" :disabled="page <= 1 || loading" @click="load(page - 1, !query.trim())">上一页</button>
         <button type="button" class="on">{{ page }}</button>
-        <button type="button" :disabled="page * pageSize >= total || loading" @click="load(page + 1)">下一页</button>
+        <button type="button" :disabled="page * pageSize >= total || loading" @click="load(page + 1, !query.trim())">下一页</button>
       </div>
     </div>
   </section>
