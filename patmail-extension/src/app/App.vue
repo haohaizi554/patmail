@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, provide, ref } from 'vue'
 import { createFullPageBridge } from './services/full-page-bridge'
 import { useWorkspace } from './composables/useWorkspace'
+import { useAccountAvatar } from '../settings/use-account-avatar'
 import HomePage from './pages/HomePage.vue'
 import FilesPage from './pages/FilesPage.vue'
 import CustomersPage from './pages/CustomersPage.vue'
@@ -27,7 +28,7 @@ const nav = [
   { name: '发文映射', path: 'rule', hash: '/rules' },
   { name: '发文任务', path: 'task', hash: '/tasks' },
   { name: '发文记录', path: 'record', hash: '/records' },
-  { name: '文件查询模板', path: 'chart', hash: '/templates' },
+  { name: '查询模板', path: 'chart', hash: '/templates' },
   { name: '邮件草稿', path: 'task', hash: '/drafts' },
   { name: '工作流', path: 'rule', hash: '/workflow' }
 ]
@@ -51,6 +52,7 @@ const pageName = computed(() => route.value === '/settings' ? '系统设置' : r
 const page = computed(() => pages[route.value as keyof typeof pages] ?? HomePage)
 const profileName = computed(() => workspace.connection.value.displayName || '未登录')
 const profileDept = computed(() => workspace.connection.value.sessionStatus === 'authenticated' ? 'EASY 已连接' : '尚未连接')
+const { src: avatarSrc, zoomed, zoomSrc, openZoom, closeZoom } = useAccountAvatar()
 
 function go(name: string): void {
   const item = nav.find(entry => entry.name === name)
@@ -58,7 +60,7 @@ function go(name: string): void {
 }
 
 function onShellSettings(name: string): void {
-  if (name === '系统设置') location.hash = '/settings'
+  if (name === '系统设置' || name === '个人资料') location.hash = '/settings'
 }
 provide('bridge', createFullPageBridge())
 
@@ -80,10 +82,14 @@ onUnmounted(() => window.removeEventListener('hashchange', onHash))
 </script>
 
 <template>
-  <Shell :page="pageName" :search="search" placeholder="搜索我方文号、客户或申请号..." :items="nav" :profile-name="profileName" :profile-dept="profileDept" :show-demo="false" :show-settings="true" @navigate="go" @settings="onShellSettings" @update:search="search = $event">
+  <Shell :page="pageName" :search="search" placeholder="搜索我方文号、客户或申请号..." :items="nav" :profile-name="profileName" :profile-dept="profileDept" :avatar-src="avatarSrc" :show-demo="false" :show-settings="true" @navigate="go" @settings="onShellSettings" @preview="openZoom()" @update:search="search = $event">
     <KeepAlive>
       <component :is="page" :key="route" />
     </KeepAlive>
   </Shell>
   <AppDialog />
+  <div v-if="zoomed" class="avatar-zoom" @click="closeZoom">
+    <button type="button" aria-label="关闭" @click="closeZoom">×</button>
+    <img :src="zoomSrc" alt="" @click.stop />
+  </div>
 </template>

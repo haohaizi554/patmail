@@ -11,10 +11,11 @@ const props = defineProps({
   items: { type: Array, default: null },
   profileName: { type: String, default: '林小樱' },
   profileDept: { type: String, default: '知识产权部' },
+  avatarSrc: { type: String, default: '' },
   showDemo: { type: Boolean, default: true },
   showSettings: { type: Boolean, default: true }
 })
-const emit = defineEmits(['navigate', 'update:search', 'settings'])
+const emit = defineEmits(['navigate', 'update:search', 'settings', 'preview'])
 const menu = computed(() => props.items || nav)
 </script>
 
@@ -34,7 +35,8 @@ const menu = computed(() => props.items || nav)
         <i v-if="showDemo">3</i>
       </button>
       <button class="profile" @click="emit('settings', '个人资料')">
-        <Avatar />
+        <img v-if="avatarSrc" class="avatar-face" :src="avatarSrc" alt="" title="点击放大" @click.stop="emit('preview')" />
+        <Avatar v-else />
         <span><b>{{ profileName }}</b><small>{{ profileDept }}</small></span>
         <svg viewBox="0 0 12 12"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
       </button>
@@ -57,7 +59,7 @@ const menu = computed(() => props.items || nav)
           </button>
         </nav>
         <img class="mascot" :src="bg('专业细节，守护创新.png')" alt="专注细节 守护创新 让知识更有力量" />
-        <button v-if="showSettings" class="settings" @click="emit('settings', '系统设置')">
+        <button v-if="showSettings" class="settings" :class="{ active: page === '系统设置' }" @click="emit('settings', '系统设置')">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.5 1.5M16.5 16.5 18 18M18 6l-1.5 1.5M7.5 16.5 6 18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           系统设置
         </button>
