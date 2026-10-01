@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 3.1 EASY 会话恢复
 
 `EasyConnectionContext` 增加 `connectionVersion` 和 `lastOperatorId`。

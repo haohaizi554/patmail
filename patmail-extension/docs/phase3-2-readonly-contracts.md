@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 3.2 只读接口契约
 
 `readonlyContract` 按接口选择已经在业务服务里核对过的参数。缺参返回 `blocked`。请求字段还不能从当前上下文凑齐时返回 `pending`，文案带 `CONTRACT_PENDING`。这两种都不会 `post`。

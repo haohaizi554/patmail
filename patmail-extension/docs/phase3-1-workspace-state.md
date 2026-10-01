@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 3.1 工作台状态
 
 `useWorkspace` 仍是模块级的一份 Vue 状态，首页、文件页、客户页、规则页和任务页读同一组 ref。

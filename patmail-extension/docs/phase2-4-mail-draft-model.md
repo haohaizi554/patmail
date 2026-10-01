@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 2.4 草稿模型
 
 `MailDraftPreview` 是 PatMail 在浏览器里算出的核对结果。它不是 EASY 已经创建的邮件。

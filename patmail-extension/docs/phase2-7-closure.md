@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 2.7 收口
 
 日期：2026-09-26。本文件记录进入 Phase 2.8 之前对现有源码的审计，以及 Phase 2.8 如何收口这些缺口。审计以 `src/automation/`、`src/mail/`、`src/workflow/`、`src/floating/AutomationPanel.vue`、`src/background/index.ts` 和 Phase 2.7 测试为准。

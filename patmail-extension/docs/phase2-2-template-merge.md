@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 2.2 模板合并
 
 合并函数是 `resolveQueryTemplate(base, customer, temporary)`。它不修改入参，结果放在 `Object.create(null)` 上。

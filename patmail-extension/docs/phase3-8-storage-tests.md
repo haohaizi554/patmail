@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 3.8 存储测试
 
 没有 IndexedDB 时，`defaultPut()` 返回不可用，会话记为 `MEMORY_ONLY`。清掉当前进程内存后，这份记录不能恢复，也不能继续当作可信来源。生产代码不再用内存 Map 冒充 `PERSISTED`。

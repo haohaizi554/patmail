@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 3.3 可信任务
 
 新计划只由 `Workspace.createTaskPlan` 经后台 `planTrustedTask` 生成。后台保存后返回 `CreatedTaskResult`：

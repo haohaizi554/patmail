@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 2.3 业务 Schema
 
 字段定义在 `FILE_SEARCH_SCHEMA`。表单按这份描述渲染，不在页面里再写一套字段名单。

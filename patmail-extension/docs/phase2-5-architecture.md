@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 2.5 架构
 
 日期：2026-09-26。范围是把 PatMail 本地 `MailDraftPreview` 接到 EASY 邮件草稿的创建和保存。不发送、不提交流程、不审核。

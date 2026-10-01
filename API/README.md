@@ -1,5 +1,7 @@
 # 专利案件管理系统接口文档
 
+这些是原站抓包和页面对出来的接口记录，不是插件的现行说明。插件现在怎么工作，见仓库根目录 [README](../README.md)。使用范围见 [LICENSE](../LICENSE)。
+
 服务地址：`http://183.36.43.66:88`  
 技术栈：ASP.NET WebForms，Ajax `.ashx` Handler  
 统一入口：`POST /AjaxServers/*.ashx`  

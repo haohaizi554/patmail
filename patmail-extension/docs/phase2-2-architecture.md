@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 2.2 架构
 
 Phase 2.2 在 Phase 2.1 的 `EasyRuntime` 上增加历史查询模板读取、QueryXml 解析、本地模板、客户覆盖和三层合并。文件查询仍走原来的 `GetSearchFiles`。

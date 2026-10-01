@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 3.9 证据聚合
 
 `aggregatePersistence()` 不再滤掉缺失的 `persistence`。只有每一份选中文件都明确是 `PERSISTED`，任务整体才是 `PERSISTED`。任一文件缺失、`UNKNOWN`、`FAILED` 或 `MEMORY_ONLY`，整体都不是 `PERSISTED`。

@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 3.2 收口
 
 Phase 3.2 已经把完整页面的客户、模板和规则写入收进 Background，并用 `createTaskPlan` 生成任务。随后的源码审计确认这些还没有封口：

@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 3.3 报告
 
 本次在 `patmail-extension` 内执行，结果来自这一轮命令，不沿用以前报告里的次数。

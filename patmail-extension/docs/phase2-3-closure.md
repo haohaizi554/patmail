@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 2.3 遗留问题收口
 
 日期：2026-09-24。以下是 Phase 2.4 开始前要求收口的项目。代码和单测已处理；真实 EASY 核对仍按 [phase2-4-acceptance.md](phase2-4-acceptance.md) 保持 PENDING。

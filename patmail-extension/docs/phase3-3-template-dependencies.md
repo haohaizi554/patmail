@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 3.3 模板依赖
 
 `queryTemplateVersionOf` 不再做字符码求和，固定返回 `0`。它不再承担业务变更检测。

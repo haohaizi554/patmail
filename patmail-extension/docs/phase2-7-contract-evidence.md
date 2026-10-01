@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 2.7 接口契约证据
 
 日期：2026-09-26。目录在 `src/automation/contract-evidence.ts`。

@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 2.3 验收
 
 自动化使用脱敏 fixture 和 mock transport，不访问真实 EASY。

@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 3.1 Origin 审计
 
 完整页面的 `location.origin` 是 `chrome-extension://...`。EASY 业务 Origin 是 `http://183.36.43.66:88`。后台 `SaveTask` 要求 `task.origin === connection.easyOrigin`。

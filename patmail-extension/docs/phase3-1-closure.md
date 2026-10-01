@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 3.1 收口
 
 Phase 3.1 已把完整页面接到现有 Background：EASY 绑定、客户覆盖保留、规则单写入口、任务按 EASY Origin 保存、缺参验收不发请求。真实 EASY 登录当时就是 PENDING，生产写开关保持关闭。

@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 3.0 架构
 
 正式界面是扩展内的完整页面 `app.html`。地址形如 `chrome-extension://<extension-id>/app.html`。`localhost:5173` 只作为根目录原型的开发预览，不是插件运行依赖。

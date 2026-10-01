@@ -1,3 +1,5 @@
+> 本文不是现行产品说明。插件现在怎么工作，见 [../../README.md](../../README.md)。使用范围见 [../../LICENSE](../../LICENSE)。
+
 # Phase 3.0 收口
 
 Phase 3.0 打开了 `chrome-extension://<id>/app.html`，图标会聚焦或创建这个页面，默认不再注入悬浮窗。数据路径是完整页面消息到后台，再进既有 Repository。
