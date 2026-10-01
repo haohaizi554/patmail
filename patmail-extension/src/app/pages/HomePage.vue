@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import PageHead from '../../../../src/components/PageHead.vue'
 import { bg, icon } from '../../../../src/assets'
+import { greetingForHour } from '../greeting'
+import { pickHomeLine } from '../home-lines'
 import { useWorkspace } from '../composables/useWorkspace'
 import EmptyGuide from '../components/EmptyGuide.vue'
 import wechatQr from '../assets/wechat-qr.png'
@@ -9,7 +11,19 @@ import wechatQr from '../assets/wechat-qr.png'
 const { connection, customers, tasks, rules } = useWorkspace()
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
 const unknownCount = computed(() => tasks.value.filter(item => item.status === 'UNKNOWN').length)
-const title = computed(() => connection.value.displayName ? `下午好，${connection.value.displayName}！` : '首页')
+const now = ref(new Date())
+let clock = 0
+onMounted(() => {
+  clock = window.setInterval(() => {
+    now.value = new Date()
+  }, 60_000)
+})
+onUnmounted(() => window.clearInterval(clock))
+const title = computed(() => {
+  const name = connection.value.displayName
+  return name ? `${greetingForHour(now.value.getHours())}，${name}！` : '首页'
+})
+const desc = pickHomeLine()
 const qrOpen = ref(false)
 const wechatButton = ref<HTMLButtonElement | null>(null)
 const qrClose = ref<HTMLButtonElement | null>(null)
@@ -25,7 +39,7 @@ watch(qrOpen, (open) => {
 </script>
 
 <template>
-  <PageHead :title="title" desc="今日已为您准备好了最新的发文任务，一起继续加油吧！" :art="bg('专注每一次发文，让知识更有力量.png')">
+  <PageHead :title="title" :desc="desc" :art="bg('专注每一次发文，让知识更有力量.png')">
     <address class="page-contact">
       <button ref="wechatButton" type="button" class="contact-hit" :aria-expanded="qrOpen" aria-haspopup="dialog" @click="qrOpen = true">
         <span>WeChat</span><b>MemoryLeak2023</b>
