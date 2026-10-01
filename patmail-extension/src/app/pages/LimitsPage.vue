@@ -12,7 +12,7 @@ import { fetchMailSenders } from '../../customer/mailset-load'
 import type { MailSender } from '../../customer/mailset'
 import { fillSheetEmails } from '../../customer/customer-page'
 import { applyPctMailTypes, clonePctTask, matchSheetCtrlProcs, pctRowsFromTable, readWorkflowTask, summarizePctTask, volumesOf, writeWorkflowTask } from '../../customer/pct-sheet'
-import { limitMailItems, limitMailLetterLabel, limitMailProcIds, runLimitMailSubmit } from '../../customer/limit-mail-submit'
+import { limitMailItems, limitMailLetterLabel, limitMailProcIds, limitMailSubmitShouldHalt, runLimitMailSubmit, runMailLetterPool } from '../../customer/limit-mail-submit'
 import { planPctRecipients, currentMailId, sheetRowsOnMail } from '../../customer/pct-recipients'
 import { inventorCustomerNames, pctRuntimeFrom, recipientModeForTask, workflowSender } from '../../workflow/catalog'
 import { isPctTask } from '../../customer/guards'
@@ -25,9 +25,11 @@ import { MessageType, type MessageBridge } from '../../shared/message'
 import { useWorkflowCatalog } from '../composables/useWorkflowCatalog'
 import { useWorkspace } from '../composables/useWorkspace'
 import { infoDialog } from '../dialog'
+import { useMailConcurrency } from '../../settings/use-mail-concurrency'
 import { useWriteSwitch } from '../../settings/use-write-switch'
 
 const { open: writesOpen, ready: writesReady } = useWriteSwitch()
+const { concurrency } = useMailConcurrency()
 const bridge = inject<MessageBridge>('bridge')
 const { connection, customers, rules, call } = useWorkspace()
 const { catalog } = useWorkflowCatalog()
@@ -361,20 +363,20 @@ async function onSubmitAsk(): Promise<void> {
     message.value = planned.message
     return
   }
-  const notes: string[] = []
-  for (let index = 0; index < planned.items.length; index += 1) {
-    const item = planned.items[index]
-    if (!item) continue
+  const notes = new Array<string>(planned.items.length).fill('')
+  const sent = new Set<string>()
+  const width = concurrency.value
+  await runMailLetterPool(planned.items, width, async (item, index) => {
     const label = limitMailLetterLabel(item, id => rows.value.find(entry => entry.procId === id)?.caseVolume ?? '')
     message.value = `正在提交 ${index + 1}/${planned.items.length}（${label}）。`
     const text = await runLimitMailSubmit(bridge, connection.value.operatorId, [item], gates.value)
-    notes.push(text)
+    notes[index] = text
     if (text.startsWith('已提交')) {
-      const sent = new Set(limitMailProcIds(item).map(id => id.toLowerCase()))
-      confirmedIds.value = confirmedIds.value.filter(id => !sent.has(id.toLowerCase()))
+      for (const id of limitMailProcIds(item)) sent.add(id.toLowerCase())
     }
-    if (/无法确认|没有再次|写开关|没有提交到审核人|登录已失效/.test(text) && !text.startsWith('已提交')) break
-  }
+    return limitMailSubmitShouldHalt(text)
+  })
+  if (sent.size) confirmedIds.value = confirmedIds.value.filter(id => !sent.has(id.toLowerCase()))
   message.value = notes.filter(Boolean).join('')
 }
 

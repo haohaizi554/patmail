@@ -8,6 +8,7 @@ import { planPctRecipients, sheetDisplayName, usesInventorSheet } from './pct-re
 import type { PctTaskRow } from './types'
 import { groupWorkflowRows } from './workflow-mail'
 import { isQueryGuid } from '../query/query-validator'
+import { clampMailConcurrency } from '../settings/mail-concurrency'
 import { isWriteSwitchOpen } from '../settings/write-switch'
 import { MessageType, type MessageBridge } from '../shared/message'
 import {
@@ -543,6 +544,37 @@ export function summarizeLimitMailSubmit(results: LimitMailSubmitResult[], stopp
       : `已提交 ${submitted.length} 件给当前登录人审核。`
   if (!last) return head
   return stopped ? `${head}${last.message}` : head
+}
+
+/** 结果没确认、写开关关掉或登录失效时，还没开始的封不再开始。 */
+export function limitMailSubmitShouldHalt(text: string): boolean {
+  return /无法确认|没有再次|写开关|没有提交到审核人|登录已失效/.test(text) && !text.startsWith('已提交')
+}
+
+/** 按封并发。一封内部仍由 submitOne 按顺序走。width 为 1 时，上一封返回之后才取下一封。 */
+export async function runMailLetterPool<T>(
+  items: T[],
+  size: number,
+  worker: (item: T, index: number) => Promise<boolean>
+): Promise<{ halted: boolean; unstarted: T[] }> {
+  const width = clampMailConcurrency(size)
+  let next = 0
+  let halted = false
+  async function run(): Promise<void> {
+    for (;;) {
+      if (halted) return
+      const index = next
+      if (index >= items.length) return
+      next += 1
+      const item = items[index]
+      if (item === undefined) return
+      const stop = await worker(item, index)
+      if (stop) halted = true
+    }
+  }
+  const workers = Math.min(width, items.length)
+  if (workers > 0) await Promise.all(Array.from({ length: workers }, () => run()))
+  return { halted, unstarted: items.slice(next) }
 }
 
 export async function runLimitMailSubmit(
