@@ -152,7 +152,7 @@ export type ContentRequest =
   | Response<'READ_MAIL_ADDRESSES', { mailId: string }>
   | Response<'LIST_HISTORY_QUERIES', { force: boolean; surface?: 'file' | 'limit' }>
   | Response<'GET_HISTORY_QUERY', { queryId: string; surface?: 'file' | 'limit' }>
-  | Response<'SAVE_HISTORY_QUERY', { title: string; queryId: string; queryXml: string }>
+  | Response<'SAVE_HISTORY_QUERY', { title: string; queryId: string; queryXml: string; surface?: 'file' | 'limit' }>
   | Response<'LOAD_DICTIONARY', DictionaryLoadRequest>
   | Request<'SCAN_FILE_SEARCH_FORM'>
   | Response<'CREATE_EASY_MAIL', { preview: MailDraftPreview; selection: SelectionClaim; confirmed: true }>
@@ -499,7 +499,9 @@ export function isMessage(value: unknown): value is AppMessage {
         (value.payload.queryId === '' || isQueryGuid(value.payload.queryId)) &&
         typeof value.payload.queryXml === 'string' && value.payload.queryXml.length <= 200_000 &&
         value.payload.queryXml.startsWith('<xmlRoot>') && value.payload.queryXml.endsWith('</xmlRoot>') &&
-        !/<!DOCTYPE|<!ENTITY/i.test(value.payload.queryXml) && Object.keys(value.payload).length === 3
+        !/<!DOCTYPE|<!ENTITY/i.test(value.payload.queryXml) &&
+        (value.payload.surface === undefined || value.payload.surface === 'file' || value.payload.surface === 'limit') &&
+        Object.keys(value.payload).every(key => key === 'title' || key === 'queryId' || key === 'queryXml' || key === 'surface')
     case MessageType.LoadDictionary:
       return isDictionaryRequest(value.payload)
     case MessageType.ScanFileSearchForm:

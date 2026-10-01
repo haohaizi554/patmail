@@ -274,10 +274,10 @@ export class EasyRuntime {
     return this.history.detail(this.historyUserKey, surface, queryId, signal)
   }
 
-  async saveHistoryQuery(title: string, queryId: string, queryXml: string, signal?: AbortSignal): Promise<ApiResult<{ saved: true }>> {
+  async saveHistoryQuery(title: string, queryId: string, queryXml: string, signal?: AbortSignal, surface: HistorySurface = 'file'): Promise<ApiResult<{ saved: true }>> {
     if (!isWriteSwitchOpen()) return apiError('BUSINESS_ERROR', '写开关已关闭。')
     await this.confirmAccountRead()
-    return this.history.save(this.historyUserKey, 'file', { title, queryId, queryXml }, signal)
+    return this.history.save(this.historyUserKey, surface, { title, queryId, queryXml }, signal)
   }
 
   private async mailUser(): Promise<{ ok: true; userId: string } | { ok: false; message: string }> {

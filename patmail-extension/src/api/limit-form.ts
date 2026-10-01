@@ -166,6 +166,31 @@ export const LIMIT_BLOCKS: LimitBlock[] = [
 ]
 
 const DISPLAY_ONLY = new Set(['business_type_other'])
+const LIMIT_NODE = /^[A-Za-z_][A-Za-z0-9_]*$/
+const FIELD_TO_LIMIT_XML: Record<string, string> = {}
+for (const [node, field] of Object.entries(LIMIT_XML_TO_FIELD)) {
+  if (!FIELD_TO_LIMIT_XML[field]) FIELD_TO_LIMIT_XML[field] = node
+}
+
+function escapeLimitXml(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/** 按原网站期限模板的控件名写回去。读入时再映回查询字段。 */
+export function buildLimitQueryXml(fields: Record<string, string>): string {
+  const parts: string[] = []
+  const used = new Set<string>()
+  for (const key of Object.keys(fields).sort()) {
+    if (!isLimitMonitorInputField(key)) continue
+    const text = fields[key]?.trim() ?? ''
+    if (!text) continue
+    const node = FIELD_TO_LIMIT_XML[key] ?? key
+    if (!LIMIT_NODE.test(node) || used.has(node)) continue
+    used.add(node)
+    parts.push(`<${node}>${escapeLimitXml(text)}</${node}>`)
+  }
+  return `<xmlRoot>${parts.join('')}</xmlRoot>`
+}
 
 function limitField(nodeName: string): string | null {
   if (DISPLAY_ONLY.has(nodeName)) return nodeName

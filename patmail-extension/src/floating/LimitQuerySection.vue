@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import ThemeSelect from '../../../src/components/ThemeSelect.vue'
 import TreeOptionSelect from '../../../src/components/TreeOptionSelect.vue'
 import type { HistoryQueryOption } from '../api/query-history'
-import { LIMIT_BLOCKS, LIMIT_OPTION_KEYS, LIMIT_SELECTS, readLimitQueryXml } from '../api/limit-form'
+import { LIMIT_BLOCKS, LIMIT_OPTION_KEYS, LIMIT_SELECTS, buildLimitQueryXml, readLimitQueryXml } from '../api/limit-form'
 import { pageSelectOptions } from '../query/form-page'
 import { activateOptionFallback, hydrateOptionFallback, optionFallbackEpoch, rememberDictionaries, savedChoices, subscribeOptionFallback } from '../query/option-fallback'
 import type { NormalizedDictionary } from '../api/dictionaries'
@@ -27,6 +27,8 @@ const selectedId = ref('')
 const showMore = ref(false)
 const loading = ref(false)
 const message = ref('')
+const saveName = ref('')
+const saving = ref(false)
 const checking = ref(false)
 const checkMessage = ref('')
 const pickers = ref<Record<string, NormalizedDictionary>>({})
@@ -144,6 +146,52 @@ async function applyTemplate(id: string): Promise<void> {
     return
   }
   values.value = parsed.data
+  const named = templates.value.find(item => item.id === id)
+  if (named) saveName.value = named.name
+}
+
+async function saveTemplate(): Promise<void> {
+  if (!props.bridge || saving.value) return
+  const title = saveName.value.trim()
+  if (!title) {
+    message.value = '先写模板名称。'
+    return
+  }
+  const fields: Record<string, string> = {}
+  for (const [key, value] of Object.entries(values.value)) {
+    if (isLimitMonitorInputField(key) && value.trim()) fields[key] = value.trim()
+  }
+  if (!Object.keys(fields).length) {
+    message.value = '先填写至少一项查询条件，再保存。'
+    return
+  }
+  const same = templates.value.find(item => item.name === title)
+  const queryId = same && isQueryGuid(same.id) ? same.id : ''
+  saving.value = true
+  message.value = '正在写入原网站的期限模板…'
+  try {
+    const response = await props.bridge.request({
+      type: MessageType.SaveHistoryQuery,
+      payload: { title, queryId, queryXml: buildLimitQueryXml(fields), surface: 'limit' }
+    })
+    if (response.type !== MessageType.HistoryQuerySaved || !response.payload.ok) {
+      message.value = response.type === MessageType.HistoryQuerySaved && !response.payload.ok
+        ? response.payload.error.message
+        : response.type === MessageType.Error ? response.payload.message : '原网站没有保存这份期限模板。'
+      return
+    }
+    await loadTemplates(true)
+    const saved = templates.value.find(item => item.name === title)
+    if (saved) {
+      selectedId.value = saved.id
+      saveName.value = saved.name
+    }
+    message.value = queryId ? '已更新原网站上的这份期限模板。' : '已在原网站新建这份期限模板。'
+  } catch {
+    message.value = '保存期限模板失败。'
+  } finally {
+    saving.value = false
+  }
 }
 
 function search(): void {
@@ -264,8 +312,15 @@ watch(() => [valueOf('case_type'), valueOf('proc_type'), valueOf('country')].joi
     </div>
     <p v-if="loading" class="hint">正在读取当前账号的期限模板…</p>
     <p v-if="message" class="hint">{{ message }}</p>
+    <ul v-if="templates.length" class="template-picks">
+      <li v-for="item in templates" :key="item.id">
+        <button type="button" :class="{ on: selectedId === item.id }" @click="applyTemplate(item.id)">
+          <b>{{ item.name }}</b>
+        </button>
+      </li>
+    </ul>
     <label>选用模板
-      <ThemeSelect :model-value="selectedId" placeholder="请选择" :options="templates.map(item => ({ value: item.id, label: item.name }))" @update:model-value="applyTemplate(String($event))" />
+      <ThemeSelect :model-value="selectedId" placeholder="请选择" empty-text="当前账号还没有期限监控模板。" :options="templates.map(item => ({ value: item.id, label: item.name }))" @update:model-value="applyTemplate(String($event))" />
     </label>
     <div class="query-conditions">
       <div class="section-heading">
@@ -319,8 +374,10 @@ watch(() => [valueOf('case_type'), valueOf('proc_type'), valueOf('country')].joi
       </section>
     </div>
     <div class="form-actions">
+      <label class="limit-save">模板名称<input v-model="saveName" type="text" maxlength="80" /></label>
+      <button class="ghost" type="button" :disabled="!canRead || saving" @click="saveTemplate">{{ saving ? '正在保存…' : '保存到网站' }}</button>
       <button class="ghost" type="button" @click="reset">重置</button>
-      <button class="solid" type="button" :disabled="!canSearch" @click="search">查询</button>
+      <button v-if="canSearch" class="solid" type="button" @click="search">查询</button>
     </div>
   </section>
 </template>

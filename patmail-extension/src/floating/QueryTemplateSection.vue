@@ -1025,7 +1025,7 @@ watch(selectedCustomerId, () => {
     </ul>
     <p v-else-if="!loadingHistory && mode === 'customer' && manage" class="empty">还没有客户。点下面的新增客户。</p>
 
-    <EmptyGuide v-if="mode === 'history' && !manage && !loadingHistory && historyOptions.length === 0 && localTemplates.length === 0" text="还没有查询模板。去文件查询模板新建一个，再回来选用。" action="去建模板" hash="/templates" />
+    <EmptyGuide v-if="mode === 'history' && !manage && !loadingHistory && historyOptions.length === 0 && localTemplates.length === 0" text="还没有查询模板。去查询模板页新建一个，再回来选用。" action="去建模板" hash="/templates" />
     <label v-else-if="mode === 'history'">选用模板
       <ThemeSelect v-model="selectedBaseId" :disabled="loadingHistory && historyOptions.length === 0" :placeholder="loadingHistory && historyOptions.length === 0 ? '正在读取…' : '请选择'" empty-text="还没有模板。点下面的新建本地模板，或点上面的重新读取。" :options="[...historyOptions.map(item => ({ value: item.id, label: item.name, group: 'EASY' })), ...localTemplates.map(item => ({ value: item.id, label: item.name, group: '本地' }))]" @change="startApply(selectedBaseId)" />
     </label>
@@ -1046,7 +1046,7 @@ watch(selectedCustomerId, () => {
       <button type="button" class="text-button" :disabled="!selectedLocal" @click="openTemplateEditor(selectedLocal ?? undefined)">编辑本地模板</button>
       <button type="button" class="text-button" :disabled="!selectedLocal" @click="deleteSelectedLocal">删除本地模板</button>
     </div>
-    <div v-if="manage" class="inline-actions" aria-label="客户操作">
+    <div v-if="manage && mode === 'customer'" class="inline-actions" aria-label="客户操作">
       <button type="button" class="text-button" @click="openCustomerEditor()">新增客户</button>
       <button type="button" class="text-button" :disabled="!selectedCustomer" @click="openCustomerEditor(selectedCustomer ?? undefined)">编辑客户配置</button>
       <button type="button" class="text-button" :disabled="!selectedCustomer" @click="deleteCustomer">删除客户</button>

@@ -177,7 +177,7 @@ const bridge: MessageBridge = {
           payload: await easyRuntime.getHistoryQuery(message.payload.queryId, signal, message.payload.surface ?? 'file') }
       case MessageType.SaveHistoryQuery:
         return { type: MessageType.HistoryQuerySaved,
-          payload: await easyRuntime.saveHistoryQuery(message.payload.title, message.payload.queryId, message.payload.queryXml, signal) }
+          payload: await easyRuntime.saveHistoryQuery(message.payload.title, message.payload.queryId, message.payload.queryXml, signal, message.payload.surface === 'limit' ? 'limit' : 'file') }
       case MessageType.ScanFileSearchForm:
         return { type: MessageType.FileSearchFormResult, payload: { fields: await readFileSearchForm() } }
       case MessageType.LoadDictionary:
