@@ -4,11 +4,52 @@ import { closeDialog, closeProgress, dialogState, progressDialog } from '../dial
 
 const state = dialogState()
 const progress = progressDialog
+const dialogRoot = ref<HTMLElement | null>(null)
+const progressRoot = ref<HTMLElement | null>(null)
+const progressLog = ref<HTMLOListElement | null>(null)
 const cancelButton = ref<HTMLButtonElement | null>(null)
 const confirmButton = ref<HTMLButtonElement | null>(null)
+const progressDone = ref<HTMLButtonElement | null>(null)
 const progressPercent = computed(() => Math.min(100, Math.round((progress.done / progress.total) * 100)))
+const latestLine = computed(() => progress.lines.at(-1)?.text ?? '')
+let returnFocus: HTMLElement | null = null
+
+function rememberFocus(): void {
+  const active = document.activeElement
+  returnFocus = active instanceof HTMLElement ? active : null
+}
+
+function restoreFocus(): void {
+  const node = returnFocus
+  returnFocus = null
+  if (node?.isConnected) node.focus()
+}
+
+function focusable(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>('button, [href], input, select, textarea'))
+    .filter(node => !node.hasAttribute('disabled'))
+}
 
 function onKey(event: KeyboardEvent): void {
+  const root = progress.open ? progressRoot.value : state.open ? dialogRoot.value : null
+  if (event.key === 'Tab' && root) {
+    const items = focusable(root)
+    if (!items.length) {
+      event.preventDefault()
+      return
+    }
+    const first = items[0]
+    const last = items[items.length - 1]
+    const active = document.activeElement
+    if (event.shiftKey && (active === first || !root.contains(active))) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && (active === last || !root.contains(active))) {
+      event.preventDefault()
+      first.focus()
+    }
+    return
+  }
   if (event.key !== 'Escape') return
   if (progress.open) {
     if (!progress.finished) return
@@ -21,10 +62,35 @@ function onKey(event: KeyboardEvent): void {
   closeDialog(false)
 }
 
-watch(() => state.open, open => {
-  if (!open) return
-  void nextTick(() => (cancelButton.value ?? confirmButton.value)?.focus())
-}, { immediate: true })
+watch(() => progress.lines.length, () => {
+  void nextTick(() => {
+    const node = progressLog.value
+    if (node) node.scrollTop = node.scrollHeight
+  })
+})
+
+watch(() => progress.open, (open, was) => {
+  if (open) {
+    rememberFocus()
+    void nextTick(() => progressRoot.value?.focus())
+    return
+  }
+  if (was && !state.open) restoreFocus()
+})
+
+watch(() => progress.finished, finished => {
+  if (!finished || !progress.open) return
+  void nextTick(() => progressDone.value?.focus())
+})
+
+watch(() => state.open, (open, was) => {
+  if (open) {
+    if (!progress.open) rememberFocus()
+    void nextTick(() => (cancelButton.value ?? confirmButton.value)?.focus())
+    return
+  }
+  if (was && !progress.open) restoreFocus()
+})
 
 window.addEventListener('keydown', onKey)
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
@@ -32,7 +98,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
 <template>
   <div v-if="state.open" class="mask app-dialog" @click.self="closeDialog(false)">
-    <div class="dialog" role="dialog" aria-modal="true" :aria-labelledby="'app-dialog-title'" aria-describedby="app-dialog-message">
+    <div ref="dialogRoot" class="dialog" role="dialog" aria-modal="true" aria-labelledby="app-dialog-title" aria-describedby="app-dialog-message" tabindex="-1">
       <header>
         <h3 id="app-dialog-title">{{ state.title }}</h3>
         <button type="button" aria-label="关闭" @click="closeDialog(false)">×</button>
@@ -45,7 +111,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     </div>
   </div>
   <div v-if="progress.open" class="mask app-dialog progress-mask">
-    <div class="dialog progress-dialog" role="dialog" aria-modal="true" aria-labelledby="progress-title">
+    <div ref="progressRoot" class="dialog progress-dialog" role="dialog" aria-modal="true" aria-labelledby="progress-title" aria-describedby="progress-current" tabindex="-1" :aria-busy="!progress.finished">
       <header>
         <h3 id="progress-title">{{ progress.title }}</h3>
         <button v-if="progress.finished" type="button" aria-label="关闭" @click="closeProgress">×</button>
@@ -54,7 +120,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         <div class="send-bar"><span :style="{ width: progressPercent + '%' }"></span></div>
         <strong>{{ progressPercent }}%</strong>
       </div>
-      <ol class="progress-log">
+      <p id="progress-current" class="sr-only" aria-live="polite">{{ latestLine }}</p>
+      <ol ref="progressLog" class="progress-log">
         <li v-for="(line, index) in progress.lines" :key="index">
           <time :datetime="line.time">{{ line.time }}</time>
           <span>{{ line.text }}</span>
@@ -67,7 +134,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         <span v-if="progress.counts.skipped" class="is-skipped">跳过 {{ progress.counts.skipped }} 件</span>
       </p>
       <footer v-if="progress.finished">
-        <button type="button" class="solid" @click="closeProgress">知道了</button>
+        <button ref="progressDone" type="button" class="solid" @click="closeProgress">知道了</button>
       </footer>
     </div>
   </div>

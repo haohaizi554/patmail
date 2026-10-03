@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { beginProgress, classifySubmitText, progressDialog, progressSummaryLine, tallyProgress } from '../src/app/dialog'
+import { beginProgress, classifySubmitText, logProgress, progressDialog, progressSummaryLine, tallyProgress } from '../src/app/dialog'
 
 describe('提交进度统计', () => {
   it('对不上邮箱算异常，已提交算成功', () => {
@@ -25,5 +25,15 @@ describe('提交进度统计', () => {
     expect(progressSummaryLine()).toBe('统计：成功 3 件，失败 1 件，异常 2 件。')
     tallyProgress('skipped', 4)
     expect(progressSummaryLine()).toBe('统计：成功 3 件，失败 1 件，异常 2 件，跳过 4 件。')
+  })
+
+  it('较小的完成数不会把进度条拉回去', () => {
+    beginProgress('提交到 EASY', 4)
+    logProgress('已完成 1 封。', 1)
+    logProgress('并发下后开始的一封先报了更大的完成数。', 3)
+    logProgress('较早的一封这时才把完成数报成 1。', 1)
+    expect(progressDialog.done).toBe(3)
+    logProgress('超过总数。', 9)
+    expect(progressDialog.done).toBe(4)
   })
 })

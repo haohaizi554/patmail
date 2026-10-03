@@ -6,7 +6,7 @@ import type { LimitMonitorResult, LimitMonitorRow } from '../../api/limit-monito
 import { isLimitMonitorType, type LimitMonitorQuery } from '../../api/limit-monitor-params'
 import { clonePctTask, readWorkflowTask, writeWorkflowTask } from '../../customer/pct-sheet'
 import { limitMailItems, limitMailLetterLabel, limitMailProcIds, limitMailSubmitShouldHalt, runLimitMailSubmit, runMailLetterPool } from '../../customer/limit-mail-submit'
-import { beginProgress, classifySubmitText, logProgress, tallyProgress } from '../dialog'
+import { beginProgress, classifySubmitText, endProgress, logProgress, progressSummaryLine, tallyProgress } from '../dialog'
 import { splitCaseVolumes } from '../../customer/volume-list'
 import { isQueryGuid } from '../../query/query-validator'
 import { MessageType, type MessageBridge } from '../../shared/message'
@@ -331,38 +331,50 @@ async function onSubmitAsk(): Promise<void> {
   const abnormal: Array<{ caseVolume: string; procLabel: string }> = []
   const sent = new Set<string>()
   const width = concurrency.value
-  if (width > 1 && involved.length) await markSendGates(involved, true)
-  let finished = 0
-  const { halted, unstarted } = await runMailLetterPool(planned.items, width, async (item, index) => {
-    const letterRows = involved.filter(entry => limitMailProcIds(item).includes(entry.procId))
-    const label = limitMailLetterLabel(item, id => letterRows.find(entry => entry.procId === id)?.caseVolume ?? '')
-    logProgress(`正在核对 ${label} 的发文流程。`, index)
-    if (width <= 1 && letterRows.length) await markSendGates(letterRows, true)
-    logProgress(`正在处理 ${label}。`, index)
-    const text = await runLimitMailSubmit(bridge, props.userId, [item], gates.value)
-    const kind = classifySubmitText(text)
-    tallyProgress(kind, limitMailProcIds(item).length)
-    if (kind === 'abnormal') {
-      for (const row of letterRows) abnormal.push({ caseVolume: row.caseVolume, procLabel: row.ctrlProc })
+  let handedOff = false
+  try {
+    if (width > 1 && involved.length) await markSendGates(involved, true)
+    let finished = 0
+    const { halted, unstarted } = await runMailLetterPool(planned.items, width, async (item) => {
+      const letterRows = involved.filter(entry => limitMailProcIds(item).includes(entry.procId))
+      const label = limitMailLetterLabel(item, id => letterRows.find(entry => entry.procId === id)?.caseVolume ?? '')
+      logProgress(`正在核对 ${label} 的发文流程。`)
+      if (width <= 1 && letterRows.length) await markSendGates(letterRows, true)
+      logProgress(`正在处理 ${label}。`)
+      const text = await runLimitMailSubmit(bridge, props.userId, [item], gates.value)
+      const kind = classifySubmitText(text)
+      tallyProgress(kind, limitMailProcIds(item).length)
+      if (kind === 'abnormal') {
+        for (const row of letterRows) abnormal.push({ caseVolume: row.caseVolume, procLabel: row.ctrlProc })
+      }
+      finished += 1
+      text.split('\n').forEach((line, lineIndex) => logProgress(lineIndex === 0 ? `${label}：${line}` : line, finished))
+      if (kind === 'success') {
+        for (const id of limitMailProcIds(item)) sent.add(id.toLowerCase())
+      }
+      return limitMailSubmitShouldHalt(text)
+    })
+    if (sent.size) confirmedIds.value = confirmedIds.value.filter(id => !sent.has(id.toLowerCase()))
+    if (halted) tallyProgress('skipped', unstarted.reduce((sum, item) => sum + limitMailProcIds(item).length, 0))
+    emit('confirm', confirmedIds.value)
+    logProgress('正在回传所涉及案件的审核状态。', planned.items.length)
+    await markSendGates(involved, true)
+    emit('refreshStatus', {
+      targets: involved.map(row => ({ caseVolume: row.caseVolume, procLabel: row.ctrlProc })),
+      abnormal
+    })
+    handedOff = true
+    message.value = ''
+    publish()
+  } catch (error: unknown) {
+    logProgress(error instanceof Error ? error.message : '提交中断了。')
+    message.value = '提交中断了。进度框里有已经完成的统计。'
+  } finally {
+    if (!handedOff) {
+      logProgress(progressSummaryLine())
+      endProgress()
     }
-    finished += 1
-    text.split('\n').forEach((line, lineIndex) => logProgress(lineIndex === 0 ? `${label}：${line}` : line, finished))
-    if (kind === 'success') {
-      for (const id of limitMailProcIds(item)) sent.add(id.toLowerCase())
-    }
-    return limitMailSubmitShouldHalt(text)
-  })
-  if (sent.size) confirmedIds.value = confirmedIds.value.filter(id => !sent.has(id.toLowerCase()))
-  if (halted) tallyProgress('skipped', unstarted.reduce((sum, item) => sum + limitMailProcIds(item).length, 0))
-  emit('confirm', confirmedIds.value)
-  logProgress('正在回传所涉及案件的审核状态。', planned.items.length)
-  await markSendGates(involved, true)
-  emit('refreshStatus', {
-    targets: involved.map(row => ({ caseVolume: row.caseVolume, procLabel: row.ctrlProc })),
-    abnormal
-  })
-  message.value = ''
-  publish()
+  }
 }
 
 watch(() => props.seedToken, () => {

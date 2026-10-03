@@ -79,7 +79,9 @@ export function progressSummaryLine(): string {
 
 export function logProgress(line: string, done?: number): void {
   progressDialog.lines.push({ time: progressClock(), text: line })
-  if (done !== undefined) progressDialog.done = done
+  if (done === undefined) return
+  const next = Math.min(progressDialog.total, Math.max(0, Math.round(done)))
+  if (next > progressDialog.done) progressDialog.done = next
 }
 
 export function endProgress(): void {
