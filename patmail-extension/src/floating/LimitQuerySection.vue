@@ -13,6 +13,8 @@ import { isLimitMonitorInputField, type LimitMonitorQuery } from '../api/limit-m
 import { isQueryGuid } from '../query/query-validator'
 import { joinCaseVolumes, splitCaseVolumes } from '../customer/volume-list'
 import { TemplateLoadCoordinator } from '../query/load-coordinator'
+import { historyLabels } from '../query/history-labels'
+import { confirmDialog } from '../app/dialog'
 import { MessageType, type MessageBridge } from '../shared/message'
 
 const props = defineProps<{ bridge?: MessageBridge; userId: string; canSearch: boolean; seed?: Record<string, string> | null; seedToken?: number }>()
@@ -29,6 +31,7 @@ const loading = ref(false)
 const message = ref('')
 const saveName = ref('')
 const saving = ref(false)
+const deleting = ref(false)
 const checking = ref(false)
 const checkMessage = ref('')
 const pickers = ref<Record<string, NormalizedDictionary>>({})
@@ -39,6 +42,10 @@ const loads = new TemplateLoadCoordinator()
 let filterTimer = 0
 const blocks = computed(() => LIMIT_BLOCKS.filter(block => showMore.value || !block.more))
 const canRead = computed(() => Boolean(props.bridge) && Boolean(props.userId))
+const templateLabels = computed(() => historyLabels(templates.value))
+function templateLabel(item: { id: string; name: string }): string {
+  return templateLabels.value.get(item.id) ?? item.name
+}
 
 onBeforeUnmount(() => {
   loads.dispose()
@@ -165,8 +172,9 @@ async function saveTemplate(): Promise<void> {
     message.value = '先填写至少一项查询条件，再保存。'
     return
   }
-  const same = templates.value.find(item => item.name === title)
-  const queryId = same && isQueryGuid(same.id) ? same.id : ''
+  const selected = templates.value.find(item => item.id === selectedId.value)
+  const queryId = selected && isQueryGuid(selected.id) ? selected.id : ''
+  const before = new Set(templates.value.map(item => item.id))
   saving.value = true
   message.value = '正在写入原网站的期限模板…'
   try {
@@ -181,7 +189,8 @@ async function saveTemplate(): Promise<void> {
       return
     }
     await loadTemplates(true)
-    const saved = templates.value.find(item => item.name === title)
+    const created = templates.value.find(item => !before.has(item.id) && item.name === title)
+    const saved = queryId ? templates.value.find(item => item.id === queryId) : created
     if (saved) {
       selectedId.value = saved.id
       saveName.value = saved.name
@@ -191,6 +200,42 @@ async function saveTemplate(): Promise<void> {
     message.value = '保存期限模板失败。'
   } finally {
     saving.value = false
+  }
+}
+
+async function deleteTemplate(): Promise<void> {
+  if (!props.bridge || deleting.value || saving.value) return
+  const current = templates.value.find(item => item.id === selectedId.value)
+  if (!current || !isQueryGuid(current.id)) {
+    message.value = '先选中原网站上的期限模板，再删除。'
+    return
+  }
+  const agreed = await confirmDialog({
+    title: '删除原网站模板',
+    message: `会从原网站删掉「${templateLabel(current)}」。`,
+    confirmLabel: '删除'
+  })
+  if (!agreed) return
+  deleting.value = true
+  message.value = '正在从原网站删除…'
+  try {
+    const response = await props.bridge.request({
+      type: MessageType.DeleteHistoryQuery,
+      payload: { queryId: current.id, surface: 'limit' }
+    })
+    if (response.type !== MessageType.HistoryQueryDeleted || !response.payload.ok) {
+      message.value = response.type === MessageType.HistoryQueryDeleted && !response.payload.ok
+        ? response.payload.error.message
+        : response.type === MessageType.Error ? response.payload.message : '原网站没有删除这份期限模板。'
+      return
+    }
+    selectedId.value = ''
+    await loadTemplates(true)
+    message.value = '已从原网站删除这份期限模板。'
+  } catch {
+    message.value = '删除期限模板失败。'
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -315,12 +360,12 @@ watch(() => [valueOf('case_type'), valueOf('proc_type'), valueOf('country')].joi
     <ul v-if="templates.length" class="template-picks">
       <li v-for="item in templates" :key="item.id">
         <button type="button" :class="{ on: selectedId === item.id }" @click="applyTemplate(item.id)">
-          <b>{{ item.name }}</b>
+          <b>{{ templateLabel(item) }}</b>
         </button>
       </li>
     </ul>
     <label>选用模板
-      <ThemeSelect :model-value="selectedId" placeholder="请选择" empty-text="当前账号还没有期限监控模板。" :options="templates.map(item => ({ value: item.id, label: item.name }))" @update:model-value="applyTemplate(String($event))" />
+      <ThemeSelect :model-value="selectedId" placeholder="请选择" empty-text="当前账号还没有期限监控模板。" :options="templates.map(item => ({ value: item.id, label: templateLabel(item) }))" @update:model-value="applyTemplate(String($event))" />
     </label>
     <div class="query-conditions">
       <div class="section-heading">
@@ -376,6 +421,7 @@ watch(() => [valueOf('case_type'), valueOf('proc_type'), valueOf('country')].joi
     <div class="form-actions">
       <label class="limit-save">模板名称<input v-model="saveName" type="text" maxlength="80" /></label>
       <button class="ghost" type="button" :disabled="!canRead || saving" @click="saveTemplate">{{ saving ? '正在保存…' : '保存到网站' }}</button>
+      <button class="ghost" type="button" :disabled="!canRead || deleting || !selectedId" @click="deleteTemplate">{{ deleting ? '正在删除…' : '删除原网站模板' }}</button>
       <button class="ghost" type="button" @click="reset">重置</button>
       <button v-if="canSearch" class="solid" type="button" @click="search">查询</button>
     </div>

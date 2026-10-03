@@ -21,6 +21,15 @@ export function historySaveRequest(surface: HistorySurface, title: string, query
   })
 }
 
+export function historyDeleteRequest(surface: HistorySurface, queryId: string): URLSearchParams {
+  const limit = surface === 'limit'
+  return new URLSearchParams({
+    Call: 'SearchQueryHisDelete',
+    query_id: queryId,
+    log_pagename: limit ? 'LimitMonitor.aspx' : 'FileSearch.aspx'
+  })
+}
+
 export function historyRequest(surface: HistorySurface, queryId: string): URLSearchParams {
   const limit = surface === 'limit'
   return new URLSearchParams({

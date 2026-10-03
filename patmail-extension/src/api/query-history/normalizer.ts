@@ -32,13 +32,19 @@ export function normalizeHistoryOptions(data: unknown): ApiResult<HistoryQueryOp
   return { ok: true, data: options }
 }
 
-/** 保存成功看 ClientInfo。Result 明确为 false 就是没写上，不从响应里猜新的模板 ID。 */
+/**
+ * 这套原网站写入和删除成功时，ClientInfo.Result 经常仍是 false、Message 为空。
+ * 真正的成败在顶层 Ret。没有 Ret 时，只有带文字的 Message 或 Status=false 才算没写上。
+ * 响应里没有新模板 ID，调用方保存后要重新读列表。
+ */
 export function normalizeHistorySave(data: unknown): ApiResult<{ saved: true }> {
   if (!isRecord(data)) return apiError('INVALID_RESPONSE', '保存查询模板的响应不是对象。')
   const client = readClientInfo(data.ClientInfo)
   if (!client.ok) return client
   if (client.data.IsLogin === false) return apiError('SESSION_EXPIRED', 'EASY 登录状态已失效，请在原网站重新登录。')
-  if (client.data.Result === false || client.data.Status === false) {
+  if (data.Ret === false || client.data.Status === false) return apiError('BUSINESS_ERROR', businessMessage(client.data))
+  if (data.Ret === true) return { ok: true, data: { saved: true } }
+  if (client.data.Result === false && typeof client.data.Message === 'string' && client.data.Message.trim()) {
     return apiError('BUSINESS_ERROR', businessMessage(client.data))
   }
   if (client.data.Result === true || client.data.Status === true) return { ok: true, data: { saved: true } }

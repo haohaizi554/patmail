@@ -7,7 +7,7 @@ import type { MailRuleBundle } from '../mail/types'
 import { isQueryGuid, isQueryTemplate } from '../query/query-validator'
 import type { QueryTemplate } from '../query/query-types'
 import { isEasyConnection, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope } from './connection'
-import { isCaseContactResult, isDictionaryResult, isFileSearchApiResult, isFileSearchQuery, isHistoryDetailResult, isHistoryListResult, isHistorySaveResult, isLimitMonitorApiResult, isLimitMonitorQuery, isMailProcessApiResult, isMailProcessQuery, isSessionResult, isVolumeList } from '../api/message-guards'
+import { isCaseContactResult, isDictionaryResult, isFileSearchApiResult, isFileSearchQuery, isHistoryDeleteResult, isHistoryDetailResult, isHistoryListResult, isHistorySaveResult, isLimitMonitorApiResult, isLimitMonitorQuery, isMailProcessApiResult, isMailProcessQuery, isSessionResult, isVolumeList } from '../api/message-guards'
 import type { LimitMonitorQuery } from '../api/limit-monitor-params'
 import { isProcessOpenTarget, type ProcessListQuery, type ProcessListResult, type ProcessOpenTarget } from '../api/mail-process'
 import type { CaseContactExport } from '../case-contact/query'
@@ -85,6 +85,8 @@ export const MessageType = {
   HistoryQueryResult: 'HISTORY_QUERY_RESULT',
   SaveHistoryQuery: 'SAVE_HISTORY_QUERY',
   HistoryQuerySaved: 'HISTORY_QUERY_SAVED',
+  DeleteHistoryQuery: 'DELETE_HISTORY_QUERY',
+  HistoryQueryDeleted: 'HISTORY_QUERY_DELETED',
   LoadDictionary: 'LOAD_DICTIONARY',
   ScanFileSearchForm: 'SCAN_FILE_SEARCH_FORM',
   FileSearchFormResult: 'FILE_SEARCH_FORM_RESULT',
@@ -153,6 +155,7 @@ export type ContentRequest =
   | Response<'LIST_HISTORY_QUERIES', { force: boolean; surface?: 'file' | 'limit' }>
   | Response<'GET_HISTORY_QUERY', { queryId: string; surface?: 'file' | 'limit' }>
   | Response<'SAVE_HISTORY_QUERY', { title: string; queryId: string; queryXml: string; surface?: 'file' | 'limit' }>
+  | Response<'DELETE_HISTORY_QUERY', { queryId: string; surface?: 'file' | 'limit' }>
   | Response<'LOAD_DICTIONARY', DictionaryLoadRequest>
   | Request<'SCAN_FILE_SEARCH_FORM'>
   | Response<'CREATE_EASY_MAIL', { preview: MailDraftPreview; selection: SelectionClaim; confirmed: true }>
@@ -303,6 +306,7 @@ export type ContentResponse =
   | Response<'HISTORY_QUERIES_RESULT', ApiResult<HistoryQueryOption[]>>
   | Response<'HISTORY_QUERY_RESULT', ApiResult<HistoryQueryDetail>>
   | Response<'HISTORY_QUERY_SAVED', ApiResult<{ saved: true }>>
+  | Response<'HISTORY_QUERY_DELETED', ApiResult<{ deleted: true }>>
   | Response<'DICTIONARY_RESULT', ApiResult<DictionarySnapshot>>
   | Response<'FILE_SEARCH_FORM_RESULT', { fields: FileSearchFormField[] }>
   | Response<'MAIL_EXECUTION_RESULT', { view: MailExecutionView | null }>
@@ -502,6 +506,10 @@ export function isMessage(value: unknown): value is AppMessage {
         !/<!DOCTYPE|<!ENTITY/i.test(value.payload.queryXml) &&
         (value.payload.surface === undefined || value.payload.surface === 'file' || value.payload.surface === 'limit') &&
         Object.keys(value.payload).every(key => key === 'title' || key === 'queryId' || key === 'queryXml' || key === 'surface')
+    case MessageType.DeleteHistoryQuery:
+      return isRecord(value.payload) && typeof value.payload.queryId === 'string' && isQueryGuid(value.payload.queryId) &&
+        (value.payload.surface === undefined || value.payload.surface === 'file' || value.payload.surface === 'limit') &&
+        Object.keys(value.payload).every(key => key === 'queryId' || key === 'surface')
     case MessageType.LoadDictionary:
       return isDictionaryRequest(value.payload)
     case MessageType.ScanFileSearchForm:
@@ -637,6 +645,8 @@ export function isMessage(value: unknown): value is AppMessage {
       return isHistoryDetailResult(value.payload)
     case MessageType.HistoryQuerySaved:
       return isHistorySaveResult(value.payload)
+    case MessageType.HistoryQueryDeleted:
+      return isHistoryDeleteResult(value.payload)
     case MessageType.DictionaryResult:
       return isDictionaryResult(value.payload)
     case MessageType.FileSearchFormResult:
@@ -689,6 +699,7 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.ReadMailAddresses ||
     value.type === MessageType.ListHistoryQueries || value.type === MessageType.GetHistoryQuery ||
     value.type === MessageType.SaveHistoryQuery ||
+    value.type === MessageType.DeleteHistoryQuery ||
     value.type === MessageType.LoadDictionary || value.type === MessageType.ScanFileSearchForm || value.type === MessageType.CreateEasyMail ||
     value.type === MessageType.SaveEasyMail || value.type === MessageType.FindMailExecution ||
     value.type === MessageType.InspectEasyMail || value.type === MessageType.ReadWorkflow ||
@@ -699,7 +710,7 @@ export function isContentRequest(value: unknown): value is ContentRequest {
 }
 
 const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'SEARCH_LIMIT_MONITOR', 'LOOKUP_IC_FLOW', 'EXPORT_CASE_CONTACTS', 'LIST_MAIL_PROCESSES', 'OPEN_EASY_FORM', 'LIST_FLOW_REVIEWERS', 'READ_CASE_DEMANDS', 'READ_CASE_BUS_FLOW', 'READ_CUSTOMER_DEMANDS', 'READ_CUSTOMER_DIRECTORY', 'READ_MAIL_CONTACTS', 'READ_MAIL_ADDRESSES', 'GET_PAGE_INFO', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
-const WRITE_FORWARD = new Set(['CREATE_EASY_MAIL', 'SAVE_EASY_MAIL', 'SAVE_HISTORY_QUERY', 'SUBMIT_LIMIT_MAIL'])
+const WRITE_FORWARD = new Set(['CREATE_EASY_MAIL', 'SAVE_EASY_MAIL', 'SAVE_HISTORY_QUERY', 'DELETE_HISTORY_QUERY', 'SUBMIT_LIMIT_MAIL'])
 
 /** 不允许转发时给出原因。写开关关掉时，创建、保存和查询模板写回都停在这里。 */
 export function workspaceForwardBlock(value: unknown): string {

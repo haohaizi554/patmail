@@ -280,6 +280,12 @@ export class EasyRuntime {
     return this.history.save(this.historyUserKey, surface, { title, queryId, queryXml }, signal)
   }
 
+  async deleteHistoryQuery(queryId: string, signal?: AbortSignal, surface: HistorySurface = 'file'): Promise<ApiResult<{ deleted: true }>> {
+    if (!isWriteSwitchOpen()) return apiError('BUSINESS_ERROR', '写开关已关闭。')
+    await this.confirmAccountRead()
+    return this.history.delete(this.historyUserKey, surface, queryId, signal)
+  }
+
   private async mailUser(): Promise<{ ok: true; userId: string } | { ok: false; message: string }> {
     const session = await this.checkSession()
     if (!session.ok || session.data.status !== 'authenticated' || !session.data.userId) {

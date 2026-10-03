@@ -3,7 +3,7 @@ import { isRecord } from '../../shared/guards'
 import { apiError, type ApiResult } from '../types'
 import type { EasyTransport } from '../transport'
 import { normalizeHistoryDetail, normalizeHistoryOptions, normalizeHistorySave } from './normalizer'
-import { historyRequest, historySaveRequest, type HistorySurface } from './surfaces'
+import { historyDeleteRequest, historyRequest, historySaveRequest, type HistorySurface } from './surfaces'
 import type { HistoryQueryDetail, HistoryQueryOption } from './types'
 
 const CACHE_MS = 10 * 60_000
@@ -61,5 +61,16 @@ export class HistoryQueryService {
     const saved = normalizeHistorySave(response.data)
     if (saved.ok && this.cache?.userKey === userKey && this.cache.surface === surface) this.cache = null
     return saved
+  }
+
+  async delete(userKey: string, surface: HistorySurface, queryId: string, signal?: AbortSignal): Promise<ApiResult<{ deleted: true }>> {
+    const id = queryId.trim()
+    if (!isQueryGuid(id)) return apiError('INVALID_QUERY', '要删除的查询模板 ID 无效。')
+    const response = await this.transport.post('historyDelete', historyDeleteRequest(surface, id), signal)
+    if (!response.ok) return response
+    const deleted = normalizeHistorySave(response.data)
+    if (!deleted.ok) return deleted
+    if (this.cache?.userKey === userKey && this.cache.surface === surface) this.cache = null
+    return { ok: true, data: { deleted: true } }
   }
 }

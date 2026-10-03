@@ -170,6 +170,10 @@ export function isHistorySaveResult(value: unknown): value is ApiResult<{ saved:
   return isApiResult(value, (data): data is { saved: true } => isRecord(data) && data.saved === true && Object.keys(data).length === 1)
 }
 
+export function isHistoryDeleteResult(value: unknown): value is ApiResult<{ deleted: true }> {
+  return isApiResult(value, (data): data is { deleted: true } => isRecord(data) && data.deleted === true && Object.keys(data).length === 1)
+}
+
 function isDictionarySnapshot(value: unknown): value is DictionarySnapshot {
   return isRecord(value) && (value.kind === 'basic' || value.kind === 'flow' || value.kind === 'fileType' ||
     value.kind === 'fieldColumn' || value.kind === 'listColumn' || value.kind === 'mailType' || value.kind === 'reviewer' || value.kind === 'picker' || value.kind === 'mailSet' || value.kind === 'signature')

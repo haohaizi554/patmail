@@ -13,6 +13,8 @@ import { activateOptionFallback, FILE_BASIC_OPTION_FIELDS, FILE_FLOW_OPTION_FIEL
 import FileTypePicker from './FileTypePicker.vue'
 import EmptyGuide from '../app/components/EmptyGuide.vue'
 import { peekHistoryList, readHistoryList, saveHistoryList } from '../query/history-list-cache'
+import { historyLabels } from '../query/history-labels'
+import { confirmDialog } from '../app/dialog'
 import { TemplateLoadCoordinator } from '../query/load-coordinator'
 import { optionsForCaseType, resolveFileDescriptionDisplay, resolveInternalIdDisplay } from '../schema'
 import type { FileTypeNode } from '../api/dictionaries'
@@ -55,7 +57,10 @@ const baseMissing = ref(false)
 const baseName = ref('')
 const temporary = ref<Record<string, string>>({})
 const temporaryActive = ref<Record<string, boolean>>({})
-const openExtra = ref<Record<string, boolean>>({})
+function defaultOpenExtra(): Record<string, boolean> {
+  return { 案件条件: true, 文件条件: true }
+}
+const openExtra = ref<Record<string, boolean>>(defaultOpenExtra())
 const collapsedByUser = ref<Record<string, boolean>>({})
 const pageFields = ref<FileSearchFormField[] | undefined>(undefined)
 const hotExtra = ref<{ case: QueryCell[]; file: QueryCell[] } | null>(null)
@@ -66,6 +71,7 @@ const hotSentinel = ref<HTMLElement | null>(null)
 const saveName = ref('')
 const saveNameDirty = ref(false)
 const savingTemplate = ref(false)
+const deletingSite = ref(false)
 let hotObserver: IntersectionObserver | null = null
 let hotFlight: Promise<void> | null = null
 let hotAbort: AbortController | null = null
@@ -164,8 +170,12 @@ const fieldOptions = [...businessFields].sort((left, right) => {
 }).map(field => ({ value: field, label: fieldLabel(field), group: fieldGroup(field) }))
 const scopedUser = computed(() => Boolean(props.userId))
 const canRead = computed(() => Boolean(props.bridge) && scopedUser.value)
+const easyLabels = computed(() => historyLabels(historyOptions.value))
+function easyLabel(item: { id: string; name: string }): string {
+  return easyLabels.value.get(item.id) ?? item.name
+}
 const accountTemplates = computed(() => [
-  ...historyOptions.value.map(item => ({ id: item.id, name: item.name, source: 'easy' as const })),
+  ...historyOptions.value.map(item => ({ id: item.id, name: easyLabel(item), source: 'easy' as const })),
   ...localTemplates.value.map(item => ({ id: item.id, name: item.name, source: 'local' as const }))
 ])
 const canSubmit = computed(() => props.canSearch && !baseMissing.value &&
@@ -173,11 +183,12 @@ const canSubmit = computed(() => props.canSearch && !baseMissing.value &&
   hasExplicitFileSearchFilter(resolved.value.fields))
 
 const baseChoices = computed(() => [
-  ...historyOptions.value.map(item => ({ id: item.id, name: item.name, source: 'easy' as const })),
+  ...historyOptions.value.map(item => ({ id: item.id, name: easyLabel(item), source: 'easy' as const })),
   ...localTemplates.value.map(item => ({ id: item.id, name: item.name, source: 'local' as const }))
 ])
 const selectedCustomer = computed(() => customers.value.find(item => item.id === selectedCustomerId.value) ?? null)
 const selectedLocal = computed(() => localTemplates.value.find(item => item.id === selectedBaseId.value) ?? null)
+const selectedEasy = computed(() => historyOptions.value.find(item => item.id === selectedBaseId.value) ?? null)
 const unknownCount = computed(() => Object.keys(unknownFields.value).length)
 const visibleWarnings = computed(() => parseWarnings.value.filter(item => !item.includes('含有未注册字段')))
 
@@ -628,6 +639,66 @@ async function deleteSelectedLocal(): Promise<void> {
   baseFields.value = {}
   await reloadLocal()
 }
+async function deleteSelectedSite(): Promise<void> {
+  if (deletingSite.value || !props.bridge) return
+  const linked = selectedLocal.value?.sourceQueryId
+  const queryId = selectedEasy.value?.id || (linked && isQueryGuid(linked) ? linked : '')
+  if (!queryId) {
+    storageMessage.value = '先选中原网站上的模板，再删除。'
+    return
+  }
+  const named = historyOptions.value.find(item => item.id === queryId)
+  const label = named ? easyLabel(named) : queryId
+  const agreed = await confirmDialog({
+    title: '删除原网站模板',
+    message: `会从原网站删掉「${label}」。本机另外保存的副本还会留着。`,
+    confirmLabel: '删除'
+  })
+  if (!agreed) return
+  deletingSite.value = true
+  storageMessage.value = '正在从原网站删除…'
+  try {
+    const response = await props.bridge.request({
+      type: MessageType.DeleteHistoryQuery,
+      payload: { queryId }
+    })
+    if (response.type !== MessageType.HistoryQueryDeleted || !response.payload.ok) {
+      const reason = response.type === MessageType.HistoryQueryDeleted && !response.payload.ok
+        ? response.payload.error.message
+        : response.type === MessageType.Error ? response.payload.message : '原网站没有返回删除结果。'
+      storageMessage.value = `原网站没有删除：${reason}`
+      return
+    }
+    if (selectedBaseId.value === queryId) {
+      selectedBaseId.value = ''
+      baseFields.value = {}
+      baseName.value = ''
+    }
+    const scope = liveScope()
+    let unlinked = true
+    if (scope) {
+      for (const local of localTemplates.value.filter(item => item.sourceQueryId === queryId)) {
+        const { sourceQueryId: _removed, ...rest } = local
+        const saved = await workspace.call({
+          action: 'saveQueryTemplate',
+          expectedScope: scope,
+          expectedVersion: local.version,
+          template: { ...rest, updatedAt: new Date().toISOString() }
+        })
+        if (!saved?.ok) unlinked = false
+      }
+    }
+    await loadHistory(true)
+    await reloadLocal()
+    storageMessage.value = unlinked
+      ? '已从原网站删除这份模板。'
+      : '原网站上的模板已删除。本机副本还记着它，请再打开一次本地模板后保存。'
+  } catch {
+    storageMessage.value = '删除原网站模板失败。'
+  } finally {
+    deletingSite.value = false
+  }
+}
 
 function openCustomerEditor(profile?: CustomerQueryProfile): void {
   editingTemplate.value = false
@@ -852,7 +923,7 @@ async function saveBoth(): Promise<void> {
       return
     }
     try { await loadHistory(true) } catch { /* 网站已写入，列表刷新失败时仍保留本地模板。 */ }
-    const created = historyOptions.value.find(item => item.name === name && !before.has(item.id))
+    const created = historyOptions.value.find(item => !before.has(item.id) && item.name === name)
     const linkedId = queryId || created?.id || ''
     if (stored && linkedId && isQueryGuid(linkedId) && stored.sourceQueryId !== linkedId) {
       const again = liveScope()
@@ -962,7 +1033,7 @@ watch(() => [props.userId, props.mode] as const, () => {
   openedScope.value = null
   resetBase()
   selectedBaseId.value = ''
-  openExtra.value = {}
+  openExtra.value = defaultOpenExtra()
   hotExtra.value = null
   hotLoaded.value = false
   hotNote.value = ''
@@ -977,6 +1048,7 @@ watch(() => [props.userId, props.mode] as const, () => {
     if (historyOptions.value.length === 0 && stored.length > 0) historyOptions.value = stored
   })
   void loadHistory(false)
+  void ensureHotFields(false)
 }, { immediate: true })
 watch(() => props.seedToken, () => { applySeed() })
 watch(selectedCaseTypeId, id => { void loadFileTypes(id) }, { immediate: true })
@@ -1002,7 +1074,10 @@ watch(selectedCustomerId, () => {
   <section class="card query-template" aria-label="查询模板">
     <div class="section-heading">
       <strong>{{ manage ? (mode === 'customer' ? '当前账号的客户配置' : '当前账号的模板') : '按模板查询' }}</strong>
-      <button type="button" class="text-button" :disabled="!canRead || loadingHistory" @click="loadHistory(true)">重新读取</button>
+      <span class="inline-actions">
+        <button v-if="mode === 'history' && (selectedEasy || (selectedLocal?.sourceQueryId && isQueryGuid(selectedLocal.sourceQueryId)))" type="button" class="text-button" :disabled="deletingSite" @click="deleteSelectedSite">{{ deletingSite ? '正在删除…' : '删除原网站模板' }}</button>
+        <button type="button" class="text-button" :disabled="!canRead || loadingHistory" @click="loadHistory(true)">重新读取</button>
+      </span>
     </div>
     <p v-if="loadingHistory && historyOptions.length === 0" class="hint">正在读取当前账号的查询模板…</p>
     <p v-if="historyMessage && historyOptions.length === 0" class="hint">{{ historyMessage }}</p>
@@ -1027,7 +1102,7 @@ watch(selectedCustomerId, () => {
 
     <EmptyGuide v-if="mode === 'history' && !manage && !loadingHistory && historyOptions.length === 0 && localTemplates.length === 0" text="还没有查询模板。去查询模板页新建一个，再回来选用。" action="去建模板" hash="/templates" />
     <label v-else-if="mode === 'history'">选用模板
-      <ThemeSelect v-model="selectedBaseId" :disabled="loadingHistory && historyOptions.length === 0" :placeholder="loadingHistory && historyOptions.length === 0 ? '正在读取…' : '请选择'" empty-text="还没有模板。点下面的新建本地模板，或点上面的重新读取。" :options="[...historyOptions.map(item => ({ value: item.id, label: item.name, group: 'EASY' })), ...localTemplates.map(item => ({ value: item.id, label: item.name, group: '本地' }))]" @change="startApply(selectedBaseId)" />
+      <ThemeSelect v-model="selectedBaseId" :disabled="loadingHistory && historyOptions.length === 0" :placeholder="loadingHistory && historyOptions.length === 0 ? '正在读取…' : '请选择'" empty-text="还没有模板。点下面的新建本地模板，或点上面的重新读取。" :options="[...historyOptions.map(item => ({ value: item.id, label: easyLabel(item), group: 'EASY' })), ...localTemplates.map(item => ({ value: item.id, label: item.name, group: '本地' }))]" @change="startApply(selectedBaseId)" />
     </label>
     <EmptyGuide v-else-if="!manage && customers.length === 0" text="还没有客户。去客户管理建一个，再回来选用。" action="去创建客户" hash="/customers" />
     <label v-else>客户
@@ -1084,7 +1159,7 @@ watch(selectedCustomerId, () => {
     <div class="query-conditions">
       <div class="section-heading">
         <strong>查询条件</strong>
-        <span v-if="manage" class="inline-actions">
+        <span v-if="manage" class="template-save-row">
           <label>模板名称<input v-model="saveName" type="text" maxlength="80" @input="saveNameDirty = true" /></label>
           <button type="button" class="search-submit" :disabled="savingTemplate" @click="saveBoth">{{ savingTemplate ? '正在保存…' : '保存到本地和网站' }}</button>
         </span>

@@ -20,7 +20,8 @@ import { resolveQueryTemplate } from '../src/query/merge'
 import { parseQueryXml, MAX_QUERY_XML_CHARS, MAX_QUERY_XML_NODES } from '../src/query/xml-parser'
 import { buildQueryXml } from '../src/query/query-xml'
 import { cellsFromLiveFields } from '../src/query/live-fields'
-import { historySaveRequest, normalizeHistorySave } from '../src/api/query-history'
+import { historyDeleteRequest, historySaveRequest, normalizeHistorySave } from '../src/api/query-history'
+import { historyLabels } from '../src/query/history-labels'
 import { BundleTemplateRepository } from '../src/query/repository'
 import { MemoryBundleRepository, readBundle } from '../src/storage/query-bundle'
 
@@ -32,6 +33,18 @@ describe('历史模板响应', () => {
   it('reads options and treats null as an empty list', () => {
     expect(dataOf(normalizeHistoryOptions({ ...client, Options: [{ query_id: guid, title: '专利文件查询' }] })))
       .toEqual([{ id: guid, name: '专利文件查询', source: 'easy' }])
+    const repeated = dataOf(normalizeHistoryOptions({
+      ...client,
+      Options: [
+        { query_id: '3E8B3288-4A3B-4685-B540-2EC98166B5B2', title: '微众OA反馈' },
+        { query_id: guid, title: '微众OA反馈' },
+        { query_id: other, title: '宁德授权请款' }
+      ]
+    }))
+    expect(repeated.map(item => item.id)).toEqual(['3E8B3288-4A3B-4685-B540-2EC98166B5B2', guid, other])
+    expect(historyLabels(repeated).get('3E8B3288-4A3B-4685-B540-2EC98166B5B2')).toBe('微众OA反馈 · 3E8B3288')
+    expect(historyLabels(repeated).get(guid)).toBe('微众OA反馈 · 227BFA59')
+    expect(historyLabels(repeated).get(other)).toBe('宁德授权请款')
     expect(dataOf(normalizeHistoryOptions({ ...client, Options: null }))).toEqual([])
     expect(dataOf(normalizeHistoryOptions({ ...client, Options: [] }))).toEqual([])
   })
@@ -242,7 +255,10 @@ describe('历史模板传输', () => {
     const parsed = parseQueryXml(xml)
     expect(parsed.ok && parsed.data.fields.fileclass).toBe('general')
     expect(dataOf(normalizeHistorySave({ ClientInfo: { IsLogin: true, Status: true, Result: true } }))).toEqual({ saved: true })
+    expect(dataOf(normalizeHistorySave({ ...client, Ret: true }))).toEqual({ saved: true })
+    expect(dataOf(normalizeHistorySave(client))).toEqual({ saved: true })
     expect(codeOf(normalizeHistorySave({ ClientInfo: { IsLogin: true, Status: true, Result: false, Message: '没有保存' } }))).toBe('BUSINESS_ERROR')
+    expect(codeOf(normalizeHistorySave({ ...client, Ret: false }))).toBe('BUSINESS_ERROR')
     let body = ''
     const service = new HistoryQueryService(new EasyTransport('http://183.36.43.66:88', {
       fetcher: async (_url, init) => {
@@ -259,6 +275,21 @@ describe('历史模板传输', () => {
     expect(sent.get('query_id')).toBe('')
     expect(sent.get('query_type')).toBe('FileSearch')
     expect(historySaveRequest('limit', '期限', '', '<xmlRoot></xmlRoot>').get('query_type')).toBe('LimitMonitor\u2014liall')
+    const remove = historyDeleteRequest('file', guid)
+    expect(remove.get('Call')).toBe('SearchQueryHisDelete')
+    expect(remove.get('query_id')).toBe(guid)
+    expect(remove.get('log_pagename')).toBe('FileSearch.aspx')
+    let deletedBody = ''
+    const deleting = new HistoryQueryService(new EasyTransport('http://183.36.43.66:88', {
+      fetcher: async (_url, init) => {
+        deletedBody = String(init?.body)
+        return new Response(JSON.stringify({ ...client, Ret: true }), { status: 200 })
+      }
+    }))
+    await deleting.list('user', 'file', true)
+    expect(dataOf(await deleting.delete('user', 'file', guid))).toEqual({ deleted: true })
+    expect(new URLSearchParams(deletedBody).get('Call')).toBe('SearchQueryHisDelete')
+    expect(codeOf(await deleting.delete('user', 'file', 'not-a-guid'))).toBe('INVALID_QUERY')
   })
 
   it('loads only the fields that sit below the first screen', () => {

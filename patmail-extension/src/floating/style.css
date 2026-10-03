@@ -62,10 +62,17 @@
 .error { margin: 0 0 12px; padding: 9px 11px; border-radius: 9px; background: #fff0f2; color: #b94d66; overflow-wrap: anywhere; }
 .results, .dom { padding: 13px; margin-top: 12px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.query-conditions > .section-heading { justify-content: flex-start; flex-wrap: wrap; }
+.query-conditions > .section-heading > .inline-actions { margin-left: auto; }
+.template-save-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.template-save-row label { display: flex; align-items: center; gap: 8px; margin: 0; color: #8a7290; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.template-save-row input { width: 168px; height: 31px; min-height: 31px; padding: 4px 8px; border: 1px solid #e9d9e9; border-radius: 8px; background: #fff; color: #4e4056; font: inherit; font-size: 12px; }
+.template-save-row .search-submit { height: 31px; min-height: 31px; margin: 0; padding: 0 12px; border-radius: 8px; }
 .result-note { color: #b29fb6; font-size: 10px; }
 .counts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 12px; }
 .counts div { display: flex; flex-direction: column; align-items: center; padding: 9px 2px 7px; border-radius: 9px; background: #fbf5fc; }
-.counts strong { color: #b66b9a; font-size: 21px; line-height: 1.2; }
+.counts strong { color: #b66b9a; font-size: 21px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px solid #9b3060; outline-offset: 1px; }
 .counts span { color: #9e8da7; font-size: 10px; }
 .result-meta { margin: 10px 0 0; color: #99879d; font-size: 11px; overflow-wrap: anywhere; }
 .copy-status, .preview-note { margin: 9px 0 0; color: #8a7292; font-size: 11px; }
@@ -139,7 +146,7 @@
 .tree-children { display: grid; gap: 4px; margin-left: 14px; }
 .tree-row { display: flex; gap: 4px; align-items: center; }
 .search-form input { width: 100%; min-height: 31px; padding: 5px 8px; border: 1px solid #e9d9e9; border-radius: 8px; background: #fff; color: #4e4056; font-family: inherit; font-size: 12px; }
-.search-form input:focus-visible { outline: 2px solid #db9cbd; outline-offset: 1px; }
+.search-form input:focus-visible { outline: 2px solid #9b3060; outline-offset: 1px; }
 .empty-guide { display: grid; gap: 8px; margin: 8px 0; padding: 10px; border: 1px dashed #f3b6d0; border-radius: 10px; background: #fff7fb; }
 .empty-guide p { margin: 0; font-size: 12px; line-height: 1.5; color: #66758f; }
 .empty-guide .solid { justify-self: start; min-height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: linear-gradient(180deg, #ff78ae, #ff4f93); color: #fff; font: 600 12px/1 "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; cursor: pointer; }
@@ -161,4 +168,14 @@
 .mail-diff { width: 100%; margin-top: 8px; border-collapse: collapse; font-size: 11px; }
 .mail-diff th, .mail-diff td { padding: 4px; border-bottom: 1px solid #f0e4f0; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .mail-diff th { color: #a38ca5; font-weight: 600; }
-.actions button:focus-visible, .buttons button:focus-visible { outline: 2px solid #b86da6; outline-offset: 2px; }
+.actions button:focus-visible, .buttons button:focus-visible { outline: 2px solid #9b3060; outline-offset: 2px; }
+.pagination button { min-height: 24px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
