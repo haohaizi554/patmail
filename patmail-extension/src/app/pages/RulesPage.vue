@@ -3,7 +3,8 @@ import PageHead from '../../../../src/components/PageHead.vue'
 import { bg } from '../../../../src/assets'
 import { computed, inject, ref, watch } from 'vue'
 import { plainClone } from '../../automation/snapshot'
-import { removeCustomerPolicy, upsertCustomerPolicy, upsertMapping } from '../../mail'
+import { mergeImportedMappings, removeCustomerPolicy, upsertCustomerPolicy, upsertMapping } from '../../mail'
+import { readXlsxRows } from '../../customer/xlsx-table'
 import type { MailRuleBundle, SendMode } from '../../mail/types'
 import type { LimitMailStyle, QuerySurfaceId } from '../../customer/types'
 import { isQueryGuid } from '../../query/query-validator'
@@ -38,6 +39,7 @@ const senders = ref<Array<{ id: string; label: string; isDefault: boolean; isPub
 const senderNotice = ref('')
 const mailTypes = ref<Array<{ id: string; name: string; parentId: string }>>([])
 const mailTypeNotice = ref('')
+const importingMappings = ref(false)
 const signatureReserved = ref<MailSignatureItem | null>(null)
 const signatureItems = ref<MailSignatureItem[]>([])
 const signatureNotice = ref('')
@@ -178,6 +180,40 @@ async function removeMapping(id: string): Promise<void> {
   await persist(bundle => { bundle.mappings = bundle.mappings.filter(item => item.id !== id) })
 }
 
+async function importMappingFile(file: File): Promise<void> {
+  if (!draft.value || importingMappings.value) return
+  if (!/\.xlsx$/i.test(file.name)) {
+    message.value = '请选择 .xlsx 文件。'
+    return
+  }
+  if (!mailTypes.value.length) {
+    message.value = '发文类型还没读到。先重新读取发文类型，再导入。'
+    return
+  }
+  importingMappings.value = true
+  try {
+    const table = await readXlsxRows(await file.arrayBuffer())
+    const merged = mergeImportedMappings(draft.value.mappings, table, mailTypes.value, {
+      now: new Date().toISOString(),
+      createId: () => crypto.randomUUID()
+    })
+    if (!merged.ok) {
+      message.value = merged.message
+      return
+    }
+    if (!merged.added) {
+      message.value = merged.notice
+      return
+    }
+    await persist(bundle => { bundle.mappings = merged.mappings })
+    if (message.value.includes('已保存')) message.value = `${merged.notice}发文规则已保存。`
+  } catch (error) {
+    message.value = error instanceof Error ? error.message : '表格没有读出来。'
+  } finally {
+    importingMappings.value = false
+  }
+}
+
 async function saveRecipient(input: { profileId: string; name: string; to: string; cc: string }): Promise<void> {
   if (!input.profileId || !input.name) { message.value = '请选择客户并填写收件人模板名称。'; return }
   await persist(bundle => {
@@ -285,7 +321,7 @@ async function importRules(): Promise<void> {
   <section v-if="!ready || !draft" class="card"><p class="empty">尚未确认当前登录的人，不能读取发文映射。</p></section>
   <div v-else class="rules-page">
     <p v-if="message" class="hint">{{ message }}</p>
-    <DescriptionMailTypeEditor :mappings="draft.mappings" :mail-types="mailTypes" :notice="mailTypeNotice" @save="saveMapping" @remove="removeMapping" @reload="loadMailTypes(true)" />
+    <DescriptionMailTypeEditor :mappings="draft.mappings" :mail-types="mailTypes" :notice="mailTypeNotice" :importing="importingMappings" @save="saveMapping" @remove="removeMapping" @reload="loadMailTypes(true)" @import="importMappingFile" />
     <div class="rule-columns">
       <RecipientEditor :recipients="draft.recipients" :customers="customers" @save="saveRecipient" />
       <SignatureEditor :signatures="draft.signatures" :items="signatureItems" :active-key="signatureActiveKey" :notice="signatureNotice" @save="saveSignature" @remove="removeSignature" @prefer="preferSignature" @reload="loadSignatures(true)" />

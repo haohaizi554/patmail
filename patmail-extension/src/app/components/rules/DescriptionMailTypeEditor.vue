@@ -7,11 +7,13 @@ const props = defineProps<{
   mappings: DescriptionMailTypeMapping[]
   mailTypes: Array<{ id: string; name: string; parentId: string }>
   notice: string
+  importing?: boolean
 }>()
 const emit = defineEmits<{
   save: [mapping: { description: string; mailTypeId: string; mailTypeName: string }]
   remove: [id: string]
   reload: []
+  import: [file: File]
 }>()
 const description = ref('')
 const mailTypeId = ref('')
@@ -37,6 +39,14 @@ function typePath(id: string, fallback: string): string {
   return names.length ? names.join(' / ') : fallback
 }
 
+function onFile(event: Event): void {
+  const input = event.target
+  if (!(input instanceof HTMLInputElement)) return
+  const file = input.files?.[0]
+  input.value = ''
+  if (file) emit('import', file)
+}
+
 function submit(): void {
   const picked = byId.value.get(mailTypeId.value)
   emit('save', {
@@ -60,9 +70,15 @@ watch(() => props.mappings, (rows) => {
   <section class="card mapping-board">
     <div class="mapping-head">
       <h2>文件描述映射</h2>
-      <button type="button" class="text-button" @click="emit('reload')">重新读取发文类型</button>
+      <div class="mapping-actions">
+        <label class="text-button file-button">
+          {{ importing ? '正在导入…' : '导入 Excel' }}
+          <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="importing" aria-label="导入 Excel" @change="onFile" />
+        </label>
+        <button type="button" class="text-button" @click="emit('reload')">重新读取发文类型</button>
+      </div>
     </div>
-    <p class="hint">发文类型由文件描述或发文内容决定。一行对应一种，文件描述填来文上的说法，发文类型在树里点选。</p>
+    <p class="hint">发文类型由文件描述或发文内容决定。一行对应一种，文件描述填来文上的说法，发文类型在树里点选。也可以导入 Excel：认「文件描述」和「发文类型」两列，相同的不会重复写入，已经有的不会改。</p>
     <p v-if="notice" class="hint">{{ notice }}</p>
     <table class="mapping-table">
       <thead>
