@@ -232,9 +232,8 @@ async function loadAll(): Promise<void> {
   loading.value = true
   message.value = ''
   const current = kind.value
-  await Promise.all(specs.map(spec => fetchList(spec.kind, 1, '').then(() => {
-    if (viewEpoch === epoch && spec.kind === current && !query.value.trim()) loading.value = false
-  })))
+  const currentPage = query.value.trim() ? 1 : page.value
+  await Promise.all(specs.map(spec => fetchList(spec.kind, spec.kind === current ? currentPage : 1, '')))
   if (viewEpoch !== epoch) return
   if (query.value.trim()) {
     await load(1, true)
@@ -269,7 +268,7 @@ watch(ready, (ok) => {
     <div class="filters">
       <label class="grow"><input v-model="query" :placeholder="placeholders[kind]" @keydown.enter="load(1)" /></label>
       <button type="button" class="ghost" :disabled="loading" @click="load(1)">{{ loading ? '查询中' : '查询' }}</button>
-      <button type="button" class="ghost" :disabled="loading || !ready" @click="load(page)">刷新</button>
+      <button type="button" class="ghost" :disabled="loading || !ready" @click="loadAll">刷新</button>
     </div>
     <p v-if="!ready" class="empty">尚未确认 EASY 用户。</p>
     <p v-else-if="message" class="hint">{{ message }}</p>
