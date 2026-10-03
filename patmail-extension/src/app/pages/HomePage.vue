@@ -3,14 +3,20 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import PageHead from '../../../../src/components/PageHead.vue'
 import { bg, icon } from '../../../../src/assets'
 import { greetingForHour } from '../greeting'
+import { barWidth, homeReport } from '../home-report'
 import { pickHomeLine } from '../home-lines'
+import { readLimitMailLedger } from '../../customer/limit-mail-submit'
 import { useWorkspace } from '../composables/useWorkspace'
 import EmptyGuide from '../components/EmptyGuide.vue'
 import wechatQr from '../assets/wechat-qr.png'
 
-const { connection, customers, tasks, rules } = useWorkspace()
+const { connection, customers, tasks } = useWorkspace()
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
-const unknownCount = computed(() => tasks.value.filter(item => item.status === 'UNKNOWN').length)
+const report = computed(() => homeReport({
+  customers: customers.value,
+  tasks: tasks.value,
+  ledger: readLimitMailLedger()
+}))
 const now = ref(new Date())
 let clock = 0
 onMounted(() => {
@@ -58,12 +64,47 @@ watch(qrOpen, (open) => {
   </Teleport>
   <div v-if="!ready" class="card"><p class="empty">尚未连接 EASY。确认登录用户之前，这里不显示客户、任务或发送统计。</p></div>
   <template v-else>
-    <div class="metric-row">
-      <article class="metric tone-pink"><img :src="icon(0)" alt="" /><div><b>已保存客户</b><strong>{{ customers.length }}</strong></div></article>
-      <article class="metric tone-blue"><img :src="icon(11)" alt="" /><div><b>已保存任务</b><strong>{{ tasks.length }}</strong></div></article>
-      <article class="metric tone-orange"><img :src="icon(18)" alt="" /><div><b>结果未知</b><strong>{{ unknownCount }}</strong></div></article>
-      <article class="metric tone-purple"><img :src="icon(17)" alt="" /><div><b>规则版本</b><strong>{{ rules?.revision ?? '—' }}</strong></div></article>
-    </div>
+    <section class="home-report" aria-label="发文报表">
+      <div class="metric-row">
+        <article class="metric tone-green"><img :src="icon(11)" alt="" /><div><b>本页已交审核</b><strong>{{ report.submitted }}</strong><small>这个标签页里的事项</small></div></article>
+        <article class="metric tone-pink"><img :src="icon(18)" alt="" /><div><b>待发任务</b><strong>{{ report.pendingTasks }}</strong><small>计划 {{ report.letters }} 封 · {{ report.files }} 个文件</small></div></article>
+        <article class="metric tone-orange"><img :src="icon(17)" alt="" /><div><b>结果未知</b><strong>{{ report.unknownTasks }}</strong><small>不能自动再提交</small></div></article>
+        <article class="metric tone-blue"><img src="/assets/icons/img_customer.png" alt="" /><div><b>在册客户</b><strong>{{ report.customers }}</strong><small>PCT {{ report.workflows[0]?.count ?? 0 }} · 鹏城 {{ report.workflows[1]?.count ?? 0 }}</small></div></article>
+      </div>
+      <div class="report-board">
+        <article>
+          <h2>发文任务</h2>
+          <ul>
+            <li v-for="item in report.tasks" :key="item.label">
+              <span>{{ item.label }}</span>
+              <i><b :class="item.tone" :style="{ width: barWidth(item.count, report.tasks) + '%' }"></b></i>
+              <strong>{{ item.count }}</strong>
+            </li>
+          </ul>
+        </article>
+        <article>
+          <h2>客户工作流</h2>
+          <ul>
+            <li v-for="item in report.workflows" :key="item.label">
+              <span>{{ item.label }}</span>
+              <i><b :class="item.tone" :style="{ width: barWidth(item.count, report.workflows) + '%' }"></b></i>
+              <strong>{{ item.count }}</strong>
+            </li>
+          </ul>
+        </article>
+        <article>
+          <h2>本页发文</h2>
+          <ul>
+            <li v-for="item in report.ledger" :key="item.label">
+              <span>{{ item.label }}</span>
+              <i><b :class="item.tone" :style="{ width: barWidth(item.count, report.ledger) + '%' }"></b></i>
+              <strong>{{ item.count }}</strong>
+            </li>
+          </ul>
+          <p>账本只留在这个标签页，关掉就清空。</p>
+        </article>
+      </div>
+    </section>
     <section class="card">
       <div class="card-head"><h2><img :src="icon(11)" alt="" />最近任务</h2></div>
       <EmptyGuide v-if="tasks.length === 0" text="还没有发文任务。去发文任务里自己拼一封，或按工作流生成。" action="去发文任务" hash="/tasks" />
