@@ -90,6 +90,8 @@ export function defaultPengchengWorkflow(): WorkflowDefinition {
   const sheet = steps.find(step => step.id === 'sheet')
   if (sheet) {
     sheet.detail = '上传一份表格。收件人读技术负责人，抄送读客户联系人(IPR)，再抄商务。邮箱那一列不读。'
+    const ipr = sheet.params.find(item => item.id === 'col_ipr')
+    if (ipr) ipr.help = '抄送里的 IPR 从这里取。'
     sheet.params.push({
       id: 'col_lead',
       label: '技术负责人那一列',

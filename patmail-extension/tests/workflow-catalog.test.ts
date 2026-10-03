@@ -15,6 +15,7 @@ import {
   workflowFromSkills,
   workflowSender
 } from '../src/workflow/catalog'
+import { stepCaption } from '../src/workflow/skills'
 import {
   loginReviewLabel,
   mailStyleChoiceOptions,
@@ -43,6 +44,11 @@ describe('PCT 工作流目录', () => {
     expect(catalog.workflows[0]?.label).toBe('PCT提醒')
     expect(catalog.workflows[1]?.label).toBe('PCT鹏城专案')
     expect(catalog.workflows[1]?.steps.find(step => step.id === 'recipients')?.params.find(param => param.id === 'recipient_mode')?.value).toBe('lead')
+    const pengcheng = catalog.workflows[1]
+    expect(pengcheng?.steps.find(step => step.id === 'sheet')?.params.find(item => item.id === 'col_ipr')?.help).toBe('抄送里的 IPR 从这里取。')
+    expect(stepCaption(pengcheng?.steps.find(step => step.id === 'recipients') ?? { skillId: 'people' })).toBe('发给技术负责人，抄送 IPR 和商务')
+    expect(stepCaption(pengcheng?.steps.find(step => step.id === 'mail-style') ?? { skillId: 'send-style' })).toBe('同一客户、同一收件人和抄送合成一封')
+    expect(stepCaption(catalog.workflows[0]?.steps.find(step => step.id === 'recipients') ?? { skillId: 'people' })).toBe('发给 IPR，抄送商务')
     expect(catalog.workflows[0]?.steps.map(step => step.id)).toEqual([
       'entry', 'sheet', 'proc', 'mail-type', 'mail-style', 'recipients', 'sender', 'review', 'query'
     ])

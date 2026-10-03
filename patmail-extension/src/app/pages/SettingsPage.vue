@@ -8,9 +8,7 @@ import { useAccountAvatar } from '../../settings/use-account-avatar'
 import { confirmDialog } from '../dialog'
 import { useMailConcurrency } from '../../settings/use-mail-concurrency'
 import { useWriteSwitch } from '../../settings/use-write-switch'
-import { useWorkspace } from '../composables/useWorkspace'
 
-const { connection } = useWorkspace()
 const { open, ready, setOpen } = useWriteSwitch()
 const { concurrency, ready: concurrencyReady, setConcurrency } = useMailConcurrency()
 const { src, presetId, uploadId, uploads, custom, note, signedIn, choosePreset, chooseUpload, upload, removeUpload, clear, openZoom } = useAccountAvatar()
@@ -84,20 +82,19 @@ async function run(action: () => Promise<void>): Promise<void> {
   </section>
   <section class="card">
     <h2>发文写入</h2>
-    <p class="hint">站点 {{ connection.easyOrigin }}</p>
-    <p class="hint">会话 {{ connection.sessionStatus }} · 标签页 {{ connection.easyTabId ?? '未绑定' }}</p>
     <form class="stack-form" @submit.prevent>
-      <label>
-        <input type="checkbox" :checked="open" @change="onToggle" />
-        写开关
-      </label>
+      <div class="write-row">
+        <label class="concurrency-line">并发数
+          <ThemeSelect :model-value="concurrency" :disabled="!concurrencyReady" :options="concurrencyOptions" @update:model-value="setConcurrency(Number($event))" />
+        </label>
+        <label>
+          <input type="checkbox" :checked="open" @change="onToggle" />
+          写开关
+        </label>
+      </div>
       <p v-if="!ready" class="hint">正在读取写开关。</p>
       <p v-else-if="open" class="hint">已打开。可以写回查询模板。创建邮件、保存草稿和流程提交还要等响应核对完，现在仍不会发出。</p>
       <p v-else class="hint">已关闭。不会写回查询模板，也不会创建邮件、保存草稿或提交流程。</p>
-      <label>并发数
-        <ThemeSelect :model-value="concurrency" :disabled="!concurrencyReady" :options="concurrencyOptions" @update:model-value="setConcurrency(Number($event))" />
-      </label>
-      <p class="hint">PCT 提醒、鹏城专案和复制出来的工作流，发文时都按这个数同时提交。一封里面仍是先创建，再写收件人，再提交。选 1 封时，上一封有结果再发下一封。有一封结果没确认时，还没开始的不再开始。已经开始的会做完。</p>
     </form>
   </section>
 </template>

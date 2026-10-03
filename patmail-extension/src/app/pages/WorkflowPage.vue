@@ -39,7 +39,8 @@ import {
 import { matchPctMailTypes, QUERY_SURFACES } from '../../customer/mail-flow'
 import { useWorkspace } from '../composables/useWorkspace'
 import type { TreeOption } from '../../query/option-tree'
-import { SKILLS, skillById, skillTint } from '../../workflow/skills'
+import { workflowPreview } from '../../workflow/preview-chart'
+import { SKILLS, skillTint, stepCaption } from '../../workflow/skills'
 import { useWorkflowChoices } from '../composables/useWorkflowChoices'
 import { confirmDialog } from '../dialog'
 
@@ -90,9 +91,14 @@ watch(screen, (value) => {
 })
 
 const locked = computed(() => isSystemWorkflow(draft.value))
+const previewOpen = ref(true)
 const selected = computed(() => draft.value?.steps.find(step => step.id === selectedId.value) ?? null)
 const visibleParams = computed(() => selected.value?.params.filter(param => !param.hidden && !WORD_PARAMS.has(param.id)) ?? [])
 const matchedMail = computed(() => matchPctMailTypes(mailTypes.value, draft.value ? pctRuntimeFrom(draft.value) : undefined))
+const previewPieces = computed(() => draft.value ? workflowPreview(draft.value, {
+  customerType: matchedMail.value.customerVolume?.name,
+  ourType: matchedMail.value.ourVolumeShenzhen?.name
+}) : [])
 const stepHasChoice = computed(() => visibleParams.value.some(param => isIdChoice(param.id) || param.id === 'proc_label' || param.id === 'review_label'))
 
 const LEGACY_STYLE_LABELS: Record<string, string> = {
@@ -300,7 +306,7 @@ function removeNote(step: WorkflowStep, id: string): void {
 }
 
 function skillTitle(step: WorkflowStep): string {
-  return skillById(step.skillId)?.blurb ?? '自己加的一步'
+  return stepCaption(step)
 }
 
 function isIdChoice(id: string): boolean {
@@ -542,8 +548,35 @@ function chooseReviewer(param: WorkflowParam, id: string): void {
   </section>
 
   <template v-else-if="draft">
+    <section class="card flow-preview">
+      <div class="section-heading">
+        <strong>全局预览</strong>
+        <button type="button" class="text-button" @click="previewOpen = !previewOpen">{{ previewOpen ? '收起' : '展开' }}</button>
+      </div>
+      <div v-show="previewOpen" class="flow-preview-host">
+        <template v-for="(piece, index) in previewPieces" :key="piece.stepId">
+          <span v-if="index" class="flow-preview-arrow" aria-hidden="true">→</span>
+          <div v-if="piece.arms" class="flow-preview-fork">
+            <button type="button" class="flow-preview-node" :class="{ on: selectedId === piece.stepId }" @click="selectedId = piece.stepId">
+              <b>{{ piece.lines[0] }}</b>
+            </button>
+            <span class="flow-preview-arrow" aria-hidden="true">→</span>
+            <div class="flow-preview-arms">
+              <span v-for="arm in piece.arms" :key="arm[0]" class="flow-preview-node arm">
+                <b>{{ arm[0] }}</b>
+                <small>{{ arm[1] }}</small>
+              </span>
+            </div>
+          </div>
+          <button v-else type="button" class="flow-preview-node" :class="{ on: selectedId === piece.stepId }" @click="selectedId = piece.stepId">
+            <b>{{ piece.lines[0] }}</b>
+            <small v-for="line in piece.lines.slice(1)" :key="line">{{ line }}</small>
+          </button>
+        </template>
+      </div>
+    </section>
     <div class="flow-board">
-      <div class="mermaid">
+      <div class="flow-steps">
         <template v-for="(step, index) in draft.steps" :key="step.id">
           <button type="button" class="flow-node" :class="[skillTint(step.skillId), { on: step.id === selectedId }]" @click="selectedId = step.id">
             <span>{{ index + 1 }}</span>

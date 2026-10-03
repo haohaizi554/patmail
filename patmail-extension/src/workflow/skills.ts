@@ -73,7 +73,7 @@ export const SKILLS: SkillTemplate[] = [
   {
     id: 'send-style',
     title: '几件合成一封',
-    blurb: '同一客户、同一收件人合成一封',
+    blurb: '同一客户、同一收件人和抄送合成一封',
     tint: 'mint',
     detail: '同一客户里，收件人和抄送都相同的几件合成一封。收件人或抄送不同就分开。',
     params: [
@@ -141,6 +141,13 @@ export function isSkillId(value: unknown): value is string {
 
 export function skillById(id: string | undefined): SkillTemplate | null {
   return SKILLS.find(item => item.id === id) ?? null
+}
+
+/** 流程图节点上的一句说明。鹏城专案的收件人跟默认技能不同，不能沿用「发给 IPR」。 */
+export function stepCaption(step: { skillId?: string; params?: Array<{ id: string; value: string }> }): string {
+  const mode = step.params?.find(item => item.id === 'recipient_mode')?.value
+  if (step.skillId === 'people' && mode === 'lead') return '发给技术负责人，抄送 IPR 和商务'
+  return skillById(step.skillId)?.blurb ?? '自己加的一步'
 }
 
 export function skillTint(id: string | undefined): SkillTemplate['tint'] {

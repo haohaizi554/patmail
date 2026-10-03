@@ -129,7 +129,12 @@ const outcome = computed(() => {
 const outcomeGroups = computed(() => {
   const groups = groupWorkflowRows('1', pendingRows.value, specials.value, recipientMode.value)
   if (groups.length < 2 || groups.length > 6) return []
-  return groups.map(group => `${people(group, 'to')} ${group.length} 行`)
+  return groups.map(group => {
+    const to = people(group, 'to')
+    const cc = people(group, 'cc')
+    const who = cc && cc !== '表格里没有' ? `${to}，抄送 ${cc}` : to
+    return `${who} ${group.length} 行`
+  })
 })
 
 const unmatched = computed(() => rows.value.filter(row => !row.mailTypeId))
@@ -736,7 +741,7 @@ function definitionHint(item: WorkflowDefinition | null): string {
           <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" @change="onSheet" />
         </label>
       </div>
-      <p v-for="note in styleNotes" :key="note" class="hint">这张表按客户和收件人合成一封。{{ note }}</p>
+      <p v-for="note in styleNotes" :key="note" class="hint">这张表按同一客户、同一收件人和抄送合成一封。{{ note }}</p>
       <p v-if="sheetName" class="hint">{{ sheetName }}{{ sheetNotice ? `。${sheetNotice}` : '' }}</p>
       <p v-if="mailTypes.length === 0" class="hint">发文类型还没读到。确认已经连上后，重新打开这一页。</p>
       <p v-if="unmatched.length" class="hint">这 {{ unmatched.length }} 行没有对上发文类型，请点选。</p>
