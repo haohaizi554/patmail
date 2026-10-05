@@ -2,6 +2,7 @@ import { indexedTransactionStore, ExecutionLedger } from '../automation/ledger'
 import { IndexedTaskStore } from '../automation/indexed-store'
 import { IndexedEvidenceStore, MemoryEvidenceStore } from '../automation/evidence-store'
 import { handleAuthorityMessage } from './authority'
+import { handleAgentChat } from './agent'
 import { scopeExtensionPageMessage } from './scope'
 import { EasyConnectionController, sameConnectionSnapshot, type ConnectionSnapshot } from '../shared/connection'
 import { handleWorkspaceMessage, openWorkspaceTab, recheckBoundSession, type WorkspaceHost } from './workspace'
@@ -113,6 +114,13 @@ async function dispatchExtensionMessage(message: unknown, sender: chrome.runtime
     return { type: MessageType.Error, payload: { message: `后台没有接住${inner ? `转发 ${inner}` : type}。请在扩展管理页重新加载后再试。` } }
   }
   if (message.type === MessageType.Ping) return { type: MessageType.Pong, payload: { ok: true } }
+  if (message.type === MessageType.AgentChat) {
+    const pageUrl = sender.url ?? sender.tab?.url ?? ''
+    if (!pageUrl.startsWith(chrome.runtime.getURL(''))) {
+      return { type: MessageType.Error, payload: { message: '只有工作台页面可以调用 AI 助手。' } }
+    }
+    return { type: MessageType.AgentChatResult, payload: await handleAgentChat(message.payload, host) }
+  }
   if (message.type === MessageType.RunReadonlyAcceptance) {
     return { type: MessageType.Error, payload: { message: '后台没有处理这条消息。' } }
   }

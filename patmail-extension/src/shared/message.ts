@@ -129,6 +129,8 @@ export const MessageType = {
   Workspace: 'WORKSPACE',
   WorkspaceResult: 'WORKSPACE_RESULT',
   WorkflowResult: 'WORKFLOW_RESULT',
+  AgentChat: 'AGENT_CHAT',
+  AgentChatResult: 'AGENT_CHAT_RESULT',
   Error: 'ERROR'
 } as const
 
@@ -203,6 +205,7 @@ export type BackgroundRequest =
   | Response<'SAVE_EVIDENCE', { record: Record<string, unknown> }>
   | Response<'LIST_EVIDENCE', { origin: string; call: string }>
   | Response<'WORKSPACE', WorkspaceAction>
+  | Response<'AGENT_CHAT', { action: 'probe' | 'turn'; message: string } | { action: 'history' | 'reset' | 'facts' | 'compact' | 'stop' }>
 export type BackgroundResponse =
   | Response<'PONG', { ok: true }>
   | Response<'EXECUTION_LEASE', ExecutionLeasePayload>
@@ -211,6 +214,7 @@ export type BackgroundResponse =
   | Response<'ACCEPTANCE_RESULT', { records: Record<string, unknown>[]; probe?: { httpStatus: number; sessionOk: boolean; fields: Record<string, string>; shape: string } }>
   | Response<'EVIDENCE_RESULT', { records: Record<string, unknown>[] }>
   | Response<'WORKSPACE_RESULT', WorkspaceResultPayload>
+  | Response<'AGENT_CHAT_RESULT', ApiResult<{ reply: string; model: string; steps: number; history: Array<{ role: 'user' | 'assistant'; content: string }> }>>
   | ErrorMessage
 
 export interface LeaseCommand {
@@ -672,11 +676,34 @@ export function isMessage(value: unknown): value is AppMessage {
     case MessageType.AcceptanceResult:
     case MessageType.EvidenceResult:
       return isRecord(value.payload) && Array.isArray(value.payload.records) && value.payload.records.every(isPlainRecord)
+    case MessageType.AgentChat:
+      return isAgentChatRequest(value.payload)
+    case MessageType.AgentChatResult:
+      return isAgentChatResult(value.payload)
     case MessageType.Error:
       return isRecord(value.payload) && typeof value.payload.message === 'string'
     default:
       return false
   }
+}
+
+function isAgentChatRequest(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.action !== 'string') return false
+  if (value.action === 'history' || value.action === 'reset' || value.action === 'facts' || value.action === 'compact' || value.action === 'stop') return Object.keys(value).length === 1
+  if (value.action !== 'probe' && value.action !== 'turn') return false
+  return typeof value.message === 'string' && value.message.trim().length > 0 && value.message.length <= 20_000 && Object.keys(value).length === 2
+}
+
+function isAgentChatResult(value: unknown): value is ApiResult<{ reply: string; model: string; steps: number; history: Array<{ role: 'user' | 'assistant'; content: string }> }> {
+  if (!isRecord(value)) return false
+  if (value.ok === false) return isRecord(value.error) && typeof value.error.code === 'string' && typeof value.error.message === 'string'
+  if (value.ok !== true || !isRecord(value.data)) return false
+  const history = value.data.history
+  return typeof value.data.reply === 'string' && value.data.reply.length <= 100_000 &&
+    typeof value.data.model === 'string' && value.data.model.length <= 200 &&
+    typeof value.data.steps === 'number' && Number.isSafeInteger(value.data.steps) && value.data.steps >= 0 && value.data.steps <= 20 &&
+    Array.isArray(history) && history.length <= 80 && history.every(item => isRecord(item) &&
+      (item.role === 'user' || item.role === 'assistant') && typeof item.content === 'string' && item.content.length <= 20_000)
 }
 
 export function isContentRequest(value: unknown): value is ContentRequest {

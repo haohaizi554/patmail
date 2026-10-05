@@ -13,7 +13,8 @@ function acceptedBackground(response: unknown): response is BackgroundResponse {
     response.type === MessageType.Pong || response.type === MessageType.Error ||
     response.type === MessageType.ExecutionLease || response.type === MessageType.ExecutionRecovered ||
     response.type === MessageType.TaskResult || response.type === MessageType.AcceptanceResult ||
-    response.type === MessageType.EvidenceResult || response.type === MessageType.WorkspaceResult
+    response.type === MessageType.EvidenceResult || response.type === MessageType.WorkspaceResult ||
+    response.type === MessageType.AgentChatResult
   )
 }
 
