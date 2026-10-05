@@ -48,7 +48,8 @@ img { max-width: 100%; }
 .search input { border: 0; border-radius: 0; box-shadow: none; outline: none; width: 100%; background: transparent; color: var(--text); }
 .search input:focus, .search input:focus-visible { outline: none; border: 0; }
 .search input::placeholder { color: #b7c0d2; }
-.bell { margin-left: auto; position: relative; width: 40px; height: 40px; border: 0; border-radius: 50%; background: #fff; color: #ff6b9d; box-shadow: 0 4px 12px #ffd0e2; }
+.top-actions { margin-left: auto; display: flex; align-items: center; position: relative; }
+.bell { position: relative; width: 40px; height: 40px; border: 0; border-radius: 50%; background: #fff; color: #ff6b9d; box-shadow: 0 4px 12px #ffd0e2; }
 .bell svg { width: 22px; height: 22px; }
 .bell i { position: absolute; top: -2px; right: -2px; min-width: 16px; height: 16px; border-radius: 8px; background: #ff4d78; color: #fff; font-style: normal; font-size: 10px; line-height: 16px; }
 .profile { display: flex; align-items: center; gap: 8px; border: 0; background: transparent; }

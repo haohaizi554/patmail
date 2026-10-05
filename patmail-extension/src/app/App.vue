@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, provide, ref } from 'vue'
 import { createFullPageBridge } from './services/full-page-bridge'
 import { useWorkspace } from './composables/useWorkspace'
 import { useAccountAvatar } from '../settings/use-account-avatar'
+import AgentDock from './components/AgentDock.vue'
 import HomePage from './pages/HomePage.vue'
 import FilesPage from './pages/FilesPage.vue'
 import CustomersPage from './pages/CustomersPage.vue'
@@ -83,6 +84,9 @@ onUnmounted(() => window.removeEventListener('hashchange', onHash))
 
 <template>
   <Shell :page="pageName" :search="search" placeholder="搜索我方文号、客户或申请号..." :items="nav" :profile-name="profileName" :profile-dept="profileDept" :avatar-src="avatarSrc" :show-demo="false" :show-settings="true" @navigate="go" @settings="onShellSettings" @preview="openZoom()" @update:search="search = $event">
+    <template #top-actions>
+      <AgentDock />
+    </template>
     <KeepAlive>
       <component :is="page" :key="route" />
     </KeepAlive>

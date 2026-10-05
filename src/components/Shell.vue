@@ -30,6 +30,9 @@ const menu = computed(() => props.items || nav)
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         <input :value="search" :placeholder="placeholder" @input="emit('update:search', $event.target.value)" />
       </label>
+      <div class="top-actions">
+        <slot name="top-actions" />
+      </div>
       <button class="bell" v-hint="'通知'" @click="emit('settings', '通知')">
         <svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2H4.5z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 19a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
         <i v-if="showDemo">3</i>
