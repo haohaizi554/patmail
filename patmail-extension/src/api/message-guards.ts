@@ -1,3 +1,4 @@
+import { isQueryGuid } from '../query/query-validator'
 import { isRecord } from '../shared/guards'
 import { isFileSearchBusinessField, type FileSearchQuery } from './file-search-params'
 import type { DictionarySnapshot } from './dictionaries'
@@ -174,9 +175,17 @@ export function isHistoryDeleteResult(value: unknown): value is ApiResult<{ dele
   return isApiResult(value, (data): data is { deleted: true } => isRecord(data) && data.deleted === true && Object.keys(data).length === 1)
 }
 
+function isCustomerListSnapshot(value: Record<string, unknown>): boolean {
+  if (value.kind !== 'customerList' || Object.keys(value).length !== 2 || !Array.isArray(value.customers) || value.customers.length > 5000) return false
+  return value.customers.every(item => isRecord(item) && Object.keys(item).length === 2 &&
+    typeof item.id === 'string' && isQueryGuid(item.id) &&
+    typeof item.name === 'string' && item.name.trim() === item.name && item.name.length > 0 && item.name.length <= 200)
+}
+
 function isDictionarySnapshot(value: unknown): value is DictionarySnapshot {
   return isRecord(value) && (value.kind === 'basic' || value.kind === 'flow' || value.kind === 'fileType' ||
-    value.kind === 'fieldColumn' || value.kind === 'listColumn' || value.kind === 'mailType' || value.kind === 'reviewer' || value.kind === 'picker' || value.kind === 'mailSet' || value.kind === 'signature')
+    value.kind === 'fieldColumn' || value.kind === 'listColumn' || value.kind === 'mailType' || value.kind === 'reviewer' || value.kind === 'picker' || value.kind === 'mailSet' || value.kind === 'signature' ||
+    isCustomerListSnapshot(value))
 }
 
 export function isDictionaryResult(value: unknown): value is ApiResult<DictionarySnapshot> {

@@ -20,6 +20,8 @@ import {
   matchPctMailTypes,
   workflowsFor
 } from '../../customer/mail-flow'
+import { fetchCustomerList } from '../../customer/customer-list-load'
+import type { EasyCustomerOption } from '../../customer/customer-list'
 import { fetchMailTypeNodes } from '../../customer/mail-type-load'
 import { fetchMailSenders } from '../../customer/mailset-load'
 import type { MailSender } from '../../customer/mailset'
@@ -55,6 +57,9 @@ const mailsetOptions = computed(() => {
   return items
 })
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
+const customerCatalog = ref<EasyCustomerOption[]>([])
+const customerPick = ref('')
+const customerListMessage = ref('正在从原网站读取客户…')
 const name = ref('')
 const surface = ref<QuerySurfaceId | ''>('')
 const workflow = ref<WorkflowId | ''>('')
@@ -74,6 +79,13 @@ const listMessage = ref('')
 const removingId = ref('')
 
 const surfaceOptions = computed(() => QUERY_SURFACES.map(item => ({ value: item.id, label: item.label })))
+const customerOptions = computed(() => {
+  const items = customerCatalog.value.map(item => ({ value: item.id, label: item.name }))
+  if (customerPick.value && !items.some(item => item.value.toLowerCase() === customerPick.value.toLowerCase())) {
+    items.unshift({ value: customerPick.value, label: name.value.trim() || '已保存的客户' })
+  }
+  return items
+})
 const stylePlaceholder = computed(() => surface.value ? '请选择发文模式' : '先选择查询入口')
 const pctDefinition = computed(() => catalog.value.workflows.find(item => item.id === 'pct-reminder') ?? null)
 const pctRuntime = computed(() => pctRuntimeFrom(pctDefinition.value))
@@ -93,6 +105,46 @@ watch(workflowMailbox, (sender) => {
   if (editingId.value || senderTouched.value || mailsetId.value || !sender) return
   mailsetId.value = sender.id
 })
+
+function chooseCustomer(value: string): void {
+  customerPick.value = value
+  const found = customerCatalog.value.find(item => item.id.toLowerCase() === value.toLowerCase())
+  if (!found) return
+  name.value = found.name
+  keptCustomerId.value = found.id
+}
+
+function alignCustomerPick(): void {
+  if (!name.value.trim() && !customerPick.value) return
+  const byId = customerCatalog.value.find(item => item.id.toLowerCase() === customerPick.value.toLowerCase())
+  if (byId) {
+    chooseCustomer(byId.id)
+    return
+  }
+  if (!isQueryGuid(customerPick.value)) {
+    const matches = customerCatalog.value.filter(item => item.name === name.value.trim())
+    if (matches.length === 1) chooseCustomer(matches[0].id)
+  }
+}
+
+let customerListTicket = 0
+async function loadCustomerList(force: boolean): Promise<void> {
+  if (!bridge || !ready.value) {
+    customerListMessage.value = '还没确认当前登录的人，客户名单还没读取。'
+    return
+  }
+  const ticket = ++customerListTicket
+  customerListMessage.value = '正在从原网站读取客户…'
+  const loaded = await fetchCustomerList(bridge, force)
+  if (ticket !== customerListTicket) return
+  if (!loaded.ok) {
+    customerListMessage.value = loaded.message
+    return
+  }
+  customerCatalog.value = loaded.customers
+  customerListMessage.value = loaded.message
+  alignCustomerPick()
+}
 
 function chooseSender(value: string): void {
   senderTouched.value = true
@@ -184,6 +236,18 @@ function edit(id: string): void {
   if (!profile) return
   editingId.value = profile.id
   name.value = profile.name
+  const savedId = profile.easyCustomerId && isQueryGuid(profile.easyCustomerId) ? profile.easyCustomerId : ''
+  const listed = savedId ? customerCatalog.value.find(item => item.id.toLowerCase() === savedId.toLowerCase()) : undefined
+  const named = !listed && !savedId ? customerCatalog.value.filter(item => item.name === profile.name.trim()) : []
+  if (listed) {
+    customerPick.value = listed.id
+    name.value = listed.name
+  } else if (named.length === 1) {
+    customerPick.value = named[0].id
+    name.value = named[0].name
+  } else {
+    customerPick.value = savedId || `saved:${profile.id}`
+  }
   surface.value = profile.querySurface ?? 'file'
   workflow.value = profile.workflowId ?? (surface.value === 'limit' ? 'pct-reminder' : '')
   mailStyle.value = (surface.value === 'limit' ? profile.limitMailStyle : profile.fileMailStyle) ?? ''
@@ -193,7 +257,7 @@ function edit(id: string): void {
   mailsetId.value = profile.mailsetId ?? ''
   enabled.value = profile.enabled
   createdAt.value = profile.createdAt
-  keptCustomerId.value = profile.easyCustomerId && isQueryGuid(profile.easyCustomerId) ? profile.easyCustomerId : ''
+  keptCustomerId.value = listed?.id || (named.length === 1 ? named[0].id : '') || savedId
   demandText.value = ''
   demandMessage.value = ''
   formScope.value = scopeFromConnection(connection.value)
@@ -243,6 +307,7 @@ async function loadDemands(): Promise<void> {
 function cancel(): void {
   editingId.value = ''
   name.value = ''
+  customerPick.value = ''
   surface.value = ''
   workflow.value = ''
   workflowRemark.value = ''
@@ -303,7 +368,15 @@ function openContacts(id: string): void {
 
 async function save(goAfter: boolean): Promise<void> {
   formMessage.value = ''
-  if (!name.value.trim()) { formMessage.value = '请先填写客户名称。'; return }
+  const selected = customerCatalog.value.find(item => item.id.toLowerCase() === customerPick.value.toLowerCase())
+  if (selected) {
+    name.value = selected.name
+    keptCustomerId.value = selected.id
+  } else if (!editingId.value || !name.value.trim()) {
+    formMessage.value = '请从客户名单里选择客户。'
+    return
+  }
+  if (!name.value.trim()) { formMessage.value = '请从客户名单里选择客户。'; return }
   if (!surface.value) { formMessage.value = '请选择查询入口。'; return }
   if (surface.value === 'limit' && workflow.value !== 'pct-reminder' && workflow.value !== 'pct-pengcheng') { formMessage.value = '请选择工作流。'; return }
   const styleMatches = surface.value === 'file' ? isFileMailStyle(mailStyle.value) : isLimitMailStyle(mailStyle.value)
@@ -400,8 +473,13 @@ watch([workflow, ready], () => {
     void loadReviewers(false)
   }
 }, { immediate: true })
+watch(ready, (value) => {
+  if (value) void loadCustomerList(false)
+}, { immediate: true })
 watch(() => connection.value.operatorId, () => {
-  if (!editingId.value && !name.value) return
+  customerCatalog.value = []
+  void loadCustomerList(false)
+  if (!editingId.value && !name.value && !customerPick.value) return
   cancel()
   formMessage.value = '登录的账号变了，没保存的内容已清掉。'
 })
@@ -420,7 +498,7 @@ watch(() => connection.value.operatorId, () => {
       <h2>已保存的客户</h2>
       <p class="hint">点「绑定查询」到查询页填好条件再绑定回来。点「写备注」在下面写一句，用来区分同一客户的多条工作流。</p>
       <p v-if="listMessage" class="hint">{{ listMessage }}</p>
-      <p v-if="customers.length === 0" class="empty">还没有客户。在下面填好名称后保存。</p>
+      <p v-if="customers.length === 0" class="empty">还没有客户。在下面选好名称后保存。</p>
       <table v-else class="grid">
         <thead><tr><th>客户</th><th>查询入口</th><th>工作流</th><th>备注</th><th>发文模式</th><th>记住的查询</th><th>状态</th><th></th></tr></thead>
         <tbody>
@@ -445,7 +523,11 @@ watch(() => connection.value.operatorId, () => {
     <form class="card" @submit.prevent="save(false)">
       <h2>{{ editingId ? '修改客户' : '添加客户' }}</h2>
       <div class="stack-form">
-        <label>客户名称 <input v-model="name" type="text" maxlength="80" /></label>
+        <label>客户名称
+          <ThemeSelect :model-value="customerPick" placeholder="请选择客户" empty-text="客户名单还没读到。点下面的重新读取。" :options="customerOptions" @update:model-value="chooseCustomer(String($event))" />
+        </label>
+        <p v-if="customerListMessage" class="hint">{{ customerListMessage }}</p>
+        <button type="button" class="text-button" @click="loadCustomerList(true)">重新读取客户</button>
         <p v-if="unlocksCaseContacts(name)" class="hint">保存「{{ CASE_CONTACT_CUSTOMER_NAME }}」后，会打开导出联系人。改成别的名字就会关掉。</p>
         <label>查询入口
           <ThemeSelect :model-value="surface" placeholder="请选择查询入口" :options="surfaceOptions" @update:model-value="surface = $event as QuerySurfaceId | ''" />

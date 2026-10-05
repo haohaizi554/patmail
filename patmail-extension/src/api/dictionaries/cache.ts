@@ -64,5 +64,6 @@ export class DictionaryCache {
   mailSetKey(userKey: string): string { return `${userKey}|mailSet` }
   signatureKey(userKey: string): string { return `${userKey}|signature` }
   reviewerKey(userKey: string): string { return `${userKey}|reviewer` }
+  customerListKey(userKey: string): string { return `${userKey}|customerList` }
   pickerKey(userKey: string, scope = ''): string { return scope ? `${userKey}|picker|${scope}` : `${userKey}|picker` }
 }

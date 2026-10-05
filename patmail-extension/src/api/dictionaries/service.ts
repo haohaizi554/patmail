@@ -10,10 +10,11 @@ import {
 } from './adapters'
 import { DictionaryCache } from './cache'
 import { readDictionaryBody, responseKeyNames } from './guards'
+import { customerListParams, readCustomerList } from '../../customer/customer-list'
 import { readMailSenders } from '../../customer/mailset'
 import { combineSignatures, readSignatureContent, readSignatureRows } from '../../mail/easy/signature-read'
 import type {
-  BasicDataSnapshot, DictionarySnapshot, FieldColumnSnapshot, FileTypeTreeSnapshot, FlowDataSnapshot, ListColumnSnapshot, MailSetSnapshot, MailTypeSnapshot, PickerSnapshot, ReviewerSnapshot, SignatureSnapshot
+  BasicDataSnapshot, CustomerListSnapshot, DictionarySnapshot, FieldColumnSnapshot, FileTypeTreeSnapshot, FlowDataSnapshot, ListColumnSnapshot, MailSetSnapshot, MailTypeSnapshot, PickerSnapshot, ReviewerSnapshot, SignatureSnapshot
 } from './types'
 import { buildPickerCatalog } from './picker-catalog'
 import { readReviewers } from './reviewers'
@@ -210,6 +211,19 @@ export class DictionaryService {
     })
   }
 
+  /** 客户列表页 GetCustomerlist。一次取全量，只保留编号和名称，结果按账号缓存。 */
+  loadCustomerList(userKey: string, force: boolean, signal?: AbortSignal): Promise<ApiResult<CustomerListSnapshot>> {
+    return this.cache.load(this.cache.customerListKey(userKey), force, async () => {
+      const response = await this.transport.post('customerList', customerListParams(), signal)
+      if (!response.ok) return response
+      const body = readDictionaryBody(response.data)
+      if (!body.ok) return body
+      const customers = readCustomerList(body.data)
+      if (!customers.ok) return customers
+      return { ok: true, data: { kind: 'customerList', customers: customers.data } }
+    })
+  }
+
   loadReviewers(userKey: string, force: boolean, signal?: AbortSignal): Promise<ApiResult<ReviewerSnapshot>> {
     return this.cache.load(this.cache.reviewerKey(userKey), force, async () => {
       const response = await this.transport.post('treeUser', params({ Call: 'GetTreeUser', log_pagename: PAGE }), signal)
@@ -285,6 +299,7 @@ export class DictionaryService {
     if (kind === 'mailSet') return this.loadMailSets(userKey, force, signal)
     if (kind === 'signature') return this.loadSignatures(userKey, force, signal)
     if (kind === 'reviewer') return this.loadReviewers(userKey, force, signal)
+    if (kind === 'customerList') return this.loadCustomerList(userKey, force, signal)
     if (kind === 'picker') return this.loadPicker(userKey, force, caseTypeId, signal, picker)
     return this.loadListColumns(userKey, force, signal)
   }

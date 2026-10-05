@@ -917,7 +917,7 @@ function isWorkflowPreview(value: unknown): value is { executionId: string; node
     typeof value.urgencyId === 'string' && value.nodeId.length <= 80 && value.reviewerId.length <= 80 && value.urgencyId.length <= 80
 }
 
-const DICTIONARY_KINDS = new Set(['basic', 'flow', 'fieldColumn', 'listColumn', 'fileType', 'mailType', 'reviewer', 'picker', 'mailSet', 'signature'])
+const DICTIONARY_KINDS = new Set(['basic', 'flow', 'fieldColumn', 'listColumn', 'fileType', 'mailType', 'reviewer', 'picker', 'mailSet', 'signature', 'customerList'])
 
 function isDictionaryRequest(value: unknown): value is DictionaryLoadRequest {
   if (!isRecord(value) || (value.force !== true && value.force !== false) || typeof value.kind !== 'string' || !DICTIONARY_KINDS.has(value.kind)) {

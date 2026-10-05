@@ -9,7 +9,7 @@ export function isCustomerProfile(value: unknown): value is CustomerQueryProfile
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const profile = value as Record<string, unknown>
   if (typeof profile.id !== 'string' || !profile.id.trim()) return false
-  if (typeof profile.name !== 'string' || !profile.name.trim() || profile.name.length > 80) return false
+  if (typeof profile.name !== 'string' || !profile.name.trim() || profile.name.length > 200) return false
   if (profile.easyCustomerId !== undefined && (typeof profile.easyCustomerId !== 'string' || !isQueryGuid(profile.easyCustomerId))) return false
   if (typeof profile.baseTemplateId !== 'string' || !profile.baseTemplateId.trim()) return false
   if (typeof profile.enabled !== 'boolean') return false

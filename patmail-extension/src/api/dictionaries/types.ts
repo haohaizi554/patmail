@@ -87,7 +87,7 @@ export interface SignatureSnapshot {
 }
 
 export type DictionarySnapshot =
-  | BasicDataSnapshot | FlowDataSnapshot | FileTypeTreeSnapshot | FieldColumnSnapshot | ListColumnSnapshot | MailTypeSnapshot | ReviewerSnapshot | PickerSnapshot | MailSetSnapshot | SignatureSnapshot
+  | BasicDataSnapshot | FlowDataSnapshot | FileTypeTreeSnapshot | FieldColumnSnapshot | ListColumnSnapshot | MailTypeSnapshot | ReviewerSnapshot | PickerSnapshot | MailSetSnapshot | SignatureSnapshot | CustomerListSnapshot
 
 export interface MailTypeSnapshot {
   kind: 'mailType'
@@ -105,10 +105,15 @@ export interface MailSetSnapshot {
   items: Array<{ id: string; name: string; email: string; label: string; isDefault: boolean; isPublic: boolean; signature: string }>
 }
 
-export type DictionaryKind = 'basic' | 'flow' | 'fileType' | 'fieldColumn' | 'listColumn' | 'mailType' | 'reviewer' | 'picker' | 'mailSet' | 'signature'
+export interface CustomerListSnapshot {
+  kind: 'customerList'
+  customers: Array<{ id: string; name: string }>
+}
+
+export type DictionaryKind = 'basic' | 'flow' | 'fileType' | 'fieldColumn' | 'listColumn' | 'mailType' | 'reviewer' | 'picker' | 'mailSet' | 'signature' | 'customerList'
 
 export type DictionaryLoadRequest =
-  | { kind: 'basic' | 'flow' | 'fieldColumn' | 'listColumn' | 'mailType' | 'reviewer' | 'mailSet'; force: boolean }
+  | { kind: 'basic' | 'flow' | 'fieldColumn' | 'listColumn' | 'mailType' | 'reviewer' | 'mailSet' | 'customerList'; force: boolean }
   | { kind: 'picker'; force: boolean; caseTypeId?: string; country?: string; procType?: string }
   | { kind: 'fileType'; force: boolean; caseTypeId: string }
   | { kind: 'signature'; force: boolean }
