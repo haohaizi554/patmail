@@ -23,7 +23,7 @@ async function insert(name: string): Promise<void> {
   <div class="template-editor">
     <label>正文模板 <textarea ref="box" v-model="model.template" rows="5"></textarea></label>
     <div class="token-row">
-      <button v-for="item in TEMPLATE_TOKENS" :key="item.name" type="button" class="text-button" :title="item.hint" @click="insert(item.name)">{{ '{' + item.name + '}' }}</button>
+      <button v-for="item in TEMPLATE_TOKENS" :key="item.name" type="button" class="text-button" v-hint="item.hint" @click="insert(item.name)">{{ '{' + item.name + '}' }}</button>
     </div>
     <p class="hint">正文和标题用同一套占位符。不需要的直接删，想固定的句子直接写。</p>
   </div>

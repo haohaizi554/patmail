@@ -167,8 +167,8 @@ onMounted(() => {
     <header class="bar" @pointerdown="onPointerDown">
       <div class="brand"><span class="brand-mark">✦</span><strong>PatMail</strong></div>
       <div class="actions">
-        <button type="button" :aria-label="collapsed ? '展开面板' : '收起面板'" :title="collapsed ? '展开' : '收起'" @click="collapsed = !collapsed">{{ collapsed ? '▢' : '−' }}</button>
-        <button type="button" aria-label="关闭面板" title="关闭" @click="closePanel?.()">×</button>
+        <button type="button" :aria-label="collapsed ? '展开面板' : '收起面板'" v-hint="collapsed ? '展开' : '收起'" @click="collapsed = !collapsed">{{ collapsed ? '▢' : '−' }}</button>
+        <button type="button" aria-label="关闭面板" v-hint="'关闭'" @click="closePanel?.()">×</button>
       </div>
     </header>
     <div v-if="!collapsed" class="body">

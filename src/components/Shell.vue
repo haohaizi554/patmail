@@ -30,12 +30,12 @@ const menu = computed(() => props.items || nav)
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         <input :value="search" :placeholder="placeholder" @input="emit('update:search', $event.target.value)" />
       </label>
-      <button class="bell" title="通知" @click="emit('settings', '通知')">
+      <button class="bell" v-hint="'通知'" @click="emit('settings', '通知')">
         <svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2H4.5z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 19a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
         <i v-if="showDemo">3</i>
       </button>
       <button class="profile" @click="emit('settings', '个人资料')">
-        <img v-if="avatarSrc" class="avatar-face" :src="avatarSrc" alt="" title="点击放大" @click.stop="emit('preview')" />
+        <img v-if="avatarSrc" class="avatar-face" :src="avatarSrc" alt="" v-hint="'点击放大'" @click.stop="emit('preview')" />
         <Avatar v-else />
         <span><b>{{ profileName }}</b><small>{{ profileDept }}</small></span>
         <svg viewBox="0 0 12 12"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>

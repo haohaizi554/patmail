@@ -23,6 +23,7 @@ async function copyManifest(from: string, to: string): Promise<void> {
 
 export default defineConfig({
   base: './',
+  server: { fs: { allow: [resolve(__dirname, '..')] } },
   publicDir: resolve(__dirname, '../public'),
   plugins: [
     vue(),

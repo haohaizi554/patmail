@@ -1,5 +1,8 @@
 import { createApp } from 'vue'
+import { hintDirective } from './components/hint'
 import App from './App.vue'
 import './style.css'
 
-createApp(App).mount('#app')
+const app = createApp(App)
+app.directive('hint', hintDirective)
+app.mount('#app')

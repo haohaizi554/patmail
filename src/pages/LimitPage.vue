@@ -129,7 +129,7 @@ function reset() {
   <section v-if="!hideForm" class="card">
     <div class="filters">
       <button v-for="item in types" :key="item[0]" :class="type === item[0] ? 'solid tiny' : 'ghost'" type="button" @click="type = item[0]">{{ item[1] }}</button>
-      <button class="ghost" type="button" disabled title="流程页签使用 FlowMonitorInfo，字段尚未核对">流程</button>
+      <span v-hint="'流程页签使用 FlowMonitorInfo，字段尚未核对'"><button class="ghost" type="button" disabled>流程</button></span>
     </div>
     <div class="form-grid">
       <label>我方文号<input v-model="caseVolume" placeholder="请输入我方文号" /></label>
@@ -151,7 +151,7 @@ function reset() {
         <span>{{ pageIndex }} / {{ totalPages }}</span>
         <button class="ghost tiny" type="button" :disabled="pageIndex >= totalPages || loading" @click="goPage(pageIndex + 1)">下一页</button>
       </div>
-      <button class="ghost" type="button" :title="submitTitle" @click="askSubmit">提交到 EASY</button>
+      <button class="ghost" type="button" v-hint="submitTitle" @click="askSubmit">提交到 EASY</button>
     </div>
     <p v-if="checking" class="hint">正在核对发文审核状态。核对完之前不能勾选。</p>
     <p v-if="message" class="hint">{{ message }}</p>
