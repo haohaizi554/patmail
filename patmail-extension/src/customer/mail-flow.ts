@@ -1,6 +1,6 @@
 import { isFileSearchBusinessField, type FileSearchQuery } from '../api/file-search-params'
 import { isForbiddenFieldName } from '../query/field-registry'
-import { resolvePctRuntime, type PctRuntimeConfig } from '../workflow/pct-config'
+import { PCT_CUSTOMER_VOLUME_TYPE_NAME, PCT_OUR_VOLUME_TYPE_NAME, resolvePctRuntime, type PctRuntimeConfig } from '../workflow/pct-config'
 import type { CustomerQueryProfile, FileMailStyle, LimitMailStyle, QuerySurfaceId, WorkflowId } from './types'
 
 /** 查询入口。以后新增入口只加这一项，客户页按这份清单渲染。 */
@@ -54,7 +54,7 @@ export const WORKFLOWS: PackagedWorkflow[] = [
       { id: 'ctrl_proc', label: '处理事项', decidedBy: '表格「处理事项」。上传后按这个名称到原网站的处理事项列表里对上再查。' },
       { id: 'our_volume', label: '我方文号', decidedBy: '表格「我方文号」。可以一个一个查，也可以用分号、空格或换行放在一起查。' },
       { id: 'customer_volume', label: '客户文号', decidedBy: '表格「客户文号」。' },
-      { id: 'volume', label: '发文类型', decidedBy: '从原网站的发文类型树热加载。有客户文号对名称里带「贵方案号」和「深圳市」的那一项；没有客户文号、有我方文号时对带「我方案号」和「深圳市」、且不是非深圳市的那一项。' },
+      { id: 'volume', label: '发文类型', decidedBy: `到发文类型下拉里按完整名称对上。有客户文号用「${PCT_CUSTOMER_VOLUME_TYPE_NAME}」。只有我方文号用「${PCT_OUR_VOLUME_TYPE_NAME}」。` },
       { id: 'mail_style', label: '发文模式', options: LIMIT_MAIL_STYLES },
       { id: 'customer_name', label: '客户名称', decidedBy: '表格「客户名称」。' },
       { id: 'to', label: '收件人', decidedBy: '表格「客户联系人(IPR)」。' },
@@ -238,21 +238,12 @@ export interface PctMailTypeMatch {
   ourVolumeShenzhen: PctMailTypeNode | null
 }
 
-/** 有客户文号用贵方案号那一项；没有客户文号但有我方文号用我方案号深圳市那一项。两个都没有就不猜。 */
+/** 有客户文号走贵方案号那一项；没有客户文号但有我方文号走我方案号深圳市那一项。两个都没有就不猜。 */
 export function pctVolumeSlot(input: { customerVolume?: string; ourVolume?: string }, config?: PctRuntimeConfig): PctVolumeSlot | null {
   const runtime = resolvePctRuntime(config)
   if (input.customerVolume?.trim()) return { id: 'customer_volume', radioIndex: runtime.customerRadio }
   if (input.ourVolume?.trim()) return { id: 'our_volume_shenzhen', radioIndex: runtime.ourRadio }
   return null
-}
-
-function named(name: string, keyword: string): boolean {
-  const text = keyword.trim()
-  return text.length > 0 && name.includes(text)
-}
-
-function inCity(name: string, config: PctRuntimeConfig): boolean {
-  return named(name, config.cityKeyword) && !named(name, config.otherCityKeyword)
 }
 
 function pickedType(nodes: Array<{ id: string; name: string }>, id: string): PctMailTypeNode | null {
@@ -262,14 +253,21 @@ function pickedType(nodes: Array<{ id: string; name: string }>, id: string): Pct
   return found ? { id: found.id, name: found.name } : null
 }
 
-/** 点名选定的优先。没选定，或这次名单里没有它，再按名字里的词来对。对不上就留空。 */
+/** 下拉里名称与完整全名一致才算对上。只包含其中几个词的不算。同名多于一项时不猜。 */
+function byExactName(nodes: Array<{ id: string; name: string }>, name: string): PctMailTypeNode | null {
+  const text = name.trim()
+  if (!text) return null
+  const found = nodes.filter(node => node.id.trim() && node.name.trim() === text)
+  return found.length === 1 ? { id: found[0].id, name: found[0].name.trim() } : null
+}
+
+/** 点名选定的优先。没选定，或这次名单里没有它，再按完整名称到下拉里找。对不上就留空。 */
 export function matchPctMailTypes(nodes: Array<{ id: string; name: string }>, config?: PctRuntimeConfig): PctMailTypeMatch {
   const runtime = resolvePctRuntime(config)
-  const reminder = nodes.filter(node => node.id.trim() && named(node.name, runtime.reminderKeyword))
   return {
-    customerVolume: pickedType(nodes, runtime.customerTypeId) ?? reminder.find(node => named(node.name, runtime.customerKeyword) && inCity(node.name, runtime)) ?? null,
-    ourVolumeOtherCity: reminder.find(node => named(node.name, runtime.ourKeyword) && named(node.name, runtime.otherCityKeyword)) ?? null,
-    ourVolumeShenzhen: pickedType(nodes, runtime.ourTypeId) ?? reminder.find(node => named(node.name, runtime.ourKeyword) && inCity(node.name, runtime)) ?? null
+    customerVolume: pickedType(nodes, runtime.customerTypeId) ?? byExactName(nodes, runtime.customerTypeName || PCT_CUSTOMER_VOLUME_TYPE_NAME),
+    ourVolumeOtherCity: null,
+    ourVolumeShenzhen: pickedType(nodes, runtime.ourTypeId) ?? byExactName(nodes, runtime.ourTypeName || PCT_OUR_VOLUME_TYPE_NAME)
   }
 }
 

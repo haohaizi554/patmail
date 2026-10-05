@@ -1,4 +1,5 @@
 import type { WorkflowDefinition, WorkflowStep } from './catalog'
+import { PCT_CUSTOMER_VOLUME_TYPE_NAME, PCT_OUR_VOLUME_TYPE_NAME } from './pct-config'
 
 export interface WorkflowPreviewNames {
   customerType?: string
@@ -44,8 +45,8 @@ function stepLines(step: WorkflowStep, index: number): string[] {
 export function workflowPreview(flow: WorkflowDefinition, names: WorkflowPreviewNames = {}): PreviewPiece[] {
   return flow.steps.map((step, index) => {
     if (step.skillId !== 'match-letter') return { stepId: step.id, lines: stepLines(step, index) }
-    const customer = names.customerType?.trim() || field(step, 'customer_type_name') || field(step, 'customer_keyword') || '贵方案号'
-    const ours = names.ourType?.trim() || field(step, 'our_type_name') || field(step, 'our_keyword') || '我方案号'
+    const customer = names.customerType?.trim() || field(step, 'customer_type_name') || PCT_CUSTOMER_VOLUME_TYPE_NAME
+    const ours = names.ourType?.trim() || field(step, 'our_type_name') || PCT_OUR_VOLUME_TYPE_NAME
     return {
       stepId: step.id,
       lines: [`${index + 1} ${step.title || '对上要发的信'}`].map(clip),

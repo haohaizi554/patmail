@@ -1,7 +1,7 @@
 import type { PackagedWorkflow } from '../customer/mail-flow'
 import { inventorCustomers } from '../customer/pct-recipients'
 import { isQueryGuid } from '../query/query-validator'
-import { resolvePctRuntime, type PctRuntimeConfig, type PctRuntimeInput } from './pct-config'
+import { PCT_CUSTOMER_VOLUME_TYPE_NAME, PCT_OUR_VOLUME_TYPE_NAME, resolvePctRuntime, type PctRuntimeConfig, type PctRuntimeInput } from './pct-config'
 import { isSkillId, skillById } from './skills'
 
 export interface WorkflowParam {
@@ -231,13 +231,9 @@ function textOf(definition: WorkflowDefinition, stepId: string, paramId: string,
 }
 
 function volumeDecidedBy(runtime: PctRuntimeConfig): string {
-  const customer = runtime.customerTypeName
-    ? `有客户文号时用「${runtime.customerTypeName}」`
-    : `有客户文号时找带「${runtime.customerKeyword}」和「${runtime.cityKeyword}」的`
-  const ours = runtime.ourTypeName
-    ? `只有我方文号时用「${runtime.ourTypeName}」`
-    : `只有我方文号时找带「${runtime.ourKeyword}」和「${runtime.cityKeyword}」、而且不是「${runtime.otherCityKeyword}」的`
-  return `到已经有的发文类型里对。${customer}。${ours}。`
+  const customer = runtime.customerTypeName || PCT_CUSTOMER_VOLUME_TYPE_NAME
+  const ours = runtime.ourTypeName || PCT_OUR_VOLUME_TYPE_NAME
+  return `到发文类型下拉里按完整名称对上。有客户文号用「${customer}」。只有我方文号用「${ours}」。`
 }
 
 function senderDecidedBy(definition: WorkflowDefinition): string {

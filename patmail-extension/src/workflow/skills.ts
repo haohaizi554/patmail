@@ -55,7 +55,7 @@ export const SKILLS: SkillTemplate[] = [
     title: '对上要发的信',
     blurb: '按文号，对上该发哪一种信',
     tint: 'pink',
-    detail: '有客户文号一种，只有我方文号一种。从发文类型里点。',
+    detail: '有客户文号对「提醒申请PCT（贵方案号）-深圳市」，只有我方文号对「提醒申请PCT（我方案号）-深圳市」。从发文类型下拉里按完整名称找。',
     params: [
       field('customer_type_id', '有客户文号时发这种', '', '从发文类型里点一种。'),
       field('customer_type_name', '有客户文号时的信叫什么', '', '', true),

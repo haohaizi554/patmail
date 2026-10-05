@@ -52,7 +52,7 @@ export function mailTypeTreeOptions(input: {
 
 /** 已经配好的一对排在前面，其余种类跟在后面。同一个种类只出现一次。 */
 export function mailTypeChoiceOptions(input: MailTypeChoiceInput): ChoiceOption[] {
-  const options: ChoiceOption[] = [{ value: '', label: '按名字里的词来对' }]
+  const options: ChoiceOption[] = [{ value: '', label: '按完整名称对' }]
   const seen = new Set<string>()
   for (const mapping of input.mappings) {
     if (!mapping.enabled || !mapping.mailTypeId.trim() || seen.has(mapping.mailTypeId)) continue

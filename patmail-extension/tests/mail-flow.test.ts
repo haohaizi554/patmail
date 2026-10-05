@@ -32,9 +32,13 @@ describe('PCT 提醒文号', () => {
     expect(pctMailTypeFor({ customerVolume: '  ', ourVolume: 'PA2518728CND' }, mailTypes)?.id).toBe('93f289c5-f3c5-4f6d-a90b-50ac1fb8d092')
   })
 
-  it('树还没读到时不写死名称', () => {
+  it('树还没读到时不写死名称，名字只是包含那几个词时也不对', () => {
     expect(pctMailTypeFor({ customerVolume: 'CS-1', ourVolume: 'PA1' }, [])).toBeNull()
-    expect(matchPctMailTypes(mailTypes).ourVolumeOtherCity?.name).toBe('提醒申请PCT（我方案号）非深圳市')
+    expect(matchPctMailTypes(mailTypes).ourVolumeShenzhen?.name).toBe('提醒申请PCT（我方案号）-深圳市')
+    expect(matchPctMailTypes(mailTypes).ourVolumeOtherCity).toBeNull()
+    expect(matchPctMailTypes([
+      { id: '71d067a3-d1a3-4d4b-87f9-38ea9d96bf70', name: '提醒申请PCT（贵方案号）深圳市' }
+    ]).customerVolume).toBeNull()
   })
 
   it('两个文号都没有时不猜', () => {

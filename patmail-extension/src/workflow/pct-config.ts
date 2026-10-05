@@ -17,7 +17,7 @@ export interface PctRuntimeConfig {
   otherCityKeyword: string
   customerRadio: 1 | 3
   ourRadio: 1 | 3
-  /** 点名选定的发文类型。空着就仍按名字里的词来对。 */
+  /** 点名选定的发文类型。空着就按下面这两个完整名称到下拉里对。 */
   customerTypeId: string
   customerTypeName: string
   ourTypeId: string
@@ -47,6 +47,11 @@ export const DEFAULT_PCT_RUNTIME: PctRuntimeConfig = {
   ourTypeId: '',
   ourTypeName: ''
 }
+
+/** 发文类型下拉里的完整名称。有客户文号对这一项。 */
+export const PCT_CUSTOMER_VOLUME_TYPE_NAME = '提醒申请PCT（贵方案号）-深圳市'
+/** 发文类型下拉里的完整名称。只有我方文号对这一项。 */
+export const PCT_OUR_VOLUME_TYPE_NAME = '提醒申请PCT（我方案号）-深圳市'
 
 export interface PctRuntimeInput {
   columns?: Partial<PctRuntimeConfig['columns']>

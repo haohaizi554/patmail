@@ -93,7 +93,8 @@ describe('PCT 工作流目录', () => {
     expect(parsed.rows[0]?.ourVolume).toBe('PA1')
     expect(parsed.notice).toContain('申请PCT')
     const customNodes = [{ id: '71d067a3-d1a3-4d4b-87f9-38ea9d96bf70', name: '提醒申请PCT（贵方编号）-深圳市' }]
-    expect(matchPctMailTypes(customNodes, runtime).customerVolume?.name).toContain('贵方编号')
+    expect(matchPctMailTypes(customNodes, runtime).customerVolume).toBeNull()
+    expect(matchPctMailTypes(nodes, runtime).customerVolume?.name).toBe('提醒申请PCT（贵方案号）-深圳市')
     expect(pctVolumeSlot({ customerVolume: 'CS-1' }, runtime)?.radioIndex).toBe(1)
   })
 
@@ -229,13 +230,14 @@ describe('PCT 工作流目录', () => {
     expect(second.label).toBe('PCT提醒 副本2')
   })
 
-  it('点名的发文类型优先，名单里没有时仍按词来对', () => {
+  it('点名的发文类型优先，名单里没有时按完整名称对', () => {
     const runtime = pctRuntimeFrom(defaultPctWorkflow())
     expect(runtime.customerTypeId).toBe('')
     runtime.customerTypeId = '82e178b4-e2b4-4e5c-98fa-49fb0ea7cf81'
     expect(matchPctMailTypes(nodes, runtime).customerVolume?.id).toBe('82e178b4-e2b4-4e5c-98fa-49fb0ea7cf81')
     runtime.customerTypeId = '00000000-0000-4000-8000-000000000000'
-    expect(matchPctMailTypes(nodes, runtime).customerVolume?.name).toContain('贵方案号')
+    expect(matchPctMailTypes(nodes, runtime).customerVolume?.name).toBe('提醒申请PCT（贵方案号）-深圳市')
+    expect(matchPctMailTypes(nodes, runtime).ourVolumeShenzhen?.name).toBe('提醒申请PCT（我方案号）-深圳市')
   })
 
   it('工作流里的邮箱必须是一份真实邮箱', () => {
@@ -258,7 +260,7 @@ describe('PCT 工作流目录', () => {
       currentId: '',
       currentName: ''
     })
-    expect(options[0]?.label).toBe('按名字里的词来对')
+    expect(options[0]?.label).toBe('按完整名称对')
     const tree = mailTypeTreeOptions({
       nodes: [
         { id: 'root', name: '全部邮件', parentId: '' },
