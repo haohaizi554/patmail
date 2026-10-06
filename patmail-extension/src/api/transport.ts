@@ -1,3 +1,4 @@
+import { documentedCallAllowed } from './documented-call'
 import { trustedOrigin } from './config'
 import { apiError, type ApiResult } from './types'
 
@@ -137,7 +138,29 @@ export class EasyTransport {
       return apiError('INVALID_QUERY', '业务请求类型无效。')
     }
     if (signal?.aborted) return apiError('REQUEST_ABORTED', '请求已取消。')
+    return this.sendForm(route.path, params, this.waitMs(operation), signal)
+  }
 
+  /** 用当前页面的登录会话调用文档里的只读接口。入口和 Call 由调用方先校验。 */
+  async postDocumented(handler: string, params: URLSearchParams, signal?: AbortSignal): Promise<ApiResult<unknown>> {
+    if (!this.origin) return apiError('INVALID_ORIGIN', '当前页面不属于受信任的 EASY 站点。')
+    const call = params.get('Call') ?? ''
+    if (params.getAll('Call').length !== 1) return apiError('INVALID_QUERY', 'Call 无效。')
+    const allowed = documentedCallAllowed(handler, call)
+    if (!allowed.ok) return apiError('INVALID_QUERY', allowed.reason)
+    let result = await this.sendForm(`/AjaxServers/${handler}`, params, 15_000, signal)
+    for (let attempt = 1; !result.ok && (result.error.status === 502 || result.error.status === 503) && attempt < 3; attempt += 1) {
+      if (signal?.aborted) return apiError('REQUEST_ABORTED', '请求已取消。')
+      await new Promise(resolve => setTimeout(resolve, 200 * attempt))
+      if (signal?.aborted) return apiError('REQUEST_ABORTED', '请求已取消。')
+      result = await this.sendForm(`/AjaxServers/${handler}`, params, 15_000, signal)
+    }
+    return result
+  }
+
+  /** Handler 和 Call 已由上层收口。Cookie 只随当前页面发出，不读出来。 */
+  private async sendForm(path: string, params: URLSearchParams, timeoutMs: number, signal?: AbortSignal): Promise<ApiResult<unknown>> {
+    if (!this.origin) return apiError('INVALID_ORIGIN', '当前页面不属于受信任的 EASY 站点。')
     const controller = new AbortController()
     let timedOut = false
     const onExternalAbort = () => controller.abort()
@@ -145,9 +168,9 @@ export class EasyTransport {
     const timer = setTimeout(() => {
       timedOut = true
       controller.abort()
-    }, this.waitMs(operation))
+    }, timeoutMs)
     try {
-      const response = await this.fetcher(this.origin + route.path, {
+      const response = await this.fetcher(this.origin + path, {
         method: 'POST',
         credentials: 'include',
         redirect: 'follow',

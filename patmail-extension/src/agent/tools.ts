@@ -1,6 +1,11 @@
+import { applyEasyRefs, documentedCallAllowed, explainEasyArgs, payloadFromSummary, readEasySteps } from '../api/documented-call'
 import type { SelectedPatentFile } from '../mail/types'
 import { isMessage, MessageType, type ContentRequest } from '../shared/message'
+import { readAgentQuestions, type AgentQuestion } from './ask'
+import { formatWorkPlan, readWorkPlan } from './plan'
 import { clipToolResult, rememberFact, searchFacts, type AgentMemoryState } from './memory'
+import { LlmError } from './llm'
+import { requiredTools } from './turn-policy'
 import type { ToolSchema } from './llm'
 
 export interface DeadlineRow {
@@ -40,6 +45,8 @@ export interface ToolContext {
   readonlyAcceptance(call: string, caseTypeId: string, mailId: string): Promise<string>
   diagnoseMail(mailId: string): Promise<string>
   exportContacts(volumes: string): Promise<string>
+  /** 助手决定提问时，等用户在浮窗里答完。 */
+  askUser?(questions: AgentQuestion[]): Promise<string>
 }
 
 /** 起草结果的固定句式。主题和没收录的占位符都留在原文里。 */
@@ -157,12 +164,98 @@ const SCHEMAS: ToolSchema[] = [
   {
     type: 'function',
     function: {
+      name: 'call_easy',
+      description: '用当前登录会话按顺序调用不会改数据的原站接口。固定组合用 recipe 加 case_id：biology、case-info、case-flow、case-demand。单步给 handler 和 call。要组合时给 steps，后面字段用 @{1.路径} 取第 1 步响应里的值，例如 @{1.TableRows.0.case_id}。先用 lookup_api 核对入口和参数。会改数据的 Call 不会发出。',
+      parameters: {
+        type: 'object',
+        properties: {
+          recipe: { type: 'string', description: 'biology、case-info、case-flow、case-demand 之一' },
+          case_id: { type: 'string', description: '查案件或查期限返回的案件编号' },
+          handler: { type: 'string', description: '单步时的 ashx 入口，如 CFInvoice.ashx' },
+          call: { type: 'string', description: '单步时的 Call 名，如 GetBiologyList' },
+          fields: { type: 'object', description: '单步表单字段，值都是字符串。可空。', additionalProperties: { type: 'string' } },
+          steps: {
+            type: 'array',
+            description: '按顺序组合，最多 4 步。每步含 handler、call、fields。',
+            items: {
+              type: 'object',
+              properties: {
+                handler: { type: 'string' },
+                call: { type: 'string' },
+                fields: { type: 'object', additionalProperties: { type: 'string' } }
+              },
+              required: ['handler', 'call']
+            }
+          }
+        },
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'lookup_api',
-      description: '查阅全部原站接口文档。用 Call 名（如 GetSearchFiles）、ashx 入口或中文主题检索。问一共有多少接口时，query 用「多少接口」，返回的是按入口和 Call 去重后的个数，不是文档篇数。只用于对照，不能据此直接发请求。',
+      description: '查阅全部原站接口文档。问句不用和原文一致，按相关片段检索。用 Call 名（如 GetSearchFiles）、ashx 入口或中文主题。问一共有多少接口时，query 用「多少接口」。真实响应用 call_easy 发，不要说发不出请求。',
       parameters: {
         type: 'object',
         properties: { query: { type: 'string', description: 'Call 名、入口或中文主题' } },
         required: ['query'],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'plan_work',
+      description: '一件事要分好几步时，先写下 2 到 6 步再动手。每步 title 是给用户看的短标题，tool 是现有工具名。写完按顺序调用，一步成功再做下一步。只查一次的小事不要用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          steps: {
+            type: 'array',
+            description: '二到六步',
+            items: {
+              type: 'object',
+              properties: {
+                title: { type: 'string', description: '这一步做什么' },
+                tool: { type: 'string', description: '办成这一步要用的工具名' }
+              },
+              required: ['title', 'tool']
+            }
+          }
+        },
+        required: ['steps'],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ask_user',
+      description: '缺了只有用户知道的内容时，向用户提一到三个问题。有固定选项就填 choices，要用户自己写就留空。可以多选时 multiple 为 true。选项只是范围、还要写具体内容时 needsText 为 true。用户答完再继续办。',
+      parameters: {
+        type: 'object',
+        properties: {
+          questions: {
+            type: 'array',
+            description: '一到三个问题',
+            items: {
+              type: 'object',
+              properties: {
+                prompt: { type: 'string', description: '问句' },
+                placeholder: { type: 'string', description: '输入提示，可空' },
+                choices: { type: 'array', items: { type: 'string' }, description: '可点的选项，没有就空着' },
+                multiple: { type: 'boolean', description: '可以多选' },
+                needsText: { type: 'boolean', description: '还要用户写上具体内容' }
+              },
+              required: ['prompt']
+            }
+          }
+        },
+        required: ['questions'],
         additionalProperties: false
       }
     }
@@ -390,13 +483,72 @@ const SCHEMAS: ToolSchema[] = [
   }
 ]
 
-export function agentToolSchemas(): ToolSchema[] {
-  return SCHEMAS
+/** 每轮都带上的工具。其余在用户这句话用得上时才带 schema。 */
+const HOT_TOOLS = new Set([
+  'connection_status', 'search_cases', 'search_deadlines', 'list_customers',
+  'lookup_api', 'call_easy', 'ask_user', 'plan_work', 'remember', 'recall', 'create_task', 'draft_mail', 'submit_easy'
+])
+
+const COLD_TOOLS: ReadonlyArray<readonly [string, RegExp]> = [
+  ['describe_workflows', /工作流/],
+  ['list_skills', /本领|技能/],
+  ['create_workflow', /工作流/],
+  ['set_workflow_field', /栏|字段/],
+  ['read_customer', /客户资料|客户配置|这位客户/],
+  ['preview_workflow', /预览/],
+  ['list_tasks', /任务/],
+  ['list_history', /查询记录|历史查询|记录页/],
+  ['list_reviewers', /审核人/],
+  ['list_processes', /流程/],
+  ['list_acceptance', /验收/],
+  ['readonly_acceptance', /验收/],
+  ['diagnose_mail', /核对邮件|邮件核对/],
+  ['export_contacts', /联系人/]
+]
+
+/** 不传文本时返回全部，供对照。传入本轮用户原话后，冷工具只在对得上时出现。 */
+export function agentToolSchemas(texts?: readonly string[]): ToolSchema[] {
+  if (!texts) return SCHEMAS
+  const blob = texts.join('\n')
+  const wanted = new Set(HOT_TOOLS)
+  for (const name of requiredTools(blob)) wanted.add(name)
+  for (const [name, pattern] of COLD_TOOLS) {
+    if (pattern.test(blob)) wanted.add(name)
+  }
+  for (const schema of SCHEMAS) {
+    if (blob.includes(schema.function.name)) wanted.add(schema.function.name)
+  }
+  return SCHEMAS.filter(schema => wanted.has(schema.function.name))
 }
 
 function textArg(args: Record<string, unknown>, key: string, max = 80): string {
   const value = args[key]
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
+}
+
+async function callEasy(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
+  const explained = explainEasyArgs(args)
+  if (explained) return explained
+  const steps = readEasySteps(args)
+  if (!steps) return '请给出入口和 Call，或一组按顺序调用的步骤。'
+  const earlier: unknown[] = []
+  const parts: string[] = []
+  for (const [index, step] of steps.entries()) {
+    const allowed = documentedCallAllowed(step.handler, step.call)
+    if (!allowed.ok) return [parts.join('\n\n'), `第 ${index + 1} 步${allowed.reason}`].filter(Boolean).join('\n')
+    const filled = applyEasyRefs(step.fields, earlier)
+    if (!filled.ok) return [parts.join('\n\n'), `第 ${index + 1} 步${filled.reason}`].filter(Boolean).join('\n')
+    const forwarded = await ctx.forward({
+      type: MessageType.CallEasy,
+      payload: { handler: step.handler, call: step.call, ...(Object.keys(filled.fields).length ? { fields: filled.fields } : {}) }
+    })
+    const error = forwardedError(forwarded)
+    if (error) return [parts.join('\n\n'), `第 ${index + 1} 步没有完成：${error}`].filter(Boolean).join('\n')
+    if (!isMessage(forwarded) || forwarded.type !== MessageType.CallEasyResult) return [parts.join('\n\n'), `第 ${index + 1} 步没有返回。`].filter(Boolean).join('\n')
+    earlier.push(payloadFromSummary(forwarded.payload.text))
+    parts.push(`第 ${index + 1} 步 ${step.handler} ${step.call}\n${forwarded.payload.text}`)
+  }
+  return clip(`已用当前登录会话调用，没有改数据。\n${parts.join('\n\n')}`)
 }
 
 function clip(text: string): string {
@@ -433,8 +585,8 @@ async function searchCases(ctx: ToolContext, args: Record<string, unknown>): Pro
   const data = response.payload.data
   const selected = data.items.map(asSelected).filter((item): item is SelectedPatentFile => item !== null)
   if (selected.length > 0) ctx.rememberFiles(selected)
-  const lines = data.items.slice(0, 10).map(item => [item.caseVolume, item.caseName, item.fileName, item.customerName, item.applicationNo].filter(Boolean).join(' | '))
-  return clip(`文件查询共 ${data.total} 条。\n${lines.join('\n') || '这一页没有记录。'}`)
+  const lines = data.items.slice(0, 10).map(item => [item.caseVolume, item.caseId && `案件编号 ${item.caseId}`, item.caseName, item.fileName, item.customerName, item.applicationNo].filter(Boolean).join(' | '))
+  return clip(`文件查询共 ${data.total} 条。案件编号只用于下一步调用。\n${lines.join('\n') || '这一页没有记录。'}`)
 }
 
 async function searchDeadlines(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
@@ -463,7 +615,7 @@ async function searchDeadlines(ctx: ToolContext, args: Record<string, unknown>):
     .map(item => ({ procId: item.procId, caseId: item.caseId, caseVolume: item.caseVolume }))
   if (deadlines.length > 0) ctx.rememberDeadlines(deadlines)
   const lines = data.items.slice(0, 10).map(item =>
-    [item.caseVolume, item.ctrlProc, item.customerName, item.intDueDate && `内部 ${item.intDueDate}`, item.cusDueDate && `客户 ${item.cusDueDate}`, item.legalDueDate && `法律 ${item.legalDueDate}`].filter(Boolean).join(' | ')
+    [item.caseVolume, item.caseId && `案件编号 ${item.caseId}`, item.procId && `事项编号 ${item.procId}`, item.ctrlProc, item.customerName, item.intDueDate && `内部 ${item.intDueDate}`, item.cusDueDate && `客户 ${item.cusDueDate}`, item.legalDueDate && `法律 ${item.legalDueDate}`].filter(Boolean).join(' | ')
   )
   return clip(`期限监控共 ${data.total} 条。\n${lines.join('\n') || '这一页没有未结束的事项。'}`)
 }
@@ -525,6 +677,21 @@ export async function executeAgentTool(name: string, rawArguments: string, ctx: 
     if (name === 'list_skills') {
       return { text: clip(ctx.skills().map(skill => `${skill.title}：${skill.blurb}。${skill.detail}`).join('\n')), memory }
     }
+    if (name === 'plan_work') {
+      const names = new Set(SCHEMAS.map(item => item.function.name))
+      const steps = readWorkPlan(args, names)
+      if (!steps) return { text: '计划要写 2 到 6 步，每步一个短标题和现有工具名。', memory }
+      return { text: formatWorkPlan(steps), memory }
+    }
+    if (name === 'ask_user') {
+      const questions = readAgentQuestions(args)
+      if (!questions) return { text: '问题没有写清，没有向用户提问。', memory }
+      if (!ctx.askUser) return { text: '现在没有人可以回答。', memory }
+      const answer = await ctx.askUser(questions)
+      if (answer === '已停下。') throw new LlmError('REQUEST_TIMEOUT', '已停下。')
+      if (answer === '跳过') return { text: '用户跳过了这个问题。', memory }
+      return { text: `用户答：\n${answer}`, memory }
+    }
     if (name === 'remember') {
       const text = textArg(args, 'text', 240)
       if (!text) return { text: '没有可记的内容。', memory }
@@ -536,6 +703,7 @@ export async function executeAgentTool(name: string, rawArguments: string, ctx: 
       if (!query) return { text: '请给出 Call 名、入口或中文主题。', memory }
       return { text: clip(ctx.lookupApi(query)), memory }
     }
+    if (name === 'call_easy') return { text: await callEasy(ctx, args), memory }
     if (name === 'recall') {
       const found = searchFacts(memory, textArg(args, 'query', 80))
       return { text: found.length === 0 ? '长期记忆里没有对上的内容。' : found.map(fact => fact.text).join('\n'), memory }
@@ -597,8 +765,10 @@ export async function executeAgentTool(name: string, rawArguments: string, ctx: 
     }
     if (name === 'export_contacts') return { text: await ctx.exportContacts(textArg(args, 'volumes', 400)), memory }
     if (name === 'submit_easy') return { text: await ctx.submitEasy(textArg(args, 'caseVolume', 400)), memory }
-    return { text: `没有这个工具：${name}`, memory }
+    const names = SCHEMAS.map(item => item.function.name).join('、')
+    return { text: `没有这个工具：${name}。现在可以用：${names}`, memory }
   } catch (error) {
+    if (error instanceof LlmError && error.message === '已停下。') throw error
     return { text: error instanceof Error ? error.message : '工具没有完成。', memory }
   }
 }

@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { AGENT_FRAME_KEY, normalizeAgentFrame, resizeAgentFrame, type AgentFrame, type ResizeEdge } from '../agent-frame'
+import { foldActivity, type AgentTraceStep } from '../../agent/trace'
 import { AGENT_CONFIG_KEY, normalizeAgentConfig } from '../../agent/config'
 import AgentAnswer from './AgentAnswer.vue'
 import { thoughtLead } from '../../agent/loop'
+import { formatAgentAnswer, isAgentQuestion, type AgentQuestion } from '../../agent/ask'
 import { filterCommands, resolveSlash, slashToken, type SlashCommand } from '../../agent/slash'
 import { MessageType, type BackgroundRequest } from '../../shared/message'
 import { sendToBackground } from '../../utils/runtime'
@@ -24,8 +26,10 @@ const queue = ref<Job[]>([])
 const queueOpen = ref(false)
 const queueHead = computed(() => queue.value.slice(0, QUEUE_HEAD))
 const queueRest = computed(() => queue.value.slice(QUEUE_HEAD))
+const liveSteps = ref<AgentTraceStep[]>([])
 const liveThought = ref('')
 const liveThoughtTarget = ref('')
+const liveDraft = ref('')
 const liveThoughtOpen = ref(true)
 const liveThoughtBox = ref<HTMLElement | null>(null)
 let livePump = 0
@@ -51,8 +55,21 @@ function clearLiveThought(): void {
   stopLivePump()
   liveThoughtTarget.value = ''
   liveThought.value = ''
+  liveDraft.value = ''
 }
 const draft = ref('')
+interface PendingAsk { questions: AgentQuestion[]; index: number; answers: Record<string, string> }
+const pendingAsk = ref<PendingAsk | null>(null)
+const askText = ref('')
+const askPicked = ref<string[]>([])
+const askQuestion = computed(() => (pendingAsk.value ? pendingAsk.value.questions[pendingAsk.value.index] ?? null : null))
+const askReady = computed(() => {
+  const question = askQuestion.value
+  if (!question) return false
+  if (question.needsText) return askText.value.trim().length > 0
+  return askPicked.value.length > 0 || askText.value.trim().length > 0
+})
+const askLast = computed(() => Boolean(pendingAsk.value && askQuestion.value && pendingAsk.value.index >= pendingAsk.value.questions.length - 1))
 const note = ref('')
 const busy = ref(false)
 const waitLabel = ref('正在回复')
@@ -67,6 +84,7 @@ const starters = [
 ]
 let stopped = false
 const ACTIVITY_CHANNEL = 'patmail-agent-activity'
+const ASK_CHANNEL = 'patmail-agent-ask'
 const calmNote = (text: string) => text === '这段对话已清空，长期记忆还在。' || text === '已停下。'
 
 function readThinking(value: unknown): void {
@@ -81,6 +99,7 @@ let resize: { edge: ResizeEdge; x: number; y: number; width: number; height: num
 function readFrame(value: unknown): void {
   if (resize) return
   preferred.value = normalizeAgentFrame(value, viewport.value)
+  clamp(x.value, y.value)
 }
 
 function saveFrame(next: AgentFrame): void {
@@ -150,7 +169,9 @@ function waitPhrase(): string {
 function startWait(label = waitPhrase()): void {
   waitLabel.value = label
   window.clearTimeout(waitTimer)
-  waitTimer = window.setTimeout(() => { waitLabel.value = '还在处理，稍等一下' }, 8_000)
+  waitTimer = window.setTimeout(() => {
+    if (liveSteps.value.length === 0 && !liveThought.value && !liveDraft.value) waitLabel.value = '还在处理，稍等一下'
+  }, 8_000)
 }
 
 function stopWait(): void {
@@ -249,6 +270,9 @@ async function finishJob(): Promise<void> {
 function halt(): void {
   if (!busy.value) return
   stopped = true
+  pendingAsk.value = null
+  askText.value = ''
+  askPicked.value = []
   waitLabel.value = '正在停下'
   void sendToBackground({ type: MessageType.AgentChat, payload: { action: 'stop' } }, 8_000)
 }
@@ -280,6 +304,7 @@ async function retry(): Promise<void> {
 async function runJob(job: Job): Promise<void> {
   stopped = false
   busy.value = true
+  liveSteps.value = []
   clearLiveThought()
   liveThoughtOpen.value = true
   note.value = ''
@@ -367,10 +392,9 @@ async function send(): Promise<void> {
     await runJob(job)
     return
   }
-  if (resolved.kind === 'unknown' || resolved.kind === 'need-args') {
+  if (resolved.kind === 'unknown') {
     showAside(resolved.message)
-    if (resolved.kind === 'need-args') draft.value = `/${resolved.name} `
-    else draft.value = ''
+    draft.value = ''
     await scrollDown()
     box.value?.focus()
     return
@@ -393,8 +417,60 @@ async function send(): Promise<void> {
   await runJob(job)
 }
 
+function beginAsk(questions: AgentQuestion[]): void {
+  pendingAsk.value = { questions, index: 0, answers: {} }
+  askText.value = ''
+  askPicked.value = []
+}
+
+function replyAnswer(message: string): void {
+  void sendToBackground({ type: MessageType.AgentChat, payload: { action: 'answer', message } }, 30_000)
+}
+
+function skipAsk(): void {
+  if (!pendingAsk.value) return
+  pendingAsk.value = null
+  askText.value = ''
+  askPicked.value = []
+  replyAnswer('跳过')
+}
+
+function toggleAsk(choice: string): void {
+  const question = askQuestion.value
+  if (!question) return
+  if (question.multiple) {
+    askPicked.value = askPicked.value.includes(choice)
+      ? askPicked.value.filter(item => item !== choice)
+      : [...askPicked.value, choice]
+    return
+  }
+  askPicked.value = askPicked.value[0] === choice ? [] : [choice]
+  if (!question.placeholder && !question.needsText) advanceAsk()
+}
+
+function advanceAsk(): void {
+  const pending = pendingAsk.value
+  const question = askQuestion.value
+  if (!pending || !question || !askReady.value) return
+  const typed = askText.value.trim()
+  const picked = question.multiple ? askPicked.value.join('、') : (askPicked.value[0] ?? '')
+  const value = [picked, typed].filter(Boolean).join(' ')
+  const answers = { ...pending.answers, [question.id]: value }
+  if (pending.index + 1 < pending.questions.length) {
+    pendingAsk.value = { ...pending, index: pending.index + 1, answers }
+    askText.value = ''
+    askPicked.value = []
+    return
+  }
+  const line = formatAgentAnswer(pending.questions, answers).trim()
+  pendingAsk.value = null
+  askText.value = ''
+  askPicked.value = []
+  replyAnswer(line || '跳过')
+}
+
 function fillCommand(command: SlashCommand, submitReady: boolean): void {
-  if (submitReady && command.args === 'none') {
+  if (submitReady && command.args !== 'optional') {
     draft.value = `/${command.name}`
     void send()
     return
@@ -444,7 +520,7 @@ function onResizeStart(edge: ResizeEdge, event: PointerEvent): void {
   event.preventDefault()
   event.stopPropagation()
   resize = { edge, x: event.clientX, y: event.clientY, width: frame.value.width, height: frame.value.height, left: x.value, top: y.value }
-  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  try { (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId) } catch { /* 指针已经松开 */ }
 }
 
 function onResizeMove(event: PointerEvent): void {
@@ -539,18 +615,38 @@ function dropAgentPort(): void {
 
 function onActivity(message: unknown): void {
   try { agentPort?.postMessage({ kind: 'tick' }) } catch { agentPort = null }
-  if (!busy.value || !message || typeof message !== 'object') return
-  const record = message as { channel?: unknown; label?: unknown; thought?: unknown }
+  if (!message || typeof message !== 'object') return
+  const record = message as { channel?: unknown; questions?: unknown; label?: unknown; thought?: unknown; detail?: unknown; phase?: unknown }
+  if (record.channel === ASK_CHANNEL) {
+    if (!busy.value || stopped || !Array.isArray(record.questions)) return
+    const questions = record.questions.filter(isAgentQuestion).slice(0, 3)
+    if (questions.length === 0) return
+    beginAsk(questions)
+    if (stick.value) void scrollDown()
+    return
+  }
+  if (!busy.value) return
   if (record.channel !== ACTIVITY_CHANNEL || typeof record.label !== 'string') return
   if (stopped) return
+  if (record.label === '正在写' && typeof record.thought === 'string' && record.thought.trim()) {
+    liveDraft.value = record.thought
+    waitLabel.value = '正在写'
+    if (stick.value) void scrollDown()
+    return
+  }
   if (typeof record.thought === 'string' && record.thought.trim()) {
     liveThoughtTarget.value = record.thought
     waitLabel.value = '正在思考'
     if (!livePump) livePump = requestAnimationFrame(pumpLiveThought)
     return
   }
-  clearLiveThought()
+  liveSteps.value = foldActivity(liveSteps.value, {
+    label: record.label,
+    phase: record.phase === 'done' ? 'done' : 'run',
+    ...(typeof record.detail === 'string' ? { detail: record.detail } : {})
+  })
   waitLabel.value = record.label.slice(0, 40)
+  if (stick.value) void scrollDown()
 }
 
 watch(liveThought, async () => {
@@ -590,6 +686,7 @@ onUnmounted(() => {
         :key="edge"
         class="agent-resize"
         :class="edge"
+        :role="edge === 'se' ? 'button' : undefined"
         :aria-label="edge === 'se' ? '拖动调整大小' : undefined"
         @pointerdown="onResizeStart(edge, $event)"
         @pointermove="onResizeMove"
@@ -615,8 +712,8 @@ onUnmounted(() => {
           <p>{{ item }}</p>
         </div>
         <div v-if="busy" class="agent-row assistant pending" role="status" aria-live="polite">
-          <div v-if="liveThought" class="agent-stack">
-            <div class="think">
+          <div class="agent-trace">
+            <div v-if="liveThought" class="think">
               <button type="button" class="think-bar" :aria-expanded="liveThoughtOpen" @click="liveThoughtOpen = !liveThoughtOpen">
                 <span class="think-chevron" :class="{ open: liveThoughtOpen }" aria-hidden="true"></span>
                 <span class="think-label">正在思考</span>
@@ -624,8 +721,17 @@ onUnmounted(() => {
               </button>
               <pre v-if="liveThoughtOpen" ref="liveThoughtBox" class="think-body live">{{ liveThought }}</pre>
             </div>
+            <ol v-if="liveSteps.length" class="agent-steps">
+              <li v-for="(step, index) in liveSteps" :key="`${index}-${step.label}`" :class="step.state">
+                <span class="agent-step-mark" aria-hidden="true"></span>
+                <span class="agent-step-label">{{ step.label }}</span>
+                <span v-if="step.detail" class="agent-step-detail">{{ step.detail }}</span>
+              </li>
+            </ol>
+            <p v-if="liveDraft" class="agent-step-label">正在写</p>
+            <pre v-if="liveDraft" class="think-body live">{{ liveDraft }}</pre>
+            <p v-if="!liveSteps.length && !liveDraft"><span class="agent-dots" aria-hidden="true"><i></i><i></i><i></i></span>{{ waitLabel }}</p>
           </div>
-          <p v-else><span class="agent-dots" aria-hidden="true"><i></i><i></i><i></i></span>{{ waitLabel }}</p>
         </div>
         <div v-if="!busy && note" class="agent-row assistant" :class="{ failed: !calmNote(note) }">
           <p>{{ note }}<button v-if="retryJob" type="button" class="agent-retry" @click="retry">重试</button></p>
@@ -633,6 +739,30 @@ onUnmounted(() => {
         <button v-if="!stick" type="button" class="agent-jump" @click="scrollDown(true)">回到最新</button>
       </div>
       <form @submit.prevent="send">
+        <div v-if="pendingAsk && askQuestion" class="agent-ask">
+          <p class="agent-ask-step">{{ pendingAsk.index + 1 }} / {{ pendingAsk.questions.length }}</p>
+          <p class="agent-ask-prompt">{{ askQuestion.prompt }}</p>
+          <div v-if="askQuestion.choices.length" class="agent-ask-choices">
+            <button
+              v-for="choice in askQuestion.choices"
+              :key="choice"
+              type="button"
+              :class="{ on: askPicked.includes(choice) }"
+              @click="toggleAsk(choice)"
+            >{{ choice }}</button>
+          </div>
+          <input
+            v-if="askQuestion.placeholder || askQuestion.needsText || askQuestion.choices.length === 0"
+            v-model="askText"
+            type="text"
+            :placeholder="askQuestion.placeholder || '写在这里'"
+            @keydown.enter.prevent="advanceAsk"
+          />
+          <div class="agent-ask-actions">
+            <button type="button" @click="skipAsk">跳过</button>
+            <button type="button" class="primary" :disabled="!askReady" @click="advanceAsk">{{ askLast ? '就这样' : '下一题' }}</button>
+          </div>
+        </div>
         <div v-if="queue.length" class="agent-queue">
           <ul id="agent-queue-list" class="agent-queue-list">
             <li v-for="(item, index) in queueHead" :key="index"><span>排队</span>{{ item.display }}</li>

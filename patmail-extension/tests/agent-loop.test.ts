@@ -3,8 +3,9 @@ import { AGENT_CONFIG_DEFAULT } from '../src/agent/config'
 import type { ChatOutcome } from '../src/agent/llm'
 import { LlmError } from '../src/agent/llm'
 import { runAgentTurn, splitAgentReply, thoughtLead, type Complete } from '../src/agent/loop'
-import { applySummary, clipToolResult, COMPRESS_AT_CHARS, EMPTY_MEMORY, foldDigest, KEEP_RECENT_CHARS, needsCompression, normalizeMemory, rememberFact, searchFacts, splitForCompression, contextChars, visibleHistory } from '../src/agent/memory'
-import { emptyPageTools, executeAgentTool, formatDraft, type ToolContext } from '../src/agent/tools'
+import { applySummary, clipToolResult, COMPRESS_AT_CHARS, EMPTY_MEMORY, foldDigest, KEEP_RECENT_CHARS, needsCompression, normalizeMemory, projectOldToolText, rememberFact, searchFacts, splitForCompression, contextChars, visibleHistory } from '../src/agent/memory'
+import { agentToolSchemas, emptyPageTools, executeAgentTool, formatDraft, type ToolContext } from '../src/agent/tools'
+import { groupToolCalls } from '../src/agent/turn-policy'
 import { MessageType } from '../src/shared/message'
 
 const config = { ...AGENT_CONFIG_DEFAULT, maxTokens: 64 }
@@ -36,6 +37,30 @@ const idleContext: ToolContext = {
 }
 
 describe('agent memory', () => {
+  it('keeps older tool text in storage and sends only the first line', async () => {
+    const stored = '文件查询共 1 条。\n案件编号 CASE-1\n受理通知书'
+    expect(projectOldToolText(stored)).toContain('已收成一行')
+    expect(projectOldToolText(stored)).not.toContain('CASE-1')
+    expect(projectOldToolText('文件查询共 1 条。')).toBe('文件查询共 1 条。')
+    const prior = {
+      ...EMPTY_MEMORY,
+      turns: [
+        { role: 'user' as const, content: '查一下' },
+        { role: 'tool' as const, content: stored, toolCallId: 'old' },
+        { role: 'assistant' as const, content: '查到了。' }
+      ]
+    }
+    let toolText = ''
+    const complete: Complete = async (_config, options) => {
+      toolText = options.messages.find(message => message.role === 'tool')?.content ?? ''
+      return outcome('这一轮还没查。')
+    }
+    const turn = await runAgentTurn(config, prior, '再看一眼', idleContext, complete)
+    expect(toolText).not.toContain('CASE-1')
+    expect(toolText).toContain('已收成一行')
+    expect(turn.memory.turns.find(item => item.toolCallId === 'old')?.content).toContain('CASE-1')
+  })
+
   it('compresses only after the stored cache crosses the size threshold', () => {
     const short = Array.from({ length: 40 }, (_, index) => ({ role: 'user' as const, content: `第${index}句` }))
     expect(needsCompression({ ...EMPTY_MEMORY, turns: short })).toBe(false)
@@ -172,6 +197,65 @@ describe('agent loop', () => {
     expect(off.reply).toBe('结论')
   })
 
+  it('asks once more for the conclusion when thinking is cut off by the length limit', async () => {
+    const thinking: boolean[] = []
+    const complete: Complete = async (active, options) => {
+      thinking.push(active.thinking)
+      if (thinking.length === 1) {
+        return {
+          usage: null,
+          raw: {},
+          choices: [{
+            content: '',
+            reasoning: '让我看看规则。我应该如实反馈。让我再试一次。规则说不能编。',
+            finishReason: 'length',
+            toolCalls: []
+          }]
+        }
+      }
+      expect(options.messages.at(-1)?.content).toContain('直接给出结论')
+      expect(options.tools).toBeUndefined()
+      return { usage: null, raw: {}, choices: [{ content: '文档里没有登录方面的接口。', reasoning: '', finishReason: 'stop', toolCalls: [] }] }
+    }
+    const turn = await runAgentTurn({ ...config, thinking: true, maxTokens: 1024 }, EMPTY_MEMORY, '登录方面的接口有哪些', idleContext, complete)
+    expect(thinking).toEqual([true, false])
+    expect(splitAgentReply(turn.reply).answer).toBe('文档里没有登录方面的接口。')
+    expect(turn.reply).not.toContain('让我看看规则')
+  })
+
+  it('stitches a reply that stopped at the length limit', async () => {
+    let calls = 0
+    const complete: Complete = async () => {
+      calls += 1
+      if (calls === 1) return { usage: null, raw: {}, choices: [{ content: '查到 2 件。', reasoning: '', finishReason: 'length', toolCalls: [] }] }
+      return { usage: null, raw: {}, choices: [{ content: '都还没到提交。', reasoning: '', finishReason: 'stop', toolCalls: [] }] }
+    }
+    const turn = await runAgentTurn(config, EMPTY_MEMORY, '查一下', idleContext, complete)
+    expect(turn.reply).toBe('查到 2 件。\n都还没到提交。')
+  })
+
+  it('shows the draft while the model is still writing, even when thinking is off', async () => {
+    const seen: string[] = []
+    const complete: Complete = async (_active, options) => {
+      options.onDelta?.({ reasoning: '', content: '让我再看规则' })
+      options.onDelta?.({ reasoning: '', content: '让我再看规则。没有对上。' })
+      return { usage: null, raw: {}, choices: [{ content: '没有对上。', reasoning: '', finishReason: 'stop', toolCalls: [] }] }
+    }
+    const labels: string[] = []
+    await runAgentTurn(config, EMPTY_MEMORY, '登录接口', idleContext, complete, undefined, (label, thought) => {
+      labels.push(label)
+      if (thought) seen.push(thought)
+    })
+    expect(labels).toContain('正在写')
+    expect(seen.some(item => item.includes('让我再看规则'))).toBe(true)
+  })
+
+  it('hides an unclosed think tag instead of showing it as the answer', () => {
+    const split = splitAgentReply('<think>先看规则\n还在想')
+    expect(split.answer).toBe('')
+    expect(split.thought).toContain('先看规则')
+  })
+
   it('folds a stored 思考 heading so the Chinese reply stays outside the chain', () => {
     const raw = '**思考**\n\nThe user said "你好" (Hello).\n\nI will respond in Chinese as requested.\n\n你好！我是 PatMail 执行助手。'
     expect(splitAgentReply(raw)).toEqual({
@@ -216,7 +300,16 @@ describe('agent loop', () => {
       ...idleContext,
       forward: async () => {
         forwards += 1
-        return { error: '尚未连接 EASY。' }
+        return {
+          type: MessageType.SearchFilesResult,
+          payload: {
+            ok: true,
+            data: {
+              items: [{ fileId: 'f1', fileName: '受理通知书', caseVolume: 'P001' }],
+              total: 1, pageIndex: 1, pageSize: 10, totalPages: 1
+            }
+          }
+        }
       }
     }
     const seen: string[] = []
@@ -376,6 +469,28 @@ describe('agent loop', () => {
     expect(authed).toBe(1)
   })
 
+  it('retries a gateway 502 twice, then surfaces the error', async () => {
+    let calls = 0
+    const activity: string[] = []
+    const complete: Complete = async () => {
+      calls += 1
+      if (calls < 3) throw new LlmError('HTTP_ERROR', '模型服务返回 HTTP 502。', 502)
+      return outcome('接上了。')
+    }
+    const turn = await runAgentTurn(config, EMPTY_MEMORY, '你好', idleContext, complete, undefined, label => activity.push(label))
+    expect(turn.reply).toBe('接上了。')
+    expect(calls).toBe(3)
+    expect(activity.filter(item => item === '模型暂时没接上，再试一次')).toHaveLength(2)
+
+    let failed = 0
+    const down: Complete = async () => {
+      failed += 1
+      throw new LlmError('HTTP_ERROR', '模型服务返回 HTTP 502。', 502)
+    }
+    await expect(runAgentTurn(config, EMPTY_MEMORY, '你好', idleContext, down)).rejects.toThrow('502')
+    expect(failed).toBe(3)
+  })
+
   it('does not keep a remembered fact when the turn is stopped', async () => {
     const saved: Array<ReturnType<typeof rememberFact>> = []
     let phase = 0
@@ -420,7 +535,7 @@ describe('agent loop', () => {
         payload: {
           ok: true,
           data: {
-            items: [{ fileId: 'f1', fileName: '受理通知书', customerName: '甲公司', customerVolume: 'ZL20250306002' }],
+            items: [{ fileId: 'f1', fileName: '受理通知书', customerName: '甲公司', customerVolume: 'ZL20250306002', caseId: 'CASE-1' }],
             total: 1, pageIndex: 1, pageSize: 10, totalPages: 1
           }
         }
@@ -428,6 +543,7 @@ describe('agent loop', () => {
     }
     const searched = await executeAgentTool('search_cases', '{"customerName":"甲公司"}', ctx, EMPTY_MEMORY)
     expect(searched.text).toContain('文件查询共 1 条')
+    expect(searched.text).toContain('案件编号 CASE-1')
     expect(volume).toBe('ZL20250306002')
     let phase = 0
     const seen: string[] = []
@@ -481,5 +597,228 @@ describe('agent loop', () => {
     const turn = await runAgentTurn(config, EMPTY_MEMORY, '帮我提交审核', ctx, complete)
     expect(phase).toBe(3)
     expect(turn.reply).toContain('已提交到 EASY')
+  })
+})
+
+describe('tool waves and schemas', () => {
+  it('runs case, deadline and api lookups together, and keeps writes alone', () => {
+    expect(groupToolCalls(['search_cases', 'search_deadlines', 'lookup_api', 'draft_mail'])).toEqual([[0, 1, 2], [3]])
+    expect(groupToolCalls(['search_cases', 'search_cases'])).toEqual([[0], [1]])
+    expect(groupToolCalls(['submit_easy', 'lookup_api'])).toEqual([[0], [1]])
+  })
+
+  it('leaves reviewer and mail-check schemas out until the question needs them', () => {
+    const plain = agentToolSchemas(['查一下文号 P001']).map(tool => tool.function.name)
+    expect(plain).toContain('search_cases')
+    expect(plain).toContain('call_easy')
+    expect(plain).toContain('ask_user')
+    expect(plain).toContain('plan_work')
+    expect(plain).not.toContain('list_reviewers')
+    expect(plain).not.toContain('diagnose_mail')
+    expect(agentToolSchemas(['审核人有哪些']).map(tool => tool.function.name)).toContain('list_reviewers')
+  })
+
+  it('overlaps readonly lookups in one model step', async () => {
+    let inflight = 0
+    let peak = 0
+    const ctx: ToolContext = {
+      ...idleContext,
+      customers: async () => {
+        inflight += 1
+        peak = Math.max(peak, inflight)
+        await new Promise(resolve => setTimeout(resolve, 40))
+        inflight -= 1
+        return []
+      },
+      lookupApi: () => {
+        inflight += 1
+        peak = Math.max(peak, inflight)
+        inflight -= 1
+        return '文档里没有对上「登录」。'
+      }
+    }
+    let step = 0
+    const complete: Complete = async () => {
+      step += 1
+      if (step === 1) {
+        return {
+          usage: null,
+          raw: {},
+          choices: [{
+            content: '',
+            reasoning: '',
+            finishReason: 'tool_calls',
+            toolCalls: [
+              { id: 'c1', type: 'function', function: { name: 'list_customers', arguments: '{}' } },
+              { id: 'c2', type: 'function', function: { name: 'lookup_api', arguments: '{"query":"登录"}' } }
+            ]
+          }]
+        }
+      }
+      return outcome('两边都看过了。')
+    }
+    const turn = await runAgentTurn(config, EMPTY_MEMORY, '客户和登录接口一起看', ctx, complete)
+    expect(peak).toBe(2)
+    expect(turn.reply).toContain('两边都看过了')
+  })
+
+  it('stops a query after two failures with the same arguments', async () => {
+    let sent = 0
+    const ctx: ToolContext = {
+      ...idleContext,
+      forward: async () => {
+        sent += 1
+        return { error: '尚未连接 EASY。' }
+      }
+    }
+    let phase = 0
+    const complete: Complete = async () => {
+      phase += 1
+      if (phase < 4) {
+        return {
+          usage: null,
+          raw: {},
+          choices: [{
+            content: '',
+            reasoning: '',
+            finishReason: 'tool_calls',
+            toolCalls: [{ id: `s${phase}`, type: 'function', function: { name: 'search_cases', arguments: '{"caseVolume":"P001"}' } }]
+          }]
+        }
+      }
+      return outcome('连着没连上，先停在查案件。')
+    }
+    const turn = await runAgentTurn(config, EMPTY_MEMORY, '查一下 P001', ctx, complete)
+    expect(sent).toBe(2)
+    expect(turn.memory.turns.some(item => item.content.includes('连着失败'))).toBe(true)
+  })
+
+  it('retries a dropped connection once', async () => {
+    let calls = 0
+    const seen: string[] = []
+    const complete: Complete = async () => {
+      calls += 1
+      if (calls === 1) throw new LlmError('NETWORK_ERROR', '无法连接模型服务，请检查地址、密钥和网络。')
+      return outcome('接上了。')
+    }
+    const turn = await runAgentTurn(config, EMPTY_MEMORY, '查一下', idleContext, complete, undefined, label => { seen.push(label) })
+    expect(calls).toBe(2)
+    expect(seen).toContain('网络不稳，再试一次')
+    expect(turn.reply).toBe('接上了。')
+  })
+
+  it('continues after the model asks and the user answers', async () => {
+    let phase = 0
+    const ctx: ToolContext = { ...idleContext, askUser: async () => '1. 工作流叫什么\nPCT提醒' }
+    const complete: Complete = async (_config, options) => {
+      phase += 1
+      if (phase === 1) {
+        return {
+          usage: null,
+          raw: {},
+          choices: [{
+            content: '',
+            reasoning: '',
+            finishReason: 'tool_calls',
+            toolCalls: [{ id: 'a1', type: 'function', function: { name: 'ask_user', arguments: '{"questions":[{"prompt":"工作流叫什么"}]}' } }]
+          }]
+        }
+      }
+      const tool = options.messages.filter(message => message.role === 'tool').at(-1)?.content ?? ''
+      expect(tool.startsWith('用户答：')).toBe(true)
+      expect(tool).toContain('PCT提醒')
+      return outcome('名字用 PCT提醒。')
+    }
+    const turn = await runAgentTurn(config, EMPTY_MEMORY, '先问我工作流的名字', ctx, complete)
+    expect(phase).toBe(2)
+    expect(turn.reply).toContain('PCT提醒')
+  })
+
+  it('stops the turn when the user stops during a question', async () => {
+    const ctx: ToolContext = { ...idleContext, askUser: async () => '已停下。' }
+    const complete: Complete = async () => ({
+      usage: null,
+      raw: {},
+      choices: [{
+        content: '',
+        reasoning: '',
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'a1', type: 'function', function: { name: 'ask_user', arguments: '{"questions":[{"prompt":"叫什么"}]}' } }]
+      }]
+    })
+    await expect(runAgentTurn(config, EMPTY_MEMORY, '建一条工作流', ctx, complete)).rejects.toMatchObject({ message: '已停下。' })
+  })
+
+  it('follows a written plan past the short step cap', async () => {
+    const sequence = ['list_customers', 'list_skills', 'describe_workflows', 'lookup_api', 'recall', 'list_tasks']
+    const planArgs = JSON.stringify({
+      steps: [
+        { title: '看客户', tool: 'list_customers' },
+        { title: '看本领', tool: 'list_skills' },
+        { title: '看工作流', tool: 'describe_workflows' },
+        { title: '查接口', tool: 'lookup_api' },
+        { title: '翻记忆', tool: 'recall' },
+        { title: '列任务', tool: 'list_tasks' }
+      ]
+    })
+    let phase = 0
+    const labels: string[] = []
+    const complete: Complete = async () => {
+      phase += 1
+      if (phase === 1) {
+        return {
+          usage: null,
+          raw: {},
+          choices: [{ content: '', reasoning: '', finishReason: 'tool_calls', toolCalls: [{ id: 'p', type: 'function', function: { name: 'plan_work', arguments: planArgs } }] }]
+        }
+      }
+      const tool = sequence[phase - 2]
+      if (tool) {
+        const args = tool === 'lookup_api' ? '{"query":"登录"}' : tool === 'recall' ? '{"query":"客户"}' : '{}'
+        return {
+          usage: null,
+          raw: {},
+          choices: [{ content: '', reasoning: '', finishReason: 'tool_calls', toolCalls: [{ id: `t${phase}`, type: 'function', function: { name: tool, arguments: args } }] }]
+        }
+      }
+      return outcome('六步都办好了。')
+    }
+    const turn = await runAgentTurn(config, EMPTY_MEMORY, '这几件一起办', idleContext, complete, undefined, label => { labels.push(label) })
+    expect(phase).toBe(8)
+    expect(turn.reply).toBe('六步都办好了。')
+    expect(labels).toContain('已拆成计划')
+  })
+
+  it('keeps going when the model tries to finish with a step left', async () => {
+    const planArgs = JSON.stringify({
+      steps: [
+        { title: '看客户', tool: 'list_customers' },
+        { title: '看本领', tool: 'list_skills' }
+      ]
+    })
+    let phase = 0
+    const complete: Complete = async () => {
+      phase += 1
+      if (phase === 1) {
+        return {
+          usage: null,
+          raw: {},
+          choices: [{ content: '', reasoning: '', finishReason: 'tool_calls', toolCalls: [{ id: 'p', type: 'function', function: { name: 'plan_work', arguments: planArgs } }] }]
+        }
+      }
+      if (phase === 2 || phase === 4) {
+        const tool = phase === 2 ? 'list_customers' : 'list_skills'
+        return {
+          usage: null,
+          raw: {},
+          choices: [{ content: '', reasoning: '', finishReason: 'tool_calls', toolCalls: [{ id: tool, type: 'function', function: { name: tool, arguments: '{}' } }] }]
+        }
+      }
+      if (phase === 3) return outcome('已经办好了。')
+      return outcome('两步都办好了。')
+    }
+    const turn = await runAgentTurn(config, EMPTY_MEMORY, '先看客户再看本领', idleContext, complete)
+    expect(phase).toBe(5)
+    expect(turn.reply).toBe('两步都办好了。')
   })
 })

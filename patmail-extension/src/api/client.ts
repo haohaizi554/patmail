@@ -1,3 +1,4 @@
+import { documentedCallAllowed, documentedParams, summarizeEasyPayload } from './documented-call'
 import { isLiveWriteCall } from '../automation/live-readonly-policy'
 import { extractReadonlyEvidence, readonlyContract } from '../automation/readonly-contracts'
 import { CURRENT_ENVIRONMENT, PCL_ORIGIN, trustedOrigin } from './config'
@@ -330,6 +331,15 @@ export class EasyRuntime {
 
   restoreWorkflow(mailId: string): Promise<WorkflowView | null> {
     return this.mailUser().then(user => user.ok ? this.workflow.restore(user.userId, mailId) : null)
+  }
+
+  /** 用当前登录会话调用一个不会改数据的接口。 */
+  async callDocumented(handler: string, call: string, fields: Record<string, string>): Promise<string> {
+    const allowed = documentedCallAllowed(handler, call)
+    if (!allowed.ok) return allowed.reason
+    const response = await this.transport.postDocumented(handler, documentedParams(call, fields))
+    if (!response.ok) return response.error.message
+    return summarizeEasyPayload(response.data)
   }
 
   /** 只读验收探测。写接口不在表内，不会发请求。 */

@@ -38,7 +38,7 @@ export interface ChatOutcome {
   raw: unknown
 }
 
-export type LlmFailureKind = 'rate_limit' | 'auth' | 'overflow' | 'timeout' | 'other'
+export type LlmFailureKind = 'rate_limit' | 'upstream' | 'transient' | 'auth' | 'overflow' | 'timeout' | 'other'
 
 export class LlmError extends Error {
   readonly code: 'NETWORK_ERROR' | 'REQUEST_TIMEOUT' | 'HTTP_ERROR' | 'INVALID_RESPONSE'
@@ -51,10 +51,12 @@ export class LlmError extends Error {
   }
 }
 
-/** 单模型不换备用链，只把错误分成限流、认证、溢出和超时。 */
+/** 单模型不换备用链。502 一类网关失败可以再试，认证失败不试。 */
 export function llmFailureKind(error: LlmError): LlmFailureKind {
   if (error.code === 'REQUEST_TIMEOUT') return 'timeout'
   if (error.status === 429) return 'rate_limit'
+  if (error.status === 502 || error.status === 503 || error.status === 504) return 'upstream'
+  if (error.code === 'NETWORK_ERROR') return 'transient'
   if (error.status === 401 || error.status === 403) return 'auth'
   if (error.status === 413 || /context length|maximum context|too many tokens|context_length_exceeded/i.test(error.message)) return 'overflow'
   return 'other'

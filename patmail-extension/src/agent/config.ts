@@ -7,7 +7,7 @@ export interface AgentConfig {
   /** 同时放在 Authorization: Bearer 和 x-api-key 两个请求头里。 */
   apiKey: string
   model: string
-  /** 单次回复上限；0 表示不传，由服务端默认。 */
+  /** 单次回复上限。思考和正文共用这一额度；0 表示不传，由服务端默认。 */
   maxTokens: number
   /** 思考型模型的思考链开关。关掉可以省 token、直接出正文。 */
   thinking: boolean
@@ -17,7 +17,7 @@ export const AGENT_CONFIG_DEFAULT: AgentConfig = {
   baseUrl: 'http://43.138.138.200:8588/v1',
   apiKey: '8588',
   model: 'Qwen3.6-35B-A3B-oQ4-fp16-mtp',
-  maxTokens: 1024,
+  maxTokens: 1048576,
   thinking: false
 }
 
@@ -28,8 +28,14 @@ export function isAgentConfig(value: unknown): value is AgentConfig {
   return typeof config.baseUrl === 'string' && /^https?:\/\/[^\s]+$/i.test(config.baseUrl) && config.baseUrl.length <= 300 &&
     typeof config.apiKey === 'string' && config.apiKey.length <= 200 &&
     typeof config.model === 'string' && config.model.trim().length > 0 && config.model.length <= 200 &&
-    typeof config.maxTokens === 'number' && Number.isSafeInteger(config.maxTokens) && config.maxTokens >= 0 && config.maxTokens <= 100_000 &&
+    typeof config.maxTokens === 'number' && Number.isSafeInteger(config.maxTokens) && config.maxTokens >= 0 && config.maxTokens <= 1_048_576 &&
     typeof config.thinking === 'boolean'
+}
+
+/** 旧默认 1024 会把思考和正文一起截断。读到这个数时抬到现在的默认。 */
+function storedMaxTokens(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > 1_048_576) return 0
+  return value === 1024 ? AGENT_CONFIG_DEFAULT.maxTokens : value
 }
 
 export function normalizeAgentConfig(value: unknown): AgentConfig {
@@ -39,7 +45,7 @@ export function normalizeAgentConfig(value: unknown): AgentConfig {
     baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl.trim().replace(/\/+$/, '') : '',
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : '',
     model: typeof record.model === 'string' ? record.model.trim() : '',
-    maxTokens: typeof record.maxTokens === 'number' && Number.isSafeInteger(record.maxTokens) && record.maxTokens >= 0 && record.maxTokens <= 100_000 ? record.maxTokens : 0,
+    maxTokens: storedMaxTokens(record.maxTokens),
     thinking: typeof record.thinking === 'boolean' ? record.thinking : false
   }
   return isAgentConfig(next) ? next : AGENT_CONFIG_DEFAULT

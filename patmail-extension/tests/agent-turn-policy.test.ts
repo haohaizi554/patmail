@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { asksToSubmit, canonicalArgs, factIsGrounded, repeatNote, requiredTools, reviewReply, shouldStopRepeat, stuckQueryText, toolSucceeded, type ToolTrace } from '../src/agent/turn-policy'
+import { asksToSubmit, canonicalArgs, factIsGrounded, failedQueryText, repeatNote, requiredTools, reviewReply, sameResultAgain, shouldStopFailures, shouldStopRepeat, stepLimit, stuckQueryText, toolSucceeded, type ToolTrace } from '../src/agent/turn-policy'
 
 function trace(name: string, args: string, text: string, ok = true): ToolTrace {
   return { name, args, text, ok }
@@ -52,6 +52,12 @@ describe('turn policy', () => {
       '尚未连接。'
     )
     expect(jitter).toContain('参数变了')
+    const failed = [trace('search_cases', '{"caseVolume":"P001"}', '尚未连接。', false), trace('search_cases', '{"caseVolume":"P001"}', '还是没连上。', false)]
+    expect(shouldStopFailures(failed, 'search_cases', '{"caseVolume":"P001"}')).toBe(true)
+    expect(shouldStopFailures(failed.slice(0, 1), 'search_cases', '{"caseVolume":"P001"}')).toBe(false)
+    expect(failedQueryText('search_cases')).toContain('search_cases')
+    expect(sameResultAgain(failed, 'search_cases', '{"caseVolume":"P001"}', '尚未连接。')).toBe(true)
+    expect(sameResultAgain(failed, 'search_cases', '{"caseVolume":"P001"}', '文件查询共 1 条。')).toBe(false)
   })
 
   it('rejects a finished claim when the tool failed or never ran', () => {
@@ -60,7 +66,15 @@ describe('turn policy', () => {
     expect(toolSucceeded('search_cases', '尚未连接 EASY。')).toBe(false)
     const failed = [trace('search_cases', '{}', '尚未连接 EASY。', false)]
     expect(reviewReply({ answer: '已经办好了。', required: [], traces: failed, submitAsked: false }).action).toBe('nudge')
+    expect(reviewReply({ answer: '没有问题。', required: [], traces: failed, submitAsked: false }).action).toBe('nudge')
     expect(reviewReply({ answer: '还没连上。', required: [], traces: failed, submitAsked: false }).action).toBe('accept')
+    const openPlan = reviewReply({ answer: '已经办好了。', required: [], traces: [], submitAsked: false, planLeft: ['看本领'] })
+    expect(openPlan.action).toBe('nudge')
+    if (openPlan.action === 'nudge') expect(openPlan.note).toContain('看本领')
+    expect(reviewReply({ answer: '停在看客户。', required: [], traces: [], submitAsked: false, planLeft: ['看本领'] }).action).toBe('accept')
+    expect(stepLimit(0)).toBe(6)
+    expect(stepLimit(2)).toBe(8)
+    expect(stepLimit(6)).toBe(12)
     const missing = reviewReply({ answer: '已经建好了。', required: ['create_workflow'], traces: [], submitAsked: false })
     expect(missing.action).toBe('nudge')
     if (missing.action === 'nudge') expect(missing.note).toContain('去调用工具')

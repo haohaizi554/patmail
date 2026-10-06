@@ -2,7 +2,7 @@ import { indexedTransactionStore, ExecutionLedger } from '../automation/ledger'
 import { IndexedTaskStore } from '../automation/indexed-store'
 import { IndexedEvidenceStore, MemoryEvidenceStore } from '../automation/evidence-store'
 import { handleAuthorityMessage } from './authority'
-import { handleAgentChat } from './agent'
+import { deliverAgentAnswer, handleAgentChat } from './agent'
 import { scopeExtensionPageMessage } from './scope'
 import { EasyConnectionController, sameConnectionSnapshot, type ConnectionSnapshot } from '../shared/connection'
 import { handleWorkspaceMessage, openWorkspaceTab, recheckBoundSession, type WorkspaceHost } from './workspace'
@@ -167,13 +167,19 @@ function publish(response: BackgroundResponse, requestId: string | null, sendRes
 }
 
 /** 工作台停靠栏连着这条端口时，服务工作线程不会在等模型的空档里被回收。 */
+let agentPorts = 0
 chrome.runtime.onConnect.addListener(port => {
   if (port.sender?.id !== chrome.runtime.id || port.name !== 'patmail-agent') {
     port.disconnect()
     return
   }
+  agentPorts += 1
   port.onMessage.addListener(() => { /* 停靠栏心跳 */ })
-  port.onDisconnect.addListener(() => { void chrome.runtime.lastError })
+  port.onDisconnect.addListener(() => {
+    agentPorts = Math.max(0, agentPorts - 1)
+    if (agentPorts === 0) deliverAgentAnswer('跳过')
+    void chrome.runtime.lastError
+  })
 })
 
 /** MV3 Service Worker 是租约、任务和证据的唯一写入方。 */

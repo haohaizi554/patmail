@@ -46,6 +46,15 @@ const STORAGE_TURN_CHARS = 240_000
 export const TOOL_RESULT_CHARS = 2_400
 const TOOL_OMISSION = '\n…中间已省略…\n'
 
+/** 上一轮已经有多行的工具原文，发给模型时只留第一行。头尾裁过的结果保持原样。 */
+export function projectOldToolText(text: string): string {
+  if (text.includes('中间已省略')) return text
+  const lines = text.split('\n').map(item => item.trim()).filter(Boolean)
+  const first = lines[0]
+  if (!first || lines.length < 2) return text
+  return `${first.slice(0, 180)}\n较早的工具原文已收成一行。`
+}
+
 export function clipToolResult(text: string, max = TOOL_RESULT_CHARS): string {
   if (text.length <= max) return text
   const tail = Math.min(600, Math.floor(max / 4))

@@ -29,4 +29,14 @@ describe('api docs', () => {
     expect(searchApiDocs('一共有多少接口')).toBe(brief)
     expect(searchApiDocs('一共有多少接口')).not.toContain('00-通用约定.md')
   })
+
+  it('finds the login notes when the question does not copy the heading', () => {
+    const sections = sectionsFromMarkdown('37-登录邮箱.md', '# 登录邮箱\n\n## Login.ashx\n\nPOST /AjaxServers/Login.ashx\n')
+    const hit = searchApiSections(sections, '登陆方面的')
+    expect(hit).toContain('Login.ashx')
+    expect(hit).not.toContain('没有对上')
+    const corpus = searchApiDocs('登陆方面的')
+    expect(corpus).toContain('Login.ashx')
+    expect(corpus).not.toContain('没有对上')
+  })
 })

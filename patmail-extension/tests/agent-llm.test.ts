@@ -14,15 +14,21 @@ describe('agent config', () => {
     expect(isAgentConfig({ baseUrl: 'ftp://x', apiKey: '', model: '', maxTokens: -1 })).toBe(false)
     expect(isAgentConfig(null)).toBe(false)
     expect(normalizeAgentConfig({ ...config, baseUrl: ' http://a/v1/ ', model: ' m ' }).baseUrl).toBe('http://a/v1')
+    expect(AGENT_CONFIG_DEFAULT.maxTokens).toBeGreaterThan(1024)
+    expect(normalizeAgentConfig({ ...AGENT_CONFIG_DEFAULT, maxTokens: 1024 }).maxTokens).toBe(AGENT_CONFIG_DEFAULT.maxTokens)
+    expect(normalizeAgentConfig({ ...AGENT_CONFIG_DEFAULT, maxTokens: 64 }).maxTokens).toBe(64)
   })
 })
 
 describe('llm failure kinds', () => {
   it('splits rate limit, auth, overflow and timeout without a fallback chain', () => {
     expect(llmFailureKind(new LlmError('HTTP_ERROR', 'slow', 429))).toBe('rate_limit')
+    expect(llmFailureKind(new LlmError('HTTP_ERROR', '模型服务返回 HTTP 502。', 502))).toBe('upstream')
+    expect(llmFailureKind(new LlmError('HTTP_ERROR', '模型服务返回 HTTP 503。', 503))).toBe('upstream')
     expect(llmFailureKind(new LlmError('HTTP_ERROR', 'no', 401))).toBe('auth')
     expect(llmFailureKind(new LlmError('HTTP_ERROR', 'maximum context length exceeded', 400))).toBe('overflow')
     expect(llmFailureKind(new LlmError('REQUEST_TIMEOUT', '模型服务请求超时。'))).toBe('timeout')
+    expect(llmFailureKind(new LlmError('NETWORK_ERROR', '无法连接模型服务，请检查地址、密钥和网络。'))).toBe('transient')
   })
 })
 

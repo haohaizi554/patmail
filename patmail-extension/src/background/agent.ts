@@ -1,4 +1,5 @@
 import { apiError, type ApiResult } from '../api/types'
+import type { AgentQuestion } from '../agent/ask'
 import { loadAgentConfig, type AgentConfig } from '../agent/config'
 import { LlmError, chatCompletion } from '../agent/llm'
 import { compactAgentMemory, runAgentTurn } from '../agent/loop'
@@ -37,23 +38,67 @@ export interface AgentTurnView {
 }
 
 const ACTIVITY_CHANNEL = 'patmail-agent-activity'
+const ASK_CHANNEL = 'patmail-agent-ask'
 let turnAbort: AbortController | null = null
+let pendingAnswer: ((text: string) => void) | null = null
 
 export function stopAgentTurn(): void {
   turnAbort?.abort()
 }
 
-function sendActivity(label: string, thought?: string): void {
+/** 把浮窗里的回答交给正在等的 ask_user。没有在等时返回 false。 */
+export function deliverAgentAnswer(text: string): boolean {
+  const resolve = pendingAnswer
+  if (!resolve) return false
+  pendingAnswer = null
+  resolve(text)
+  return true
+}
+
+function waitForAnswer(questions: AgentQuestion[]): Promise<string> {
+  if (pendingAnswer) {
+    const previous = pendingAnswer
+    pendingAnswer = null
+    previous('跳过')
+  }
+  return new Promise(resolve => {
+    pendingAnswer = resolve
+    try {
+      chrome.runtime.sendMessage({ channel: ASK_CHANNEL, questions }, () => {
+        if (chrome.runtime.lastError && pendingAnswer === resolve) {
+          pendingAnswer = null
+          resolve('跳过')
+        }
+      })
+    } catch {
+      if (pendingAnswer === resolve) {
+        pendingAnswer = null
+        resolve('跳过')
+      }
+    }
+  })
+}
+
+function sendActivity(label: string, thought?: string, detail?: string): void {
   try {
-    chrome.runtime.sendMessage({ channel: ACTIVITY_CHANNEL, label, ...(thought ? { thought } : {}) }, () => {
+    chrome.runtime.sendMessage({
+      channel: ACTIVITY_CHANNEL,
+      label,
+      ...(thought ? { thought } : {}),
+      ...(detail ? { detail, phase: 'done' } : { phase: 'run' })
+    }, () => {
       void chrome.runtime.lastError
     })
   } catch { /* 页面已经离开 */ }
 }
 
-/** 思考增量马上送出，不再攒一批。界面自己按字符往外长。 */
-function publishActivity(label: string, thought?: string): void {
-  sendActivity(thought ? '正在思考' : label, thought)
+/** 思考和正文分开送。工具开始和结束分成两条，浮窗按顺序排成过程。 */
+function publishActivity(label: string, thought?: string, detail?: string): void {
+  if (label === '正在写' || label === '正在思考') {
+    sendActivity(label, thought, detail)
+    return
+  }
+  sendActivity(thought ? '正在思考' : label, thought, detail)
 }
 
 function viewOf(reply: string, model: string, steps: number, memory: AgentMemoryState): AgentTurnView {
@@ -157,7 +202,8 @@ function toolContext(host: WorkspaceHost): ToolContext {
     readonlyAcceptance: (call, caseTypeId, mailId) => readonlyAcceptance(forward, call, caseTypeId, mailId),
     diagnoseMail: mailId => diagnoseMail(forward, mailId),
     exportContacts: volumes => exportContacts(forward, bucket, volumes),
-    submitEasy: caseVolume => submitEasy(host, forward, bucket, deadlines, caseVolume)
+    submitEasy: caseVolume => submitEasy(host, forward, bucket, deadlines, caseVolume),
+    askUser: questions => waitForAnswer(questions)
   }
 }
 
@@ -504,7 +550,13 @@ export async function handleAgentChat(payload: { action?: unknown; message?: unk
     return { ok: true, data: viewOf(factsReply(memory), config.model, 0, memory) }
   }
   if (action === 'compact') return compactConversation(area, config)
+  if (action === 'answer') {
+    const text = typeof payload.message === 'string' ? payload.message.trim() : ''
+    const delivered = deliverAgentAnswer(text || '跳过')
+    return { ok: true, data: viewOf(delivered ? '' : '现在没有要答的问题。', config.model, 0, await loadMemory(area)) }
+  }
   if (action === 'stop') {
+    deliverAgentAnswer('已停下。')
     stopAgentTurn()
     return { ok: true, data: viewOf('已停下。', config.model, 0, await loadMemory(area)) }
   }
@@ -536,7 +588,7 @@ export async function handleAgentChat(payload: { action?: unknown; message?: unk
     return { ok: true, data: viewOf(factsReply(memory), config.model, 0, memory) }
   }
   if (resolved.kind === 'local' && resolved.local === 'compact') return compactConversation(area, config)
-  if (resolved.kind === 'unknown' || resolved.kind === 'need-args') {
+  if (resolved.kind === 'unknown') {
     return { ok: true, data: viewOf(resolved.message, config.model, 0, await loadMemory(area)) }
   }
   const abort = new AbortController()

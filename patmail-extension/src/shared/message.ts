@@ -126,6 +126,8 @@ export const MessageType = {
   ListEvidence: 'LIST_EVIDENCE',
   EvidenceResult: 'EVIDENCE_RESULT',
   RunReadonlyAcceptance: 'RUN_READONLY_ACCEPTANCE',
+  CallEasy: 'CALL_EASY',
+  CallEasyResult: 'CALL_EASY_RESULT',
   Workspace: 'WORKSPACE',
   WorkspaceResult: 'WORKSPACE_RESULT',
   WorkflowResult: 'WORKFLOW_RESULT',
@@ -170,6 +172,7 @@ export type ContentRequest =
   | Response<'RESTORE_WORKFLOW', { mailId: string }>
   | Response<'DIAGNOSE_EXISTING_MAIL', { mailId: string; flowType: string }>
   | Response<'RUN_READONLY_ACCEPTANCE', { call: string; expected: Record<string, string>; caseTypeId?: string; mailId?: string; flowType?: string }>
+  | Response<'CALL_EASY', { handler: string; call: string; fields?: Record<string, string> }>
 export type ErrorMessage = Response<'ERROR', { message: string }>
 export interface ExistingMailDiagnostic {
   mailId: string
@@ -205,7 +208,7 @@ export type BackgroundRequest =
   | Response<'SAVE_EVIDENCE', { record: Record<string, unknown> }>
   | Response<'LIST_EVIDENCE', { origin: string; call: string }>
   | Response<'WORKSPACE', WorkspaceAction>
-  | Response<'AGENT_CHAT', { action: 'probe' | 'turn'; message: string } | { action: 'history' | 'reset' | 'facts' | 'compact' | 'stop' }>
+  | Response<'AGENT_CHAT', { action: 'probe' | 'turn'; message: string } | { action: 'answer'; message: string } | { action: 'history' | 'reset' | 'facts' | 'compact' | 'stop' }>
 export type BackgroundResponse =
   | Response<'PONG', { ok: true }>
   | Response<'EXECUTION_LEASE', ExecutionLeasePayload>
@@ -316,6 +319,7 @@ export type ContentResponse =
   | Response<'MAIL_EXECUTION_RESULT', { view: MailExecutionView | null }>
   | Response<'WORKFLOW_RESULT', { view: WorkflowView | null }>
   | Response<'EXISTING_MAIL_DIAGNOSTIC', ExistingMailDiagnostic>
+  | Response<'CALL_EASY_RESULT', { text: string }>
   | BackgroundResponse
 export type AppMessage = ContentRequest | ContentResponse | BackgroundRequest
 
@@ -553,6 +557,10 @@ export function isMessage(value: unknown): value is AppMessage {
         Object.keys(value.payload).length === 2
     case MessageType.RunReadonlyAcceptance:
       return isReadonlyProbe(value.payload)
+    case MessageType.CallEasy:
+      return isCallEasy(value.payload)
+    case MessageType.CallEasyResult:
+      return isRecord(value.payload) && typeof value.payload.text === 'string' && value.payload.text.length <= 8_000 && Object.keys(value.payload).length === 1
     case MessageType.ClaimExecution:
       return isClaim(value.payload)
     case MessageType.MarkExecutionPrepared:
@@ -690,6 +698,7 @@ export function isMessage(value: unknown): value is AppMessage {
 function isAgentChatRequest(value: unknown): boolean {
   if (!isRecord(value) || typeof value.action !== 'string') return false
   if (value.action === 'history' || value.action === 'reset' || value.action === 'facts' || value.action === 'compact' || value.action === 'stop') return Object.keys(value).length === 1
+  if (value.action === 'answer') return typeof value.message === 'string' && value.message.trim().length > 0 && value.message.length <= 4_000 && Object.keys(value).length === 2
   if (value.action !== 'probe' && value.action !== 'turn') return false
   return typeof value.message === 'string' && value.message.trim().length > 0 && value.message.length <= 20_000 && Object.keys(value).length === 2
 }
@@ -732,11 +741,12 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.InspectEasyMail || value.type === MessageType.ReadWorkflow ||
     value.type === MessageType.RefreshWorkflow || value.type === MessageType.PreviewWorkflow ||
     value.type === MessageType.RestoreWorkflow || value.type === MessageType.DiagnoseExistingMail ||
-    value.type === MessageType.RunReadonlyAcceptance
+    value.type === MessageType.RunReadonlyAcceptance ||
+    value.type === MessageType.CallEasy
   )
 }
 
-const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'SEARCH_LIMIT_MONITOR', 'LOOKUP_IC_FLOW', 'EXPORT_CASE_CONTACTS', 'LIST_MAIL_PROCESSES', 'OPEN_EASY_FORM', 'LIST_FLOW_REVIEWERS', 'READ_CASE_DEMANDS', 'READ_CASE_BUS_FLOW', 'READ_CUSTOMER_DEMANDS', 'READ_CUSTOMER_DIRECTORY', 'READ_MAIL_CONTACTS', 'READ_MAIL_ADDRESSES', 'GET_PAGE_INFO', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE'])
+const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'SEARCH_LIMIT_MONITOR', 'LOOKUP_IC_FLOW', 'EXPORT_CASE_CONTACTS', 'LIST_MAIL_PROCESSES', 'OPEN_EASY_FORM', 'LIST_FLOW_REVIEWERS', 'READ_CASE_DEMANDS', 'READ_CASE_BUS_FLOW', 'READ_CUSTOMER_DEMANDS', 'READ_CUSTOMER_DIRECTORY', 'READ_MAIL_CONTACTS', 'READ_MAIL_ADDRESSES', 'GET_PAGE_INFO', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE', 'CALL_EASY'])
 const WRITE_FORWARD = new Set(['CREATE_EASY_MAIL', 'SAVE_EASY_MAIL', 'SAVE_HISTORY_QUERY', 'DELETE_HISTORY_QUERY', 'SUBMIT_LIMIT_MAIL'])
 
 /** 不允许转发时给出原因。写开关关掉时，创建、保存和查询模板写回都停在这里。 */
@@ -892,6 +902,15 @@ function isAcceptanceAction(value: Record<string, unknown>): boolean {
   if (value.flowType !== undefined && !isShortText(value.flowType, 20)) return false
   if (value.expectedFields !== undefined && (!isRecord(value.expectedFields) || Object.keys(value.expectedFields).length > 20 || Object.values(value.expectedFields).some(item => typeof item !== 'string'))) return false
   return true
+}
+
+function isCallEasy(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.handler !== 'string' || typeof value.call !== 'string') return false
+  if (Object.keys(value).some(key => key !== 'handler' && key !== 'call' && key !== 'fields')) return false
+  if (value.fields === undefined) return true
+  if (!isRecord(value.fields) || Array.isArray(value.fields) || Object.keys(value.fields).length > 12) return false
+  return Object.entries(value.fields).every(([key, item]) => /^[A-Za-z_][A-Za-z0-9_]{0,40}$/.test(key) &&
+    typeof item === 'string' && item.length <= 200 && !/cookie|authorization|password|token/i.test(key))
 }
 
 function isReadonlyProbe(value: unknown): boolean {

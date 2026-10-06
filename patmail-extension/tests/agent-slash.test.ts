@@ -36,10 +36,18 @@ describe('slash commands', () => {
     for (const command of SLASH_COMMANDS) expect(command.description.length).toBeLessThanOrEqual(60)
   })
 
-  it('keeps local commands and incomplete skills away from the model', () => {
+  it('sends a skill with missing details to the model so it can ask', () => {
     expect(resolveSlash('你好')).toEqual({ kind: 'text' })
     expect(resolveSlash('/help').kind).toBe('local')
-    expect(resolveSlash('/记住')).toMatchObject({ kind: 'need-args', name: '记住' })
+    const missing = resolveSlash('/建工作流')
+    expect(missing).toMatchObject({ kind: 'skill', name: '建工作流' })
+    if (missing.kind === 'skill') expect(missing.guidance).toContain('ask_user')
+    const lookup = resolveSlash('/查案件')
+    expect(lookup).toMatchObject({ kind: 'skill', name: '查案件' })
+    if (lookup.kind === 'skill') expect(lookup.guidance).toContain('ask_user')
+    const remembered = resolveSlash('/记住')
+    expect(remembered).toMatchObject({ kind: 'skill', name: '记住' })
+    if (remembered.kind === 'skill') expect(remembered.guidance).toContain('ask_user')
     expect(resolveSlash('/没有这个')).toMatchObject({ kind: 'unknown' })
     const skill = resolveSlash('/查案件 P001')
     expect(skill).toMatchObject({ kind: 'skill', name: '查案件', display: '/查案件 P001' })
@@ -49,6 +57,14 @@ describe('slash commands', () => {
     }
     const letter = resolveSlash('/对上要发的信')
     if (letter.kind === 'skill') expect(letter.guidance).toContain('draft_mail')
+    const review = resolveSlash('/谁来看一眼')
+    if (review.kind === 'skill') expect(review.guidance).toContain('list_reviewers')
+    const again = resolveSlash('/再查一遍并记下 P001')
+    if (again.kind === 'skill') expect(again.guidance).toContain('search_cases')
+    const sheet = resolveSlash('/读表格')
+    if (sheet.kind === 'skill') expect(sheet.guidance).not.toContain('search_cases')
+    const check = resolveSlash('/核对事项 提醒申请PCT')
+    if (check.kind === 'skill') expect(check.guidance).toContain('search_deadlines')
   })
 })
 

@@ -208,6 +208,11 @@ const bridge: MessageBridge = {
         return { type: MessageType.WorkflowResult, payload: { view: await easyRuntime.restoreWorkflow(message.payload.mailId) } }
       case MessageType.DiagnoseExistingMail:
         return { type: MessageType.ExistingMailDiagnostic, payload: await easyRuntime.diagnoseExistingMail(message.payload.mailId, message.payload.flowType) }
+      case MessageType.CallEasy:
+        return {
+          type: MessageType.CallEasyResult,
+          payload: { text: await easyRuntime.callDocumented(message.payload.handler, message.payload.call, message.payload.fields ?? {}) }
+        }
       case MessageType.RunReadonlyAcceptance: {
         const probe = await easyRuntime.probeReadonly(message.payload.call, {
           caseTypeId: message.payload.caseTypeId,
