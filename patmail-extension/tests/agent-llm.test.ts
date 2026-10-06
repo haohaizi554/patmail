@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chatCompletion, LlmError } from '../src/agent/llm'
+import { chatCompletion, LlmError, llmFailureKind } from '../src/agent/llm'
 import { AGENT_CONFIG_DEFAULT, isAgentConfig, normalizeAgentConfig } from '../src/agent/config'
 
 const config = { ...AGENT_CONFIG_DEFAULT, maxTokens: 100 }
@@ -14,6 +14,15 @@ describe('agent config', () => {
     expect(isAgentConfig({ baseUrl: 'ftp://x', apiKey: '', model: '', maxTokens: -1 })).toBe(false)
     expect(isAgentConfig(null)).toBe(false)
     expect(normalizeAgentConfig({ ...config, baseUrl: ' http://a/v1/ ', model: ' m ' }).baseUrl).toBe('http://a/v1')
+  })
+})
+
+describe('llm failure kinds', () => {
+  it('splits rate limit, auth, overflow and timeout without a fallback chain', () => {
+    expect(llmFailureKind(new LlmError('HTTP_ERROR', 'slow', 429))).toBe('rate_limit')
+    expect(llmFailureKind(new LlmError('HTTP_ERROR', 'no', 401))).toBe('auth')
+    expect(llmFailureKind(new LlmError('HTTP_ERROR', 'maximum context length exceeded', 400))).toBe('overflow')
+    expect(llmFailureKind(new LlmError('REQUEST_TIMEOUT', '模型服务请求超时。'))).toBe('timeout')
   })
 })
 

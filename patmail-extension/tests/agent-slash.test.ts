@@ -3,7 +3,7 @@ import { AGENT_CONFIG_DEFAULT } from '../src/agent/config'
 import type { ChatOutcome } from '../src/agent/llm'
 import { compactAgentMemory, runAgentTurn, type Complete } from '../src/agent/loop'
 import { EMPTY_MEMORY } from '../src/agent/memory'
-import { filterCommands, resolveSlash, slashToken } from '../src/agent/slash'
+import { filterCommands, resolveSlash, SLASH_COMMANDS, slashToken } from '../src/agent/slash'
 import type { ToolContext } from '../src/agent/tools'
 
 const config = { ...AGENT_CONFIG_DEFAULT, maxTokens: 64 }
@@ -32,6 +32,7 @@ describe('slash commands', () => {
     expect(filterCommands('help').map(command => command.name)).toEqual(['帮助'])
     expect(filterCommands('读').map(command => command.name)).toEqual(['读表格'])
     expect(filterCommands('表格').map(command => command.name)).toEqual(['读表格'])
+    for (const command of SLASH_COMMANDS) expect(command.description.length).toBeLessThanOrEqual(60)
   })
 
   it('keeps local commands and incomplete skills away from the model', () => {

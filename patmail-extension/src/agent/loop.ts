@@ -1,10 +1,10 @@
 import type { AgentConfig } from './config'
-import { chatCompletion, type ChatMessage } from './llm'
-import { applySummary, foldDigest, needsCompression, splitForCompression, visibleHistory, type AgentMemoryState } from './memory'
+import { chatCompletion, LlmError, llmFailureKind, type AssistantToolCall, type ChatMessage, type ChatOutcome } from './llm'
+import { applySummary, contextChars, foldDigest, needsCompression, splitForCompression, trimToolResults, visibleHistory, type AgentMemoryState, type MemoryTurn } from './memory'
 import { resolveSlash } from './slash'
 import { agentToolSchemas, executeAgentTool, type ToolContext } from './tools'
+import { DIGEST_MISS_LIMIT, MAX_NUDGES, MAX_STEPS, RATE_LIMIT_BACKOFF_MS, STEP_LIMIT_REPLY, UNKNOWN_STOP_AT, WRAP_NOTE, asksToSubmit, canonicalArgs, factIsGrounded, isUnknownTool, repeatNote, requiredTools, reviewReply, shouldStopRepeat, skippedToolText, stuckQueryText, toolSucceeded, unknownStopNote, type ToolTrace } from './turn-policy'
 
-const MAX_STEPS = 6
 const THOUGHT_MARK = '\u001e'
 
 const TOOL_ACTIVITY: Record<string, string> = {
@@ -87,22 +87,8 @@ export interface AgentTurnResult {
 
 export type Complete = typeof chatCompletion
 
-function toChat(state: AgentMemoryState): ChatMessage[] {
-  const facts = state.facts.slice(-12).map(fact => `- ${fact.text}`).join('\n')
-  const preface = [
-    SYSTEM_PROMPT,
-    state.summary ? `\n更早对话的原文摘录：\n${state.summary}` : '',
-    facts ? `\n长期记忆：\n${facts}` : ''
-  ].join('')
-  return [
-    { role: 'system', content: preface },
-    ...state.turns.map((turn): ChatMessage => ({
-      role: turn.role,
-      content: messageOf(turn),
-      ...(turn.toolCallId ? { toolCallId: turn.toolCallId } : {}),
-      ...(turn.toolCalls ? { toolCalls: turn.toolCalls } : {})
-    }))
-  ]
+function wait(ms: number): Promise<void> {
+  return new Promise(resolve => { setTimeout(resolve, ms) })
 }
 
 function messageOf(turn: { role: string; content: string; guidance?: string }): string {
@@ -111,19 +97,60 @@ function messageOf(turn: { role: string; content: string; guidance?: string }): 
   return turn.content
 }
 
-/** 旧轮次按原文摘录收起，不再让模型改写成一段摘要，避免把没查过的事写成已经查到。 */
+/** 系统提示保持不变。摘录和长期记忆挂在这一轮的用户消息上，不改已经发出的历史。 */
+function toChat(state: AgentMemoryState): ChatMessage[] {
+  const facts = state.facts.slice(-12).map(fact => `- ${fact.text}`).join('\n')
+  const visibleUsers = state.turns.flatMap((turn, index) => turn.role === 'user' && !turn.hidden ? [index] : [])
+  const firstUser = visibleUsers[0]
+  const lastUser = visibleUsers[visibleUsers.length - 1]
+  return [
+    { role: 'system', content: SYSTEM_PROMPT },
+    ...state.turns.map((turn, index): ChatMessage => ({
+      role: turn.role,
+      content: outgoingContent(turn, index, firstUser, lastUser, state.summary, facts),
+      ...(turn.toolCallId ? { toolCallId: turn.toolCallId } : {}),
+      ...(turn.toolCalls ? { toolCalls: turn.toolCalls } : {})
+    }))
+  ]
+}
+
+function outgoingContent(turn: MemoryTurn, index: number, firstUser: number | undefined, lastUser: number | undefined, summary: string, facts: string): string {
+  let text = messageOf(turn)
+  if (turn.role !== 'user' || turn.hidden) return text
+  if (index === firstUser && summary) text = `更早对话的原文摘录：\n${summary}\n\n${text}`
+  if (index === lastUser && facts) text = `${text}\n\n本轮可以参考的长期记忆：\n${facts}`
+  return text
+}
+
+function withTool(state: AgentMemoryState, id: string, text: string): AgentMemoryState {
+  return { ...state, turns: [...state.turns, { role: 'tool', content: text, toolCallId: id }] }
+}
+
+function sealSkipped(state: AgentMemoryState, calls: AssistantToolCall[]): AgentMemoryState {
+  return calls.reduce((current, call) => withTool(current, call.id, skippedToolText()), state)
+}
+
+/** 先把超长工具结果收成头尾，再摘更早的原话。摘录连续三次没变短就停。 */
 async function compress(_config: AgentConfig, state: AgentMemoryState, _complete: Complete): Promise<AgentMemoryState> {
-  if (!needsCompression(state)) return state
-  const { older } = splitForCompression(state)
-  if (older.length === 0) return state
-  return applySummary(state, foldDigest(state.summary, older))
+  const trimmed = trimToolResults(state)
+  if ((trimmed.digestMisses ?? 0) >= DIGEST_MISS_LIMIT) return trimmed
+  if (!needsCompression(trimmed)) return trimmed
+  const { older } = splitForCompression(trimmed)
+  if (older.length === 0) return { ...trimmed, digestMisses: Math.min(DIGEST_MISS_LIMIT, (trimmed.digestMisses ?? 0) + 1) }
+  const next = applySummary(trimmed, foldDigest(trimmed.summary, older))
+  if (!next.summary || contextChars(next) >= contextChars(trimmed)) {
+    return { ...trimmed, digestMisses: Math.min(DIGEST_MISS_LIMIT, (trimmed.digestMisses ?? 0) + 1) }
+  }
+  return { ...next, digestMisses: 0 }
 }
 
 /** 手动收摘录。最近一大段原话照留，缓存还没超出这段时不动。 */
 export async function compactAgentMemory(_config: AgentConfig, memory: AgentMemoryState, _complete: Complete = chatCompletion): Promise<{ memory: AgentMemoryState; reply: string }> {
-  const { older } = splitForCompression(memory)
-  if (older.length === 0) return { memory, reply: '这段对话还没到要收的长度，先不用压。' }
-  return { memory: applySummary(memory, foldDigest(memory.summary, older)), reply: '更早的对话已收成原文摘录，最近一大段原话还在。' }
+  const trimmed = trimToolResults(memory)
+  const { older } = splitForCompression(trimmed)
+  if (older.length === 0) return { memory: trimmed, reply: '这段对话还没到要收的长度，先不用压。' }
+  const next = applySummary(trimmed, foldDigest(trimmed.summary, older))
+  return { memory: { ...next, digestMisses: 0 }, reply: '更早的对话已收成原文摘录，最近一大段原话还在。' }
 }
 
 /** 思考模式打开时，把思考链放在正文前面。关掉时不展示，避免和等待文案搅在一起。 */
@@ -135,7 +162,70 @@ function replyText(choice: { content: string; reasoning?: string }, thinking: bo
   return `${THOUGHT_MARK}thought${THOUGHT_MARK}${thought}${THOUGHT_MARK}${answer}`
 }
 
-/** 一轮用户请求：必要时压缩旧上下文，然后按工具调用循环直到模型给出正文。 */
+function groundSources(state: AgentMemoryState, traces: ToolTrace[], userText: string): string[] {
+  const said = state.turns.filter(turn => turn.role === 'user' && !turn.hidden).map(turn => turn.content)
+  const found = traces.filter(trace => trace.ok).map(trace => trace.text)
+  return [userText, ...said, ...found]
+}
+
+interface ToolBatch {
+  state: AgentMemoryState
+  traces: ToolTrace[]
+  unknownStreak: number
+  halt: boolean
+}
+
+/** 每个工具调用都回一条结果。重复查询和无此工具在这里停，不把整轮掐掉。 */
+async function runToolBatch(state: AgentMemoryState, calls: AssistantToolCall[], traces: ToolTrace[], unknownStreak: number, ctx: ToolContext, userText: string, onActivity?: (label: string, thought?: string) => void): Promise<ToolBatch> {
+  let next = state
+  const seen = traces.map(trace => ({ ...trace }))
+  let unknown = unknownStreak
+  let halt = false
+  for (let index = 0; index < calls.length; index += 1) {
+    const call = calls[index]
+    if (!call) continue
+    const args = canonicalArgs(call.function.arguments)
+    if (shouldStopRepeat(seen, call.function.name, args)) {
+      onActivity?.('重复查询已停下')
+      const text = stuckQueryText(call.function.name, args)
+      next = withTool(next, call.id, text)
+      seen.push({ name: call.function.name, args, text, ok: false })
+      next = sealSkipped(next, calls.slice(index + 1))
+      halt = true
+      break
+    }
+    onActivity?.(toolActivity(call.function.name))
+    const executed = await executeAgentTool(call.function.name, call.function.arguments, ctx, next)
+    let text = executed.text
+    let memory = executed.memory
+    if (call.function.name === 'remember') {
+      const before = new Set(next.facts.map(fact => fact.id))
+      const added = memory.facts.filter(fact => !before.has(fact.id))
+      const fresh = added.filter(fact => factIsGrounded(fact.text, groundSources(next, seen, userText)))
+      if (added.length > 0 && fresh.length !== added.length) {
+        memory = { ...memory, facts: [...next.facts, ...fresh] }
+        text = fresh.length > 0
+          ? `已记住：${fresh.map(fact => fact.text).join('；')}`
+          : '这句话不是用户亲口说的，也不是这次工具返回的，没有写入长期记忆。'
+      }
+    }
+    const note = isUnknownTool(text) ? '' : repeatNote(seen, call.function.name, args, text)
+    if (isUnknownTool(text)) unknown += 1
+    else unknown = 0
+    const stopUnknown = unknown >= UNKNOWN_STOP_AT
+    const stored = `${text}${note}${stopUnknown ? unknownStopNote() : ''}`
+    seen.push({ name: call.function.name, args, text, ok: toolSucceeded(call.function.name, text) })
+    next = { ...memory, turns: [...next.turns, { role: 'tool', content: stored, toolCallId: call.id }] }
+    if (stopUnknown) {
+      next = sealSkipped(next, calls.slice(index + 1))
+      halt = true
+      break
+    }
+  }
+  return { state: next, traces: seen, unknownStreak: unknown, halt }
+}
+
+/** 一轮用户请求：先裁工具结果，再按工具调用循环。正文要过闸门，步数用尽时再要一次不带工具的收尾。 */
 export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState, userText: string, ctx: ToolContext, complete: Complete = chatCompletion, onMemory?: (state: AgentMemoryState) => Promise<void>, onActivity?: (label: string, thought?: string) => void): Promise<AgentTurnResult> {
   const resolved = resolveSlash(userText)
   if (resolved.kind === 'local' || resolved.kind === 'unknown' || resolved.kind === 'need-args') {
@@ -143,46 +233,106 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
   }
   const content = resolved.kind === 'skill' ? resolved.display : userText
   const guidance = resolved.kind === 'skill' ? resolved.guidance : undefined
+  const required = requiredTools(content)
+  const submitAsked = asksToSubmit(content)
+  const factsAtStart = memory.facts
   let state: AgentMemoryState = {
     ...memory,
     turns: [...memory.turns, { role: 'user', content, ...(guidance ? { guidance } : {}) }]
   }
   if (needsCompression(state)) onActivity?.('正在整理更早的对话')
+  state = trimToolResults(state)
   state = await compress(config, state, complete)
-  const persist = async (): Promise<void> => { await onMemory?.(state) }
-  let steps = 0
-  for (; steps < MAX_STEPS; steps += 1) {
-    onActivity?.(config.thinking ? '正在思考' : '正在组织回答')
-    const outcome = await complete(config, {
-      messages: toChat(state),
-      tools: agentToolSchemas(),
+  const persistTranscript = async (): Promise<void> => { await onMemory?.({ ...state, facts: factsAtStart }) }
+  const finish = async (reply: string, steps: number): Promise<AgentTurnResult> => {
+    state = { ...state, turns: [...state.turns.filter(turn => !turn.hidden), { role: 'assistant', content: reply }] }
+    await onMemory?.(state)
+    return { reply, steps, memory: state, history: visibleHistory(state) }
+  }
+  const ask = async (withTools: boolean): Promise<ChatOutcome> => {
+    const send = (current: AgentMemoryState): Promise<ChatOutcome> => complete(config, {
+      messages: toChat(current),
+      ...(withTools ? { tools: agentToolSchemas() } : {}),
       temperature: 0.2,
       onDelta: partial => {
         const thought = partial.reasoning.trim()
         if (config.thinking && thought) onActivity?.('正在思考', thought)
       }
     })
+    try {
+      return await send(state)
+    } catch (error) {
+      if (!(error instanceof LlmError)) throw error
+      const kind = llmFailureKind(error)
+      if (kind === 'rate_limit') {
+        onActivity?.('模型忙，稍等再试')
+        await wait(RATE_LIMIT_BACKOFF_MS)
+        return await send(state)
+      }
+      if (kind === 'overflow') {
+        onActivity?.('正在缩短查询结果')
+        state = trimToolResults(state)
+        return await send(state)
+      }
+      throw error
+    }
+  }
+
+  const traces: ToolTrace[] = []
+  let unknownStreak = 0
+  let candidate = ''
+  let nudges = 0
+  let steps = 0
+  let halt = false
+  while (steps < MAX_STEPS && !halt) {
+    steps += 1
+    onActivity?.(config.thinking ? '正在思考' : '正在组织回答')
+    const outcome = await ask(true)
     const choice = outcome.choices[0]
-    if (!choice) break
+    if (!choice) { halt = true; break }
     if (choice.toolCalls.length > 0) {
       state = { ...state, turns: [...state.turns, { role: 'assistant', content: choice.content, toolCalls: choice.toolCalls }] }
-      for (const call of choice.toolCalls) {
-        onActivity?.(toolActivity(call.function.name))
-        const executed = await executeAgentTool(call.function.name, call.function.arguments, ctx, state)
-        state = executed.memory
-        state = { ...state, turns: [...state.turns, { role: 'tool', content: executed.text, toolCallId: call.id }] }
-      }
-      await persist()
+      const batch = await runToolBatch(state, choice.toolCalls, traces, unknownStreak, ctx, content, onActivity)
+      state = batch.state
+      traces.splice(0, traces.length, ...batch.traces)
+      unknownStreak = batch.unknownStreak
+      halt = batch.halt
+      await persistTranscript()
+      if (halt) break
       continue
     }
     const reply = replyText(choice, config.thinking)
-    if (!reply) break
-    state = { ...state, turns: [...state.turns, { role: 'assistant', content: reply }] }
-    await persist()
-    return { reply, steps: steps + 1, memory: state, history: visibleHistory(state) }
+    if (!reply) { halt = true; break }
+    const gate = reviewReply({ answer: splitAgentReply(reply).answer || reply, required, traces, submitAsked })
+    if (gate.action === 'nudge' && nudges < MAX_NUDGES) {
+      candidate = reply
+      nudges += 1
+      state = {
+        ...state,
+        turns: [
+          ...state.turns,
+          { role: 'assistant', content: reply, hidden: true },
+          { role: 'user', content: gate.note, hidden: true }
+        ]
+      }
+      continue
+    }
+    if (gate.action === 'nudge') {
+      candidate = reply
+      break
+    }
+    return finish(reply, steps)
   }
-  const reply = '这轮工具调用已经到上限，先停在这里。可以把要求再说具体一点，或让我只查其中一件。'
-  state = { ...state, turns: [...state.turns, { role: 'assistant', content: reply }] }
-  await persist()
-  return { reply, steps, memory: state, history: visibleHistory(state) }
+  if (candidate) return finish(candidate, steps)
+  onActivity?.('正在整理这轮结果')
+  state = { ...state, turns: [...state.turns, { role: 'user', content: WRAP_NOTE, hidden: true }] }
+  try {
+    const outcome = await ask(false)
+    const choice = outcome.choices[0]
+    const reply = choice && choice.toolCalls.length === 0 ? replyText(choice, config.thinking) : ''
+    if (reply) return finish(reply, steps)
+  } catch (error) {
+    if (error instanceof LlmError && error.message === '已停下。') throw error
+  }
+  return finish(STEP_LIMIT_REPLY, steps)
 }

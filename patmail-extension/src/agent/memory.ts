@@ -10,6 +10,8 @@ export interface MemoryTurn {
   guidance?: string
   toolCallId?: string
   toolCalls?: AssistantToolCall[]
+  /** 闸门追加的说明。模型要看见，页面上不显示。 */
+  hidden?: boolean
 }
 
 /** 跨会话还在的事实：偏好、常用客户、没做完的交代。 */
@@ -23,6 +25,8 @@ export interface AgentMemoryState {
   summary: string
   turns: MemoryTurn[]
   facts: MemoryFact[]
+  /** 原文摘录连续没变短的次数。到 3 次就停，避免同一段反复摘。 */
+  digestMisses?: number
 }
 
 export const EMPTY_MEMORY: AgentMemoryState = { summary: '', turns: [], facts: [] }
@@ -38,6 +42,29 @@ export const COMPRESS_AT_CHARS = Math.floor(CONTEXT_WINDOW_CHARS * 0.75)
 export const KEEP_RECENT_CHARS = 64_000
 /** 极端情况下的存储上限，避免坏数据撑满浏览器缓存。正常在压缩阈值就会收掉。 */
 const STORAGE_TURN_CHARS = 240_000
+/** 单条工具结果的上限。超出留头尾，诊断经常在末尾。 */
+export const TOOL_RESULT_CHARS = 2_400
+const TOOL_OMISSION = '\n…中间已省略…\n'
+
+export function clipToolResult(text: string, max = TOOL_RESULT_CHARS): string {
+  if (text.length <= max) return text
+  const tail = Math.min(600, Math.floor(max / 4))
+  const head = max - tail - TOOL_OMISSION.length
+  if (head < 1) return text.slice(0, max)
+  return `${text.slice(0, head)}${TOOL_OMISSION}${text.slice(-tail)}`
+}
+
+export function trimToolResults(state: AgentMemoryState): AgentMemoryState {
+  let changed = false
+  const turns = state.turns.map(turn => {
+    if (turn.role !== 'tool') return turn
+    const content = clipToolResult(turn.content)
+    if (content === turn.content) return turn
+    changed = true
+    return { ...turn, content }
+  })
+  return changed ? { ...state, turns } : state
+}
 const MAX_FACTS = 60
 const MAX_FACT_TEXT = 240
 
@@ -72,15 +99,17 @@ export function normalizeMemory(value: unknown): AgentMemoryState {
   const record = value as Record<string, unknown>
   const turns = Array.isArray(record.turns) ? record.turns.flatMap((item): MemoryTurn[] => {
     if (!isTurn(item)) return []
+    const hidden = item.hidden === true ? { hidden: true as const } : {}
     if (item.role !== 'user' || typeof item.guidance !== 'string' || !item.guidance.trim()) {
       return [{
         role: item.role,
         content: item.content,
         ...(item.toolCallId ? { toolCallId: item.toolCallId } : {}),
-        ...(item.toolCalls ? { toolCalls: item.toolCalls } : {})
+        ...(item.toolCalls ? { toolCalls: item.toolCalls } : {}),
+        ...hidden
       }]
     }
-    return [{ ...item, guidance: item.guidance.trim().slice(0, 4_000) }]
+    return [{ ...item, guidance: item.guidance.trim().slice(0, 4_000), ...hidden }]
   }) : []
   const facts = Array.isArray(record.facts) ? record.facts.flatMap((item): MemoryFact[] => {
     if (typeof item !== 'object' || item === null) return []
@@ -91,7 +120,10 @@ export function normalizeMemory(value: unknown): AgentMemoryState {
     return [{ id: fact.id.slice(0, 80), text, at: fact.at.slice(0, 40) }]
   }).slice(-MAX_FACTS) : []
   const summary = typeof record.summary === 'string' ? record.summary.slice(0, 4_000) : ''
-  return { summary, turns: capStoredTurns(turns), facts }
+  const misses = typeof record.digestMisses === 'number' && Number.isFinite(record.digestMisses)
+    ? Math.max(0, Math.min(3, Math.floor(record.digestMisses)))
+    : 0
+  return { summary, turns: capStoredTurns(turns), facts, ...(misses > 0 ? { digestMisses: misses } : {}) }
 }
 
 export function turnChars(turn: MemoryTurn): number {
@@ -153,6 +185,7 @@ function oneLine(text: string, limit: number): string {
 export function digestTurns(turns: MemoryTurn[]): string {
   const lines: string[] = []
   for (const turn of turns) {
+    if (turn.hidden) continue
     if (turn.role === 'user') {
       const text = oneLine(turn.content, 160)
       if (text) lines.push(`- 用户：${text}`)
@@ -207,6 +240,7 @@ export function searchFacts(state: AgentMemoryState, query: string): MemoryFact[
 /** 页面上只展示人和助手的原话，工具来回留在后台。 */
 export function visibleHistory(state: AgentMemoryState): Array<{ role: 'user' | 'assistant'; content: string }> {
   return state.turns.flatMap(turn => {
+    if (turn.hidden) return []
     if ((turn.role !== 'user' && turn.role !== 'assistant') || !turn.content.trim()) return []
     if (turn.role === 'assistant' && turn.toolCalls && turn.toolCalls.length > 0 && !turn.content.trim()) return []
     return [{ role: turn.role, content: turn.content }]

@@ -1,6 +1,5 @@
 import { isMessage, MessageType, type ContentRequest } from '../shared/message'
-import type { AgentMemoryState } from './memory'
-import { rememberFact, searchFacts } from './memory'
+import { clipToolResult, rememberFact, searchFacts, type AgentMemoryState } from './memory'
 import type { ToolSchema } from './llm'
 
 export interface ToolContext {
@@ -192,8 +191,8 @@ function textArg(args: Record<string, unknown>, key: string, max = 80): string {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
 }
 
-function clip(text: string, max = 3_500): string {
-  return text.length <= max ? text : `${text.slice(0, max)}…`
+function clip(text: string): string {
+  return clipToolResult(text)
 }
 
 function forwardedError(value: unknown): string | null {
@@ -275,7 +274,7 @@ export async function executeAgentTool(name: string, rawArguments: string, ctx: 
     if (name === 'list_customers') {
       const rows = await ctx.customers()
       if (rows.length === 0) return { text: '当前账号还没有在插件里保存客户。', memory }
-      return { text: rows.slice(0, 40).map(row => `${row.name}｜入口 ${row.surface || '未设'}｜工作流 ${row.workflowId || '未设'}`).join('\n'), memory }
+      return { text: clip(rows.slice(0, 40).map(row => `${row.name}｜入口 ${row.surface || '未设'}｜工作流 ${row.workflowId || '未设'}`).join('\n')), memory }
     }
     if (name === 'describe_workflows') {
       const nameQuery = textArg(args, 'name', 40).toLowerCase()
@@ -288,7 +287,7 @@ export async function executeAgentTool(name: string, rawArguments: string, ctx: 
       }
     }
     if (name === 'list_skills') {
-      return { text: ctx.skills().map(skill => `${skill.title}：${skill.blurb}。${skill.detail}`).join('\n'), memory }
+      return { text: clip(ctx.skills().map(skill => `${skill.title}：${skill.blurb}。${skill.detail}`).join('\n')), memory }
     }
     if (name === 'remember') {
       const text = textArg(args, 'text', 240)
@@ -299,7 +298,7 @@ export async function executeAgentTool(name: string, rawArguments: string, ctx: 
     if (name === 'lookup_api') {
       const query = textArg(args, 'query', 120)
       if (!query) return { text: '请给出 Call 名、入口或中文主题。', memory }
-      return { text: ctx.lookupApi(query), memory }
+      return { text: clip(ctx.lookupApi(query)), memory }
     }
     if (name === 'recall') {
       const found = searchFacts(memory, textArg(args, 'query', 80))

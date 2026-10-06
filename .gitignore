@@ -1,5 +1,11 @@
 node_modules/
 dist/
+__pycache__/
+*.pyc
+# 本地对照用的参考克隆，不纳入本仓库
+/openclaw/
+/hermes-agent/
+/claude-code/
 .idea/
 *.iml
 Thumbs.db
