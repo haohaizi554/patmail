@@ -6,6 +6,7 @@ __pycache__/
 /openclaw/
 /hermes-agent/
 /claude-code/
+/参考/
 .idea/
 *.iml
 Thumbs.db
