@@ -28,7 +28,7 @@ const props = defineProps<{
   queryTemplateVersion: number
   businessOrigin: string
 }>()
-const { open: writesOpen } = useWriteSwitch()
+const { open: writesOpen, ready: writesReady } = useWriteSwitch()
 
 const history = ref<TaskSummary[]>([])
 const checked = ref<AutomationTask | null>(null)
@@ -210,7 +210,7 @@ async function diagnose(): Promise<void> {
 <template>
   <section class="file-card" aria-label="发文任务">
     <p class="mail-stage" role="status">任务计划</p>
-    <p class="hint">{{ writesOpen ? '写开关已打开。' : '写开关已关闭，不会创建、保存或提交流程。' }}</p>
+    <p class="hint">{{ !writesReady ? '正在读取写开关。' : writesOpen ? '写开关已打开。' : '写开关已关闭，不会创建、保存或提交流程。' }}</p>
     <button type="button" class="text-button" :disabled="files.length === 0" @click="plan">生成计划</button>
     <button type="button" class="text-button" :disabled="!checked" @click="showBlockers = !showBlockers">查看阻塞项</button>
     <button type="button" class="text-button" :disabled="!checked" @click="recheck">重新核对</button>

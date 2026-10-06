@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { AGENT_FRAME_KEY, normalizeAgentFrame, resizeAgentFrame, type AgentFrame, type ResizeEdge } from '../agent-frame'
+import { AGENT_ASK_SESSION_NAME_KEY } from '../../agent/memory'
 import { foldActivity, type AgentTraceStep } from '../../agent/trace'
 import { AGENT_CONFIG_KEY, normalizeAgentConfig } from '../../agent/config'
 import AgentAnswer from './AgentAnswer.vue'
@@ -11,22 +12,35 @@ import { MessageType, type BackgroundRequest } from '../../shared/message'
 import { sendToBackground } from '../../utils/runtime'
 
 interface Bubble { role: 'user' | 'assistant'; content: string }
+interface SessionCard { id: string; title: string; updatedAt: string; active: boolean }
 interface Job { kind: 'turn' | 'facts' | 'compact' | 'reset'; display: string; message: string; label: string }
 type AgentRequest = Extract<BackgroundRequest, { type: typeof MessageType.AgentChat }>
-type AskResult = { ok: true; reply: string; history: Bubble[] } | { ok: false; message: string }
+type AskOk = { ok: true; reply: string; history: Bubble[]; sessions: SessionCard[]; activeId: string }
+type AskResult = AskOk | { ok: false; message: string }
 
 const RESIZE_EDGES: ResizeEdge[] = ['e', 's', 'se']
 const open = ref(false)
 const loaded = ref(false)
 const placed = ref(false)
 const history = ref<Bubble[]>([])
+const sessions = ref<SessionCard[]>([])
+const activeId = ref('')
+const sessionsOpen = ref(false)
+const askName = ref(true)
+const naming = ref(false)
+const nameDraft = ref('')
+const nameBox = ref<HTMLInputElement | null>(null)
+const renamingId = ref('')
+const renameDraft = ref('')
 const aside = ref<string[]>([])
 const QUEUE_HEAD = 3
 const queue = ref<Job[]>([])
 const queueOpen = ref(false)
 const queueHead = computed(() => queue.value.slice(0, QUEUE_HEAD))
 const queueRest = computed(() => queue.value.slice(QUEUE_HEAD))
+interface LiveNote { kind: 'thought' | 'step'; text: string; detail: string; state: 'run' | 'done' }
 const liveSteps = ref<AgentTraceStep[]>([])
+const liveLog = ref<LiveNote[]>([])
 const liveThought = ref('')
 const liveThoughtTarget = ref('')
 const liveDraft = ref('')
@@ -51,10 +65,24 @@ function pumpLiveThought(): void {
   livePump = requestAnimationFrame(pumpLiveThought)
 }
 
+function commitStreamingThought(): void {
+  const text = liveThoughtTarget.value.trim()
+  if (!text) return
+  const last = liveLog.value.at(-1)
+  if (last?.kind === 'thought' && (text === last.text || text.startsWith(last.text))) {
+    if (text.length > last.text.length) liveLog.value = [...liveLog.value.slice(0, -1), { ...last, text }]
+  } else if (!(last?.kind === 'thought' && last.text.startsWith(text))) {
+    liveLog.value = [...liveLog.value, { kind: 'thought', text, detail: '', state: 'done' }]
+  }
+  liveThoughtTarget.value = ''
+  liveThought.value = ''
+}
+
 function clearLiveThought(): void {
   stopLivePump()
   liveThoughtTarget.value = ''
   liveThought.value = ''
+  liveLog.value = []
   liveDraft.value = ''
 }
 const draft = ref('')
@@ -85,7 +113,8 @@ const starters = [
 let stopped = false
 const ACTIVITY_CHANNEL = 'patmail-agent-activity'
 const ASK_CHANNEL = 'patmail-agent-ask'
-const calmNote = (text: string) => text === '这段对话已清空，长期记忆还在。' || text === '已停下。'
+const calmNote = (text: string) => text === '已停下。' || text.startsWith('这段对话') || text.startsWith('新对话') || text.startsWith('对话已经有') || text === '没有这段对话。' || text === '名字不能是空的。'
+const sessionLocked = computed(() => busy.value || queue.value.length > 0)
 
 function readThinking(value: unknown): void {
   thinkingOn.value = normalizeAgentConfig(value).thinking
@@ -108,15 +137,18 @@ function saveFrame(next: AgentFrame): void {
 }
 
 if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-  void chrome.storage.local.get([AGENT_CONFIG_KEY, AGENT_FRAME_KEY]).then(stored => {
+  void chrome.storage.local.get([AGENT_CONFIG_KEY, AGENT_FRAME_KEY, AGENT_ASK_SESSION_NAME_KEY]).then(stored => {
     readThinking(stored[AGENT_CONFIG_KEY])
     readFrame(stored[AGENT_FRAME_KEY])
+    askName.value = stored[AGENT_ASK_SESSION_NAME_KEY] !== false
   }).catch(() => {})
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local') return
-    if (AGENT_CONFIG_KEY in changes) readThinking(changes[AGENT_CONFIG_KEY]?.newValue)
-    if (AGENT_FRAME_KEY in changes) readFrame(changes[AGENT_FRAME_KEY]?.newValue)
-  })
+  chrome.storage.onChanged.addListener(onStoredAgent)
+}
+function onStoredAgent(changes: Record<string, chrome.storage.StorageChange>, area: string): void {
+  if (area !== 'local') return
+  if (AGENT_CONFIG_KEY in changes) readThinking(changes[AGENT_CONFIG_KEY]?.newValue)
+  if (AGENT_FRAME_KEY in changes) readFrame(changes[AGENT_FRAME_KEY]?.newValue)
+  if (AGENT_ASK_SESSION_NAME_KEY in changes) askName.value = changes[AGENT_ASK_SESSION_NAME_KEY]?.newValue !== false
 }
 const paletteDismissed = ref(false)
 const active = ref(0)
@@ -133,7 +165,7 @@ let pendingReset = false
 const token = computed(() => slashToken(draft.value))
 const commands = computed(() => token.value === null ? [] : filterCommands(token.value))
 const groups = computed(() => {
-  const order = ['指令', '去办', '本领'] as const
+  const order = ['指令', '去办'] as const
   return order.flatMap(group => {
     const items = commands.value.filter(command => command.group === group)
     return items.length ? [{ group, items }] : []
@@ -143,6 +175,12 @@ const showPalette = computed(() => open.value && token.value !== null && !palett
 
 function applyHistory(items: Bubble[]): void {
   history.value = items.filter(item => item.content.trim())
+}
+
+function applyTurn(result: AskOk): void {
+  applyHistory(result.history)
+  sessions.value = result.sessions
+  activeId.value = result.activeId
 }
 
 function nearBottom(): boolean {
@@ -188,7 +226,9 @@ async function ask(action: AgentRequest): Promise<AskResult> {
     return {
       ok: true,
       reply: response.payload.data.reply,
-      history: response.payload.data.history.filter(item => item.content.trim())
+      history: response.payload.data.history.filter(item => item.content.trim()),
+      sessions: response.payload.data.sessions,
+      activeId: response.payload.data.activeId
     }
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : '后台没有响应。' }
@@ -204,7 +244,7 @@ async function ensureHistory(): Promise<void> {
   }
   loaded.value = true
   note.value = ''
-  applyHistory(result.history)
+  applyTurn(result)
 }
 
 function placeNearEntry(): void {
@@ -231,6 +271,88 @@ function enqueue(job: Job): boolean {
   }
   queue.value = [...queue.value, job]
   return true
+}
+
+async function useSession(action: AgentRequest, closeList: boolean): Promise<void> {
+  if (sessionLocked.value) return
+  const result = await ask(action)
+  if (!result.ok) {
+    note.value = result.message
+    return
+  }
+  aside.value = []
+  applyTurn(result)
+  note.value = result.reply
+  if (closeList) sessionsOpen.value = false
+  await scrollDown(true)
+}
+
+function persistAskName(next: boolean): void {
+  askName.value = next
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) return
+  void chrome.storage.local.set({ [AGENT_ASK_SESSION_NAME_KEY]: next }).catch(() => {})
+}
+
+function startCreate(): void {
+  if (sessionLocked.value) return
+  renamingId.value = ''
+  if (!askName.value) {
+    naming.value = false
+    void createSession()
+    return
+  }
+  naming.value = true
+  nameDraft.value = ''
+  void nextTick(() => nameBox.value?.focus())
+}
+
+function confirmCreate(): void {
+  if (sessionLocked.value) return
+  const title = nameDraft.value.replace(/\s+/g, ' ').trim()
+  naming.value = false
+  nameDraft.value = ''
+  void createSession(title)
+}
+
+function createSession(title = ''): Promise<void> {
+  const payload = title
+    ? { action: 'create' as const, title: title.slice(0, 40) }
+    : { action: 'create' as const }
+  return useSession({ type: MessageType.AgentChat, payload }, true)
+}
+
+function beginRename(item: SessionCard): void {
+  if (sessionLocked.value) return
+  naming.value = false
+  renamingId.value = item.id
+  renameDraft.value = item.title
+  void nextTick(() => {
+    const field = panel.value?.querySelector<HTMLInputElement>('.agent-session-row input')
+    field?.focus()
+    field?.select()
+  })
+}
+
+function commitRename(): void {
+  const id = renamingId.value
+  const title = renameDraft.value.replace(/\s+/g, ' ').trim()
+  if (!id || !title || sessionLocked.value) return
+  renamingId.value = ''
+  void useSession({ type: MessageType.AgentChat, payload: { action: 'rename', id, title: title.slice(0, 40) } }, false)
+}
+
+function openSession(id: string): Promise<void> {
+  if (id === activeId.value) {
+    sessionsOpen.value = false
+    return Promise.resolve()
+  }
+  renamingId.value = ''
+  naming.value = false
+  return useSession({ type: MessageType.AgentChat, payload: { action: 'open', id } }, true)
+}
+
+function removeSession(id: string): Promise<void> {
+  return useSession({ type: MessageType.AgentChat, payload: { action: 'remove', id } }, false)
 }
 
 async function reset(): Promise<void> {
@@ -325,7 +447,7 @@ async function runJob(job: Job): Promise<void> {
       if (!result.ok) note.value = result.message
       else {
         note.value = result.reply
-        applyHistory(result.history)
+        applyTurn(result)
       }
       return
     }
@@ -339,7 +461,7 @@ async function runJob(job: Job): Promise<void> {
       const result = await ask({ type: MessageType.AgentChat, payload: { action: 'compact' } })
       if (!result.ok) note.value = result.message
       else {
-        applyHistory(result.history)
+        applyTurn(result)
         showAside(result.reply)
       }
       return
@@ -355,7 +477,7 @@ async function runJob(job: Job): Promise<void> {
       retryJob.value = job
     } else {
       retryJob.value = null
-      applyHistory(result.history)
+      applyTurn(result)
     }
   } finally {
     await finishJob()
@@ -569,6 +691,12 @@ function onEscape(event: KeyboardEvent): void {
     event.preventDefault()
     return
   }
+  if (naming.value || renamingId.value) {
+    naming.value = false
+    renamingId.value = ''
+    event.preventDefault()
+    return
+  }
   if (!busy.value) open.value = false
 }
 
@@ -635,15 +763,34 @@ function onActivity(message: unknown): void {
     return
   }
   if (typeof record.thought === 'string' && record.thought.trim()) {
+    const next = record.thought.trim()
+    const prev = liveThoughtTarget.value.trim()
+    if (prev && !next.startsWith(prev) && !prev.startsWith(next)) commitStreamingThought()
     liveThoughtTarget.value = record.thought
     waitLabel.value = '正在思考'
     if (!livePump) livePump = requestAnimationFrame(pumpLiveThought)
     return
   }
+  const quiet = record.label === '正在思考' || record.label === '正在组织回答'
+  if (!quiet) commitStreamingThought()
+  const detail = typeof record.detail === 'string' ? record.detail : ''
+  const phase = record.phase === 'done' || detail ? 'done' : 'run'
+  if (!quiet && phase === 'done') {
+    const openAt = [...liveLog.value].reverse().findIndex(item => item.kind === 'step' && item.text === record.label && item.state === 'run')
+    if (openAt >= 0) {
+      const at = liveLog.value.length - 1 - openAt
+      liveLog.value = liveLog.value.map((item, index) => index === at ? { ...item, detail, state: 'done' } : item)
+    } else liveLog.value = [...liveLog.value, { kind: 'step', text: record.label, detail, state: 'done' }]
+  } else if (!quiet) {
+    const last = liveLog.value.at(-1)
+    if (!(last?.kind === 'step' && last.text === record.label && last.state === 'run')) {
+      liveLog.value = [...liveLog.value, { kind: 'step', text: record.label, detail: '', state: 'run' }]
+    }
+  }
   liveSteps.value = foldActivity(liveSteps.value, {
     label: record.label,
-    phase: record.phase === 'done' ? 'done' : 'run',
-    ...(typeof record.detail === 'string' ? { detail: record.detail } : {})
+    phase,
+    ...(detail ? { detail } : {})
   })
   waitLabel.value = record.label.slice(0, 40)
   if (stick.value) void scrollDown()
@@ -666,6 +813,7 @@ window.addEventListener('resize', onViewport)
 onUnmounted(() => {
   window.removeEventListener('keydown', onEscape)
   window.removeEventListener('resize', onViewport)
+  if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) chrome.storage.onChanged.removeListener(onStoredAgent)
   if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) chrome.runtime.onMessage.removeListener(onActivity)
   dropAgentPort()
   stopLivePump()
@@ -695,8 +843,34 @@ onUnmounted(() => {
       ></div>
       <header @pointerdown="onDragStart" @pointermove="onDragMove" @pointerup="onDragEnd" @pointercancel="onDragEnd">
         <strong>AI 助手</strong>
-        <button type="button" aria-label="关闭" @click="open = false">×</button>
+        <div class="agent-head" @pointerdown.stop>
+          <button type="button" class="agent-sessions-toggle" :aria-expanded="sessionsOpen" @click="sessionsOpen = !sessionsOpen">对话</button>
+          <button type="button" aria-label="关闭" @click="open = false">×</button>
+        </div>
       </header>
+      <div v-if="sessionsOpen" class="agent-sessions" @pointerdown.stop>
+        <div v-if="naming" class="agent-session-name">
+          <input ref="nameBox" v-model="nameDraft" maxlength="24" aria-label="对话名字" placeholder="给这段对话起个名字" @keydown.enter.prevent="confirmCreate" @keydown.esc.prevent="naming = false" />
+          <button type="button" class="agent-session-name-go" :disabled="sessionLocked" @click="confirmCreate">创建</button>
+          <button type="button" class="agent-session-ask" :aria-pressed="askName" v-hint="askName ? '现在每次新建都会问名字。点一下，以后直接打开' : '现在新建直接打开。点一下，以后先问名字'" @click="persistAskName(!askName)">以后还问</button>
+        </div>
+        <button v-else type="button" class="agent-session-new" :disabled="sessionLocked" @click="startCreate">新对话</button>
+        <button v-if="!naming && !askName" type="button" class="agent-session-ask wide" :aria-pressed="askName" v-hint="'现在新建直接打开。点一下，以后先问名字'" @click="persistAskName(true)">以后还问名字</button>
+        <p class="agent-session-note">每段对话各自留上下文。长期记忆是各段共用的。</p>
+        <ul class="agent-session-list">
+          <li v-for="item in sessions" :key="item.id" class="agent-session-row" :class="{ on: item.active }">
+            <template v-if="renamingId === item.id">
+              <input v-model="renameDraft" maxlength="24" aria-label="修改对话名字" @keydown.enter.prevent="commitRename" @keydown.esc.prevent="renamingId = ''" />
+              <button type="button" class="agent-session-name-go" :disabled="sessionLocked || !renameDraft.trim()" @click="commitRename">确定</button>
+            </template>
+            <template v-else>
+              <button type="button" class="agent-session-open" :disabled="sessionLocked" @click="openSession(item.id)">{{ item.title }}</button>
+              <button type="button" class="agent-session-rename" :disabled="sessionLocked" :aria-label="`改名${item.title}`" @click="beginRename(item)">改名</button>
+              <button type="button" class="agent-session-delete" :disabled="sessionLocked" :aria-label="`删除${item.title}`" @click="removeSession(item.id)">删除</button>
+            </template>
+          </li>
+        </ul>
+      </div>
       <div ref="scroller" class="agent-stream" @scroll="onStreamScroll">
         <div v-if="history.length === 0 && aside.length === 0 && !busy && !note" class="agent-empty">
           <p>输入 / 可以点技能。也可以从下面选一件。</p>
@@ -713,15 +887,25 @@ onUnmounted(() => {
         </div>
         <div v-if="busy" class="agent-row assistant pending" role="status" aria-live="polite">
           <div class="agent-trace">
-            <div v-if="liveThought" class="think">
+            <div v-if="liveThought || liveLog.some(item => item.kind === 'thought')" class="think">
               <button type="button" class="think-bar" :aria-expanded="liveThoughtOpen" @click="liveThoughtOpen = !liveThoughtOpen">
                 <span class="think-chevron" :class="{ open: liveThoughtOpen }" aria-hidden="true"></span>
                 <span class="think-label">正在思考</span>
-                <span v-if="!liveThoughtOpen" class="think-lead">{{ thoughtLead(liveThought) }}</span>
+                <span v-if="!liveThoughtOpen" class="think-lead">{{ thoughtLead(liveThought || [...liveLog].reverse().find(item => item.kind === 'thought')?.text || '') }}</span>
               </button>
-              <pre v-if="liveThoughtOpen" ref="liveThoughtBox" class="think-body live">{{ liveThought }}</pre>
+              <template v-if="liveThoughtOpen">
+                <template v-for="(item, index) in liveLog" :key="index">
+                  <pre v-if="item.kind === 'thought'" class="think-body live">{{ item.text }}</pre>
+                  <p v-else class="think-step" :class="item.state">
+                    <span class="agent-step-mark" aria-hidden="true"></span>
+                    <span class="agent-step-label">{{ item.text }}</span>
+                    <span v-if="item.detail" class="agent-step-detail">{{ item.detail }}</span>
+                  </p>
+                </template>
+                <pre v-if="liveThought" ref="liveThoughtBox" class="think-body live">{{ liveThought }}</pre>
+              </template>
             </div>
-            <ol v-if="liveSteps.length" class="agent-steps">
+            <ol v-if="liveSteps.length && !liveThought && !liveLog.some(item => item.kind === 'thought')" class="agent-steps">
               <li v-for="(step, index) in liveSteps" :key="`${index}-${step.label}`" :class="step.state">
                 <span class="agent-step-mark" aria-hidden="true"></span>
                 <span class="agent-step-label">{{ step.label }}</span>

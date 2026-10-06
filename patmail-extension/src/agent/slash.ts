@@ -1,6 +1,4 @@
-import { SKILLS } from '../workflow/skills'
-
-export type SlashGroup = '指令' | '去办' | '本领'
+export type SlashGroup = '指令' | '去办'
 export type SlashLocal = 'help' | 'clear' | 'memory' | 'compact'
 
 export interface SlashCommand {
@@ -38,7 +36,7 @@ const ACTIONS: SlashCommand[] = [
     name: '清空',
     aliases: ['clear'],
     group: '指令',
-    description: '清空这段对话，长期记忆还在',
+    description: '清空这段对话，其它对话和长期记忆还在',
     argumentHint: '',
     args: 'none',
     local: 'clear'
@@ -172,42 +170,8 @@ const ACTIONS: SlashCommand[] = [
   }
 ]
 
-const DRAFT_SKILLS = new Set(['对上要发的信', '几件合成一封', '谁来收'])
-
-function skillInstruction(title: string, blurb: string, detail: string): string {
-  if (DRAFT_SKILLS.has(title)) {
-    return `这是工作流本领「${title}」。先查到文件，再调用 draft_mail。占位符由查到的文件填写。不要代点创建发文或提交审核。`
-  }
-  if (title === '谁来看一眼') {
-    return '这是工作流本领「谁来看一眼」。调用 list_reviewers，说明当前登录人能不能被选中。不要提交审核。'
-  }
-  if (title === '从哪里开始') {
-    return '这是工作流本领「从哪里开始」。先调用 connection_status。已经连上再调用 search_deadlines。不要改配置，不要提交。'
-  }
-  if (title === '再查一遍并记下') {
-    return '这是工作流本领「再查一遍并记下」。先调用 connection_status，再用补充里的文号调用 search_cases。查到的文件留在这一轮，这一步还不发出去。'
-  }
-  if (title === '核对事项') {
-    return '这是工作流本领「核对事项」。先调用 connection_status。已经连上再调用 search_deadlines。对照返回里的处理事项和补充里的事项名，对不上就说明。不要改配置，不要提交。'
-  }
-  return `这是工作流本领「${title}」。${blurb}。${detail} 可以调用 list_skills 核对原文。用大白话说明要准备什么、在哪一步用。不要改配置，不要代点创建发文或提交审核。`
-}
-
-const WORKFLOW_COMMANDS: SlashCommand[] = SKILLS.map(skill => ({
-  name: skill.title,
-  aliases: [],
-  group: '本领' as const,
-  description: skill.blurb,
-  argumentHint: '补充说明，可空',
-  args: 'optional' as const,
-  guide: (args: string) => told(
-    skillInstruction(skill.title, skill.blurb, skill.detail),
-    args,
-    DRAFT_SKILLS.has(skill.title) ? '用户没有写补充，就用这一轮已经查到的文件起草。' : '用户没有写补充，就按这个本领现在能调用的工具做。'
-  )
-}))
-
-export const SLASH_COMMANDS: readonly SlashCommand[] = [...ACTIONS, ...WORKFLOW_COMMANDS]
+/** 工作流里的步骤不放进这个菜单。助手用 list_skills 和 create_workflow 自己调用。 */
+export const SLASH_COMMANDS: readonly SlashCommand[] = ACTIONS
 
 const TAKEN = new Set<string>()
 for (const command of SLASH_COMMANDS) {
@@ -247,7 +211,7 @@ export function filterCommands(query: string): SlashCommand[] {
 
 export function helpText(): string {
   const lines = ['输入 / 弹出技能。方向键选择，Enter 使用，Esc 先收起菜单。', '']
-  for (const group of ['指令', '去办', '本领'] as const) {
+  for (const group of ['指令', '去办'] as const) {
     lines.push(group)
     for (const command of SLASH_COMMANDS.filter(item => item.group === group)) {
       const hint = command.argumentHint ? ` ${command.argumentHint}` : ''
@@ -270,7 +234,7 @@ export function resolveSlash(input: string): SlashResolution {
   const command = findCommand(token)
   if (!command) return { kind: 'unknown', message: `没有「/${token}」这个技能。输入 / 查看可以点的。` }
   if (command.local === 'help') return { kind: 'local', local: 'help', message: helpText() }
-  if (command.local === 'clear') return { kind: 'local', local: 'clear', message: '这段对话已清空，长期记忆还在。' }
+  if (command.local === 'clear') return { kind: 'local', local: 'clear', message: '这段对话已清空。其它对话和长期记忆还在。' }
   if (command.local === 'memory') return { kind: 'local', local: 'memory', message: '' }
   if (command.local === 'compact') return { kind: 'local', local: 'compact', message: '' }
   const guidance = command.guide?.(args)

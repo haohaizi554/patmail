@@ -268,32 +268,110 @@ export function limitMailItems(input: {
   return { ok: true, items }
 }
 
-export function readLimitMailLedger(): LimitMailMark[] {
+function parseLimitMailLedger(value: unknown): LimitMailMark[] {
+  let parsed = value
+  if (typeof value === 'string') {
+    try { parsed = JSON.parse(value) as unknown } catch { return [] }
+  }
+  if (!Array.isArray(parsed)) return []
+  return parsed.flatMap(item => {
+    if (!isRecord(item) || !isQueryGuid(String(item.procId))) return []
+    const state = item.state === 'created' || item.state === 'submitted' || item.state === 'unknown' ? item.state : null
+    if (!state) return []
+    const mailId = typeof item.mailId === 'string' && (item.mailId === '' || isQueryGuid(item.mailId)) ? item.mailId : ''
+    return [{ procId: String(item.procId), mailId, state }]
+  })
+}
+
+function sessionLedgerArea(): chrome.storage.StorageArea | null {
+  if (typeof chrome === 'undefined' || !chrome.storage?.session) return null
+  return chrome.storage.session
+}
+
+function readSessionLedger(): LimitMailMark[] {
   try {
     const raw = sessionStorage.getItem(LEDGER_KEY)
-    const parsed = raw ? JSON.parse(raw) as unknown : []
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap(item => {
-      if (!isRecord(item) || !isQueryGuid(String(item.procId))) return []
-      const state = item.state === 'created' || item.state === 'submitted' || item.state === 'unknown' ? item.state : null
-      if (!state) return []
-      const mailId = typeof item.mailId === 'string' && (item.mailId === '' || isQueryGuid(item.mailId)) ? item.mailId : ''
-      return [{ procId: String(item.procId), mailId, state }]
-    })
+    return raw ? parseLimitMailLedger(raw) : []
   } catch {
     return []
   }
 }
 
+let memoryMarks: LimitMailMark[] | null = null
+const droppedMarks = new Set<string>()
+let ledgerQueue: Promise<void> = Promise.resolve()
+
+export function readLimitMailLedger(): LimitMailMark[] {
+  return memoryMarks ?? readSessionLedger()
+}
+
+export async function loadLimitMailLedger(): Promise<LimitMailMark[]> {
+  const area = sessionLedgerArea()
+  if (!area) {
+    memoryMarks = readSessionLedger()
+    return memoryMarks
+  }
+  try {
+    const stored = await area.get(LEDGER_KEY)
+    memoryMarks = parseLimitMailLedger(stored[LEDGER_KEY])
+  } catch {
+    memoryMarks = readSessionLedger()
+  }
+  return memoryMarks
+}
+
+function flushLimitMailLedger(): Promise<void> {
+  const job = ledgerQueue.then(async () => {
+    const local = memoryMarks ? memoryMarks.slice() : readSessionLedger()
+    const tombstones = [...droppedMarks]
+    const area = sessionLedgerArea()
+    if (!area) {
+      sessionStorage.setItem(LEDGER_KEY, JSON.stringify(local.slice(-500)))
+      return
+    }
+    const stored = parseLimitMailLedger((await area.get(LEDGER_KEY))[LEDGER_KEY])
+    const merged = new Map<string, LimitMailMark>()
+    for (const item of stored) {
+      if (tombstones.includes(item.procId.toLowerCase())) continue
+      merged.set(item.procId.toLowerCase(), item)
+    }
+    for (const item of local) {
+      if (tombstones.includes(item.procId.toLowerCase())) continue
+      merged.set(item.procId.toLowerCase(), item)
+    }
+    const next = [...merged.values()].slice(-500)
+    memoryMarks = next
+    for (const id of tombstones) droppedMarks.delete(id)
+    await area.set({ [LEDGER_KEY]: next })
+  }).catch(() => {})
+  ledgerQueue = job
+  return job
+}
+
 export function writeLimitMailMark(mark: LimitMailMark): void {
-  const marks = readLimitMailLedger().filter(item => item.procId.toLowerCase() !== mark.procId.toLowerCase())
+  const id = mark.procId.toLowerCase()
+  droppedMarks.delete(id)
+  const marks = readLimitMailLedger().filter(item => item.procId.toLowerCase() !== id)
   marks.push(mark)
-  sessionStorage.setItem(LEDGER_KEY, JSON.stringify(marks.slice(-500)))
+  memoryMarks = marks.slice(-500)
+  void flushLimitMailLedger()
 }
 
 export function forgetLimitMailMark(procId: string): void {
-  const marks = readLimitMailLedger().filter(item => item.procId.toLowerCase() !== procId.toLowerCase())
-  sessionStorage.setItem(LEDGER_KEY, JSON.stringify(marks.slice(-500)))
+  const id = procId.toLowerCase()
+  droppedMarks.add(id)
+  memoryMarks = readLimitMailLedger().filter(item => item.procId.toLowerCase() !== id).slice(-500)
+  void flushLimitMailLedger()
+}
+
+export function watchLimitMailLedger(listener: () => void): () => void {
+  if (typeof chrome === 'undefined' || !chrome.storage?.onChanged) return () => {}
+  const onChange = (changes: Record<string, chrome.storage.StorageChange>, area: string): void => {
+    if (area !== 'session' || !(LEDGER_KEY in changes)) return
+    listener()
+  }
+  chrome.storage.onChanged.addListener(onChange)
+  return () => chrome.storage.onChanged.removeListener(onChange)
 }
 
 /** 结束流程后回传是还没提交审核时，不再沿用上次的发文。还在审核里才跳过。 */
@@ -525,12 +603,22 @@ export async function submitLimitMailBatch(transport: EasyTransport, userId: str
   if (!isWriteSwitchOpen()) return { stopped: true, results: [{ procId: '', mailId: '', state: 'failed', message: '写开关已关闭，没有提交到 EASY。' }] }
   if (!isQueryGuid(userId)) return { stopped: true, results: [{ procId: '', mailId: '', state: 'failed', message: '当前登录人编号还没确认，没有提交。' }] }
   const results: LimitMailSubmitResult[] = []
+  const finish = async (stopped: boolean): Promise<{ stopped: boolean; results: LimitMailSubmitResult[] }> => {
+    for (const result of results) {
+      if (!isQueryGuid(result.procId)) continue
+      if (result.state === 'submitted' || result.state === 'unknown' || (result.state === 'created' && result.mailId)) {
+        writeLimitMailMark({ procId: result.procId, mailId: result.mailId, state: result.state })
+      }
+    }
+    await ledgerQueue
+    return { stopped, results }
+  }
   for (const item of items) {
     const letter = await submitOne(transport, userId, item)
     results.push(...letter.map(result => result.message.length > 8000 ? { ...result, message: result.message.slice(0, 8000) } : result))
-    if (letter.some(result => result.state !== 'submitted')) return { stopped: true, results }
+    if (letter.some(result => result.state !== 'submitted')) return finish(true)
   }
-  return { stopped: false, results }
+  return finish(false)
 }
 
 export function summarizeLimitMailSubmit(results: LimitMailSubmitResult[], stopped: boolean): string {
@@ -583,6 +671,7 @@ export async function runLimitMailSubmit(
   items: LimitMailSubmitItem[],
   gates: Record<string, 'open' | 'pending' | 'done'> = {}
 ): Promise<string> {
+  await loadLimitMailLedger()
   const ledger = readLimitMailLedger()
   const pending: LimitMailSubmitItem[] = []
   let skipReason: 'pending' | 'remembered' | '' = ''
@@ -631,5 +720,6 @@ export async function runLimitMailSubmit(
       writeLimitMailMark({ procId: result.procId, mailId: result.mailId, state: result.state })
     }
   }
+  await ledgerQueue
   return summarizeLimitMailSubmit(response.payload.results, response.payload.stopped)
 }

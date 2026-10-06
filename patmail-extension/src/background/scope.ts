@@ -2,7 +2,7 @@ import { isConfirmedOperator } from '../automation/operator'
 import { MessageType, type AppMessage } from '../shared/message'
 import type { EasyConnectionContext } from '../shared/connection'
 
-/** 扩展页面不能用自行填写的用户标识读取其他账号。 */
+/** 扩展页面和页面里的浮窗都不能用自行填写的用户标识读取其他账号。 */
 export function scopeExtensionPageMessage(message: AppMessage, connection: EasyConnectionContext): AppMessage | { error: string } {
   const ready = connection.sessionStatus === 'authenticated' && isConfirmedOperator(connection.operatorId)
   const deny = '尚未确认 EASY 用户，不能读取其他账号的数据。'

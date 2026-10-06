@@ -11,6 +11,10 @@ function toggleThought(): void {
 }
 const reply = computed(() => splitAgentReply(props.content))
 const lead = computed(() => thoughtLead(reply.value.thought))
+const thoughtTitle = computed(() => {
+  const lines = reply.value.thought.split('\n').map(line => line.trim()).filter(Boolean)
+  return lines.length > 0 && lines.every(line => line.startsWith('- ')) ? '过程' : '已思考'
+})
 const answerHtml = computed(() => reply.value.answer ? renderAgentMarkdown(reply.value.answer) : '')
 const thoughtHtml = computed(() => reply.value.thought ? renderAgentMarkdown(reply.value.thought) : '')
 </script>
@@ -20,12 +24,18 @@ const thoughtHtml = computed(() => reply.value.thought ? renderAgentMarkdown(rep
     <div v-if="reply.thought" class="think">
       <button type="button" class="think-bar" :aria-expanded="view.open" @click="toggleThought">
         <span class="think-chevron" :class="{ open: view.open }" aria-hidden="true"></span>
-        <span class="think-label">已思考</span>
+        <span class="think-label">{{ thoughtTitle }}</span>
         <span v-if="!view.open && lead" class="think-lead">{{ lead }}</span>
       </button>
       <div v-if="view.open" class="think-body" v-html="thoughtHtml"></div>
     </div>
-    <div v-if="answerHtml" class="agent-md" v-html="answerHtml"></div>
-    <button v-if="answerHtml" type="button" class="agent-copy" @click="emit('copy', reply.answer)">{{ copied ? '已复制' : '复制' }}</button>
+    <div v-if="answerHtml" class="agent-bubble">
+      <div class="agent-md" v-html="answerHtml"></div>
+      <button type="button" class="agent-copy" :class="{ done: copied }" :aria-label="copied ? '已复制' : '复制回答'" @click="emit('copy', reply.answer)">
+        <svg v-if="copied" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8.4 6.3 11.5 12.8 4.6" /></svg>
+        <svg v-else viewBox="0 0 16 16" aria-hidden="true"><rect x="5.2" y="5.2" width="8" height="8" rx="1.4" /><path d="M10.6 5.1V3.6A1.4 1.4 0 0 0 9.2 2.2H3.6A1.4 1.4 0 0 0 2.2 3.6v5.6A1.4 1.4 0 0 0 3.6 10.6H5" /></svg>
+        <span>{{ copied ? '已复制' : '复制' }}</span>
+      </button>
+    </div>
   </div>
 </template>

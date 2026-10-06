@@ -17,7 +17,7 @@ export const AGENT_CONFIG_DEFAULT: AgentConfig = {
   baseUrl: 'http://43.138.138.200:8588/v1',
   apiKey: '8588',
   model: 'Qwen3.6-35B-A3B-oQ4-fp16-mtp',
-  maxTokens: 1048576,
+  maxTokens: 8192,
   thinking: false
 }
 
@@ -32,10 +32,10 @@ export function isAgentConfig(value: unknown): value is AgentConfig {
     typeof config.thinking === 'boolean'
 }
 
-/** 旧默认 1024 会把思考和正文一起截断。读到这个数时抬到现在的默认。 */
+/** 旧默认 1024 会把思考和正文一起截断。后来抬到 1048576 又会把整段窗口占满。这两个数都收回到现在的默认。 */
 function storedMaxTokens(value: unknown): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > 1_048_576) return 0
-  return value === 1024 ? AGENT_CONFIG_DEFAULT.maxTokens : value
+  return value === 1024 || value === 1_048_576 ? AGENT_CONFIG_DEFAULT.maxTokens : value
 }
 
 export function normalizeAgentConfig(value: unknown): AgentConfig {

@@ -1,5 +1,18 @@
-import { ref } from 'vue'
+import { onScopeDispose, ref } from 'vue'
 import { AGENT_CONFIG_DEFAULT, AGENT_CONFIG_KEY, normalizeAgentConfig, type AgentConfig } from '../agent/config'
+
+const configSubscribers = new Set<(next: AgentConfig) => void>()
+let watchingAgentConfig = false
+
+function ensureAgentConfigWatch(): void {
+  if (watchingAgentConfig || typeof chrome === 'undefined' || !chrome.storage?.onChanged) return
+  watchingAgentConfig = true
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !(AGENT_CONFIG_KEY in changes)) return
+    const next = normalizeAgentConfig(changes[AGENT_CONFIG_KEY]?.newValue)
+    for (const notify of configSubscribers) notify(next)
+  })
+}
 
 /** 设置页的 Agent 配置读写。存本机 chrome.storage.local；没有扩展存储时（测试）只留在内存。 */
 export function useAgentConfig() {
@@ -14,12 +27,13 @@ export function useAgentConfig() {
       config.value = null
       ready.value = true
     })
-    chrome.storage.onChanged.addListener((changes, area) => {
-      if (area !== 'local' || !(AGENT_CONFIG_KEY in changes)) return
-      const next = normalizeAgentConfig(changes[AGENT_CONFIG_KEY]?.newValue)
+    ensureAgentConfigWatch()
+    const onStored = (next: AgentConfig): void => {
       // 思考开关单独写入。不要把地址、密钥的未保存修改盖掉。
       config.value = config.value ? { ...config.value, thinking: next.thinking } : next
-    })
+    }
+    configSubscribers.add(onStored)
+    onScopeDispose(() => configSubscribers.delete(onStored))
   } else {
     config.value = { ...AGENT_CONFIG_DEFAULT }
     ready.value = true

@@ -26,7 +26,7 @@ const sessionName = ref('')
 const sessionUserId = ref('')
 const sessionMessage = ref('')
 const sessionLoading = ref(false)
-const queryUserId = computed(() => sessionUserId.value || workspace.connection.value.operatorId)
+const queryUserId = computed(() => props.showSession ? sessionUserId.value : workspace.connection.value.operatorId)
 const epoch = ref(0)
 const selected = ref<Record<string, SelectedPatentFile>>({})
 const showSelected = ref(false)
@@ -40,10 +40,8 @@ const acceptedSources = ref<Record<string, boolean>>({})
 let sessionGeneration = 0
 
 const canSearch = computed(() => {
-  if (!props.showSession) return workspace.connection.value.sessionStatus === 'authenticated'
-  if (sessionStatus.value === 'authenticated') return true
-  if (sessionStatus.value === 'unknown' || sessionLoading.value) return workspace.connection.value.sessionStatus === 'authenticated'
-  return false
+  if (!props.showSession) return workspace.connection.value.sessionStatus === 'authenticated' && Boolean(workspace.connection.value.operatorId)
+  return sessionStatus.value === 'authenticated' && Boolean(sessionUserId.value)
 })
 const sessionLabel = computed(() => ({
   unknown: '尚未检测登录状态', checking: '检测中…', authenticated: '已登录',

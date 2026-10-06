@@ -75,4 +75,11 @@ describe('message validation', () => {
       code: 'UNKNOWN_CODE', message: 'bad'
     } } })).toBe(false)
   })
+
+  it('accepts a named new chat and a rename, and rejects a blank title', () => {
+    expect(isMessage({ type: 'AGENT_CHAT', payload: { action: 'create', title: '周报核对' } })).toBe(true)
+    expect(isMessage({ type: 'AGENT_CHAT', payload: { action: 'rename', id: 'session-1', title: '客户甲' } })).toBe(true)
+    expect(isMessage({ type: 'AGENT_CHAT', payload: { action: 'create', title: '   ' } })).toBe(false)
+    expect(isMessage({ type: 'AGENT_CHAT', payload: { action: 'rename', id: 'short', title: '客户甲' } })).toBe(false)
+  })
 })

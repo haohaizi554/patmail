@@ -1,4 +1,23 @@
 import { isLiveWriteCall } from '../automation/live-readonly-policy'
+
+const readmeFiles = import.meta.glob('../../../API/README.md', {
+  query: '?raw',
+  import: 'default',
+  eager: true
+}) as Record<string, string>
+
+let catalogCalls: Set<string> | null = null
+
+/** 索引表里出现过的 Call。没写进文档的名字不能带着登录态发出。 */
+export function documentedCallNames(): ReadonlySet<string> {
+  if (catalogCalls) return catalogCalls
+  const names = new Set<string>()
+  for (const text of Object.values(readmeFiles)) {
+    for (const match of text.matchAll(/`([A-Za-z][A-Za-z0-9_]{1,80})`/g)) names.add(match[1])
+  }
+  catalogCalls = names
+  return names
+}
 import { caseInfoParams } from '../case-contact/query'
 import { caseBusFlowParams } from '../customer/pct-flow-status'
 import { caseDemandParams } from '../mail/easy/case-demand'
@@ -11,6 +30,7 @@ const WRITE = /save|delete|submit|update|insert|remove|create|destroy|drop|mailc
 export function documentedCallAllowed(handler: string, call: string): { ok: true } | { ok: false; reason: string } {
   if (!HANDLER.test(handler)) return { ok: false, reason: '入口名无效，没有发出。' }
   if (!CALL.test(call)) return { ok: false, reason: 'Call 名无效，没有发出。' }
+  if (!documentedCallNames().has(call)) return { ok: false, reason: '文档索引里没有这个 Call，没有发出。' }
   if (isLiveWriteCall(call) || WRITE.test(call)) return { ok: false, reason: '这个 Call 会改数据，没有发出。创建和提交仍用现成工具。' }
   return { ok: true }
 }

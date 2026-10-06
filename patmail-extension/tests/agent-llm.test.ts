@@ -14,9 +14,11 @@ describe('agent config', () => {
     expect(isAgentConfig({ baseUrl: 'ftp://x', apiKey: '', model: '', maxTokens: -1 })).toBe(false)
     expect(isAgentConfig(null)).toBe(false)
     expect(normalizeAgentConfig({ ...config, baseUrl: ' http://a/v1/ ', model: ' m ' }).baseUrl).toBe('http://a/v1')
-    expect(AGENT_CONFIG_DEFAULT.maxTokens).toBeGreaterThan(1024)
-    expect(normalizeAgentConfig({ ...AGENT_CONFIG_DEFAULT, maxTokens: 1024 }).maxTokens).toBe(AGENT_CONFIG_DEFAULT.maxTokens)
+    expect(AGENT_CONFIG_DEFAULT.maxTokens).toBe(8192)
+    expect(normalizeAgentConfig({ ...AGENT_CONFIG_DEFAULT, maxTokens: 1024 }).maxTokens).toBe(8192)
+    expect(normalizeAgentConfig({ ...AGENT_CONFIG_DEFAULT, maxTokens: 1_048_576 }).maxTokens).toBe(8192)
     expect(normalizeAgentConfig({ ...AGENT_CONFIG_DEFAULT, maxTokens: 64 }).maxTokens).toBe(64)
+    expect(normalizeAgentConfig({ ...AGENT_CONFIG_DEFAULT, maxTokens: 16384 }).maxTokens).toBe(16384)
   })
 })
 

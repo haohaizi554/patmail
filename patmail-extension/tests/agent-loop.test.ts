@@ -197,6 +197,52 @@ describe('agent loop', () => {
     expect(off.reply).toBe('结论')
   })
 
+  it('keeps every thinking pass and the step record after the turn ends', async () => {
+    let phase = 0
+    const complete: Complete = async () => {
+      phase += 1
+      if (phase === 1) {
+        return {
+          usage: null,
+          raw: {},
+          choices: [{
+            content: '',
+            reasoning: '先查这件案子。',
+            finishReason: 'tool_calls',
+            toolCalls: [{ id: 'c1', type: 'function', function: { name: 'search_cases', arguments: '{"caseVolume":"PA25110088CND"}' } }]
+          }]
+        }
+      }
+      if (phase === 2) {
+        return {
+          usage: null,
+          raw: {},
+          choices: [{
+            content: '',
+            reasoning: '再看有哪些本领。',
+            finishReason: 'tool_calls',
+            toolCalls: [{ id: 'c2', type: 'function', function: { name: 'list_skills', arguments: '{}' } }]
+          }]
+        }
+      }
+      return {
+        usage: null,
+        raw: {},
+        choices: [{ content: '接口返回了空表。', reasoning: '把这次响应告诉用户。', finishReason: 'stop', toolCalls: [] }]
+      }
+    }
+    const turn = await runAgentTurn({ ...config, thinking: true }, EMPTY_MEMORY, '你给我调用下', idleContext, complete)
+    const split = splitAgentReply(turn.reply)
+    expect(split.answer).toBe('接口返回了空表。')
+    const order = ['先查这件案子。', '- 正在查案件', '再看有哪些本领。', '- 正在看本领', '把这次响应告诉用户。']
+    let cursor = -1
+    for (const piece of order) {
+      const found = split.thought.indexOf(piece)
+      expect(found).toBeGreaterThan(cursor)
+      cursor = found
+    }
+  })
+
   it('asks once more for the conclusion when thinking is cut off by the length limit', async () => {
     const thinking: boolean[] = []
     const complete: Complete = async (active, options) => {
@@ -467,6 +513,14 @@ describe('agent loop', () => {
     }
     await expect(runAgentTurn(config, EMPTY_MEMORY, '你好', idleContext, denied)).rejects.toBeInstanceOf(LlmError)
     expect(authed).toBe(1)
+
+    let stuck = 0
+    const noShrink: Complete = async () => {
+      stuck += 1
+      throw new LlmError('HTTP_ERROR', 'maximum context length exceeded', 400)
+    }
+    await expect(runAgentTurn(config, EMPTY_MEMORY, '你好', idleContext, noShrink)).rejects.toBeInstanceOf(LlmError)
+    expect(stuck).toBe(1)
   })
 
   it('retries a gateway 502 twice, then surfaces the error', async () => {
@@ -503,6 +557,20 @@ describe('agent loop', () => {
       saved.push(state)
     })).rejects.toThrow('已停下。')
     expect(saved.at(-1)?.facts).toEqual([])
+  })
+
+  it('keeps a grounded fact when the next model call fails', async () => {
+    const saved: Array<ReturnType<typeof rememberFact>> = []
+    let phase = 0
+    const complete: Complete = async () => {
+      phase += 1
+      if (phase === 1) return outcome('', 'remember')
+      throw new LlmError('HTTP_ERROR', '模型服务返回 HTTP 502。', 502)
+    }
+    await expect(runAgentTurn(config, EMPTY_MEMORY, '记住我先看法律期限', idleContext, complete, async state => {
+      saved.push(state)
+    })).rejects.toThrow('502')
+    expect(saved.at(-1)?.facts.map(fact => fact.text)).toEqual(['先看法律期限'])
   })
 
   it('stops excerpting after three misses and still clips the tool text', async () => {
@@ -613,7 +681,11 @@ describe('tool waves and schemas', () => {
     expect(plain).toContain('call_easy')
     expect(plain).toContain('ask_user')
     expect(plain).toContain('plan_work')
+    expect(plain).toContain('list_skills')
+    expect(plain).toContain('describe_workflows')
     expect(plain).not.toContain('list_reviewers')
+    expect(plain).not.toContain('preview_workflow')
+    expect(agentToolSchemas(['帮我建一个工作流']).map(tool => tool.function.name)).toContain('preview_workflow')
     expect(plain).not.toContain('diagnose_mail')
     expect(agentToolSchemas(['审核人有哪些']).map(tool => tool.function.name)).toContain('list_reviewers')
   })
@@ -785,7 +857,9 @@ describe('tool waves and schemas', () => {
     }
     const turn = await runAgentTurn(config, EMPTY_MEMORY, '这几件一起办', idleContext, complete, undefined, label => { labels.push(label) })
     expect(phase).toBe(8)
-    expect(turn.reply).toBe('六步都办好了。')
+    expect(splitAgentReply(turn.reply).answer).toBe('六步都办好了。')
+    expect(splitAgentReply(turn.reply).thought).toContain('已拆成计划')
+    expect(splitAgentReply(turn.reply).thought).toContain('正在查客户')
     expect(labels).toContain('已拆成计划')
   })
 
@@ -819,6 +893,8 @@ describe('tool waves and schemas', () => {
     }
     const turn = await runAgentTurn(config, EMPTY_MEMORY, '先看客户再看本领', idleContext, complete)
     expect(phase).toBe(5)
-    expect(turn.reply).toBe('两步都办好了。')
+    expect(splitAgentReply(turn.reply).answer).toBe('两步都办好了。')
+    expect(splitAgentReply(turn.reply).thought).toContain('正在查客户')
+    expect(splitAgentReply(turn.reply).thought).toContain('正在看本领')
   })
 })

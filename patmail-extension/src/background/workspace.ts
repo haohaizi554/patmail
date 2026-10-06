@@ -413,6 +413,14 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
     if (forwardBlock) {
       return workspaceResult({ ok: false, message: forwardBlock, connection: host.connection.context })
     }
+    let outbound = action.message
+    if (outbound.type === MessageType.SubmitLimitMail) {
+      const operatorId = host.connection.context.operatorId
+      if (!isConfirmedOperator(operatorId)) {
+        return workspaceResult({ ok: false, message: '当前登录人还没确认，没有提交。', connection: host.connection.context })
+      }
+      outbound = { ...outbound, payload: { ...outbound.payload, userId: operatorId } }
+    }
     if (action.message.type === MessageType.ExportCaseContacts) {
       const frozen = freezeAccount(host.connection.context)
       const account = frozen ? await readAccount(host, frozen) : null
@@ -422,7 +430,7 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
     const frozen = freezeAccount(host.connection.context)
     const version = host.connection.context.connectionVersion
     try {
-      const response = await host.sendToTab(target.tabId, stripSearchContinuation(action.message))
+      const response = await host.sendToTab(target.tabId, stripSearchContinuation(outbound))
       if (frozen && !sameAccountContext(host.connection.context, frozen)) {
         return workspaceResult({ ok: false, message: '账号已经变化，这次查询结果已丢弃。', connection: host.connection.context })
       }

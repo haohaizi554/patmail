@@ -318,7 +318,8 @@ async function importRules(): Promise<void> {
 
 <template>
   <PageHead title="发文映射" desc="文件描述对上发文类型，并记下收件人、签名、标题和正文。" :art="bg('规则配置好，发文更轻松.png')" art-large />
-  <section v-if="!ready || !draft" class="card"><p class="empty">尚未确认当前登录的人，不能读取发文映射。</p></section>
+  <section v-if="!ready" class="card"><p class="empty">尚未确认当前登录的人，不能读取发文映射。</p></section>
+  <section v-else-if="!draft" class="card"><p class="empty">发文规则还没有读到。</p></section>
   <div v-else class="rules-page">
     <p v-if="message" class="hint">{{ message }}</p>
     <DescriptionMailTypeEditor :mappings="draft.mappings" :mail-types="mailTypes" :notice="mailTypeNotice" :importing="importingMappings" @save="saveMapping" @remove="removeMapping" @reload="loadMailTypes(true)" @import="importMappingFile" />

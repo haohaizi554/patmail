@@ -96,11 +96,12 @@ function fromExtensionPage(sender: chrome.runtime.MessageSender): boolean {
 const WRITES = new Set<string>([
   MessageType.SaveTask, MessageType.ClaimExecution, MessageType.MarkExecutionPrepared,
   MessageType.MarkExecutionSent, MessageType.MarkExecutionResponse, MessageType.MarkExecutionVerified,
-  MessageType.CompleteExecution, MessageType.ReleaseExecution, MessageType.MarkExecutionUnknown
+  MessageType.CompleteExecution, MessageType.ReleaseExecution, MessageType.MarkExecutionUnknown,
+  MessageType.ArchiveTask
 ])
 const READS = new Set<string>([
   MessageType.ListTasks, MessageType.GetTask, MessageType.ListAcceptance,
-  MessageType.ArchiveTask, MessageType.ValidateTaskMetadata, MessageType.RecoverExecution
+  MessageType.ValidateTaskMetadata, MessageType.RecoverExecution
 ])
 
 /** 页面和后台用长连接。查询过程中还会调用 EASY 页面，不能占用一次性消息口。 */
@@ -132,13 +133,14 @@ async function dispatchExtensionMessage(message: unknown, sender: chrome.runtime
     }
   }
   let scoped: AppMessage = message
-  if (fromExtensionPage(sender) && (WRITES.has(message.type) || READS.has(message.type))) {
-    const gate = await recheckBoundSession(host)
-    if (WRITES.has(message.type) && gate !== 'same') {
-      return { type: MessageType.Error, payload: { message: '会话已变化，请重新读取后再保存。' } }
+  const accountScoped = WRITES.has(message.type) || READS.has(message.type)
+  if (accountScoped || fromExtensionPage(sender)) {
+    if (accountScoped) {
+      const gate = await recheckBoundSession(host)
+      if (WRITES.has(message.type) && gate !== 'same') {
+        return { type: MessageType.Error, payload: { message: '会话已变化，请重新读取后再保存。' } }
+      }
     }
-  }
-  if (fromExtensionPage(sender)) {
     const next = scopeExtensionPageMessage(message, connection.context)
     if ('error' in next) return { type: MessageType.Error, payload: { message: next.error } }
     scoped = next

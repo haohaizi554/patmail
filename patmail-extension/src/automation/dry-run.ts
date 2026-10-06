@@ -3,7 +3,13 @@ import { buildStagePlans } from './stage-plan'
 import { buildTask, type TaskBuildInput } from './task-builder'
 import type { AutomationLog, AutomationStagePlan, AutomationTask } from './types'
 
-const WRITE_CALLS = ['MailCustomer', 'SaveMailInfo', 'SaveMailRalteCaseFile', 'FlowSubmit', 'EndEmailFlowd']
+const WRITE_CALLS: Record<string, string> = {
+  MAIL_CREATE: 'MailCustomer',
+  MAIL_SAVE: 'SaveMailInfo',
+  FILE_BIND: 'SaveMailRalteCaseFile',
+  WORKFLOW_SUBMIT: 'FlowSubmit',
+  REVIEW_EXECUTE: 'EndEmailFlowd'
+}
 
 export interface DryRunResult {
   task: AutomationTask
@@ -26,6 +32,6 @@ export function runDryRun(input: TaskBuildInput, transport: EasyTransport | null
     status: task.status, durationMs: Date.now() - started, errorCode: task.status === 'DRY_RUN_COMPLETED' ? '' : 'BLOCKED',
     timestamp: task.updatedAt
   }]
-  const writeCalls = WRITE_CALLS.filter(call => logs.some(item => item.event === call))
+  const writeCalls = [...new Set(plans.flatMap(item => item.sideEffect === 'write' && item.canExecute ? [WRITE_CALLS[item.stage] ?? ''] : []).filter(Boolean))]
   return { task, logs, writeCalls, plans }
 }

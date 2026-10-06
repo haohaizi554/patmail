@@ -29,7 +29,7 @@ export function injectPanel(bridge: MessageBridge): void {
   host.popover = 'manual'
   // 宿主脱离页面布局。important 防止站点的通用 CSS 覆盖这个边界节点。
   host.style.cssText = 'all: initial !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 0 !important; height: 0 !important; display: block !important; z-index: 2147483647 !important; pointer-events: none !important;'
-  const shadow = host.attachShadow({ mode: 'open' })
+  const shadow = host.attachShadow({ mode: 'closed' })
   const style = document.createElement('style')
   style.textContent = `${cssText}\n${themeSelectCss}`
   const mountPoint = document.createElement('div')

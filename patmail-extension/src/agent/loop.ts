@@ -1,7 +1,7 @@
 import { activityDetail } from './trace'
 import type { AgentConfig } from './config'
 import { chatCompletion, LlmError, llmFailureKind, type AssistantToolCall, type ChatChoice, type ChatMessage, type ChatOutcome } from './llm'
-import { applySummary, contextChars, foldDigest, needsCompression, projectOldToolText, splitForCompression, trimToolResults, visibleHistory, type AgentMemoryState, type MemoryTurn } from './memory'
+import { applySummary, contextChars, foldDigest, needsCompression, OVERFLOW_RETRY_CHARS, projectOldToolText, splitForCompression, trimToolResults, visibleHistory, type AgentMemoryState, type MemoryTurn } from './memory'
 import { planFromCalls, remainingWork, type WorkStep } from './plan'
 import { resolveSlash } from './slash'
 import { agentToolSchemas, executeAgentTool, type ToolContext } from './tools'
@@ -174,6 +174,72 @@ export async function compactAgentMemory(_config: AgentConfig, memory: AgentMemo
   return { memory: { ...next, digestMisses: 0 }, reply: '更早的对话已收成原文摘录，最近一大段原话还在。' }
 }
 
+const SAVED_STEPS = new Set<string>([...Object.values(TOOL_ACTIVITY), '正在办理', '已拆成计划', '连着失败已停下', '重复查询已停下'])
+
+interface JournalEntry { kind: 'thought' | 'step'; text: string; detail: string }
+
+function appendThought(items: JournalEntry[], text: string): void {
+  const cleaned = text.trim()
+  if (!cleaned) return
+  const last = items.at(-1)
+  if (last?.kind === 'thought') {
+    if (cleaned === last.text || cleaned.startsWith(last.text)) {
+      last.text = cleaned
+      return
+    }
+    if (last.text.startsWith(cleaned)) return
+  }
+  items.push({ kind: 'thought', text: cleaned, detail: '' })
+}
+
+function appendStep(items: JournalEntry[], label: string, detail?: string): void {
+  if (!SAVED_STEPS.has(label)) return
+  if (detail) {
+    const open = [...items].reverse().find(item => item.kind === 'step' && item.text === label && !item.detail)
+    if (open) {
+      open.detail = detail
+      return
+    }
+    items.push({ kind: 'step', text: label, detail })
+    return
+  }
+  const last = items.at(-1)
+  if (last?.kind === 'step' && last.text === label && !last.detail) return
+  items.push({ kind: 'step', text: label, detail: '' })
+}
+
+function renderJournal(items: readonly JournalEntry[]): string {
+  const blocks: string[] = []
+  let steps: string[] = []
+  const flush = (): void => {
+    if (steps.length === 0) return
+    blocks.push(steps.join('\n'))
+    steps = []
+  }
+  for (const item of items) {
+    if (item.kind === 'step') {
+      steps.push(item.detail ? `- ${item.text}：${item.detail}` : `- ${item.text}`)
+      continue
+    }
+    flush()
+    if (item.text.trim()) blocks.push(item.text.trim())
+  }
+  flush()
+  return blocks.join('\n\n')
+}
+
+/** 思考和步骤按发生顺序收成一段。展开后先看到先发生的那一件。 */
+export function packJournal(reply: string, journal: readonly JournalEntry[]): string {
+  const split = splitAgentReply(reply)
+  const answer = (split.answer || reply).trim()
+  const items = journal.map(item => ({ ...item }))
+  if (split.thought.trim() && split.thought.trim() !== answer) appendThought(items, split.thought)
+  const body = renderJournal(items)
+  if (!body) return answer
+  const clipped = body.length > 12_000 ? body.slice(body.length - 12_000) : body
+  return `${THOUGHT_MARK}thought${THOUGHT_MARK}${clipped}${THOUGHT_MARK}${answer}`
+}
+
 /** 思考模式打开时，把思考链放在正文前面。正文还没写出来时不把思考当成回复。 */
 function replyText(choice: { content: string; reasoning?: string }, thinking: boolean): string {
   const answer = choice.content.trim()
@@ -334,10 +400,16 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
   const compacted = Boolean(state.summary) && state.summary !== summaryBefore
   const persistTranscript = async (): Promise<void> => { await onMemory?.({ ...state, facts: factsAtStart }) }
   let plan: WorkStep[] = []
+  const journal: JournalEntry[] = []
+  const watch = (label: string, thought?: string, detail?: string): void => {
+    onActivity?.(label, thought, detail)
+    appendStep(journal, label, detail)
+  }
   const finish = async (reply: string, steps: number): Promise<AgentTurnResult> => {
-    state = { ...state, turns: [...state.turns.filter(turn => !turn.hidden), { role: 'assistant', content: reply }] }
+    const packed = packJournal(reply, journal)
+    state = { ...state, turns: [...state.turns.filter(turn => !turn.hidden), { role: 'assistant', content: packed }] }
     await onMemory?.(state)
-    return { reply, steps, memory: state, history: visibleHistory(state) }
+    return { reply: packed, steps, memory: state, history: visibleHistory(state) }
   }
   const ask = async (withTools: boolean, override?: AgentConfig): Promise<ChatOutcome> => {
     const active = override ?? config
@@ -381,6 +453,7 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
     }
     let upstreamTries = 0
     let transientTries = 0
+    let overflowTries = 0
     for (;;) {
       try {
         return await send(state)
@@ -405,13 +478,25 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
           await wait(RATE_LIMIT_BACKOFF_MS)
           continue
         }
-        if (kind === 'overflow') {
+        if (kind === 'overflow' && overflowTries < 1) {
+          overflowTries += 1
+          const next = trimToolResults(state, OVERFLOW_RETRY_CHARS)
+          if (contextChars(next) >= contextChars(state)) throw error
           onActivity?.('正在缩短查询结果')
-          state = trimToolResults(state)
-          return await send(state)
+          state = next
+          continue
         }
         throw error
       }
+    }
+  }
+
+  const askOrKeep = async (withTools: boolean, override?: AgentConfig): Promise<ChatOutcome> => {
+    try {
+      return await ask(withTools, override)
+    } catch (error) {
+      if (!(error instanceof LlmError) || error.message !== '已停下。') await onMemory?.(state)
+      throw error
     }
   }
 
@@ -438,7 +523,7 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
         : { ...choice, content: cutShort, reasoning: '', finishReason: 'stop' }
     )
     try {
-      const more = await ask(false, { ...config, thinking: false, maxTokens: Math.max(config.maxTokens, 4096) })
+      const more = await askOrKeep(false, { ...config, thinking: false, maxTokens: Math.max(config.maxTokens, 4096) })
       const next = more.choices[0]
       state = bookmark
       if (!next || next.toolCalls.length > 0 || !next.content.trim() || isSelfTalk(next.content) || thinkLeftOpen(next.content)) return fallback()
@@ -460,12 +545,14 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
   while (steps < stepLimit(plan.length) && !halt) {
     steps += 1
     onActivity?.(config.thinking ? '正在思考' : '正在组织回答')
-    const outcome = await ask(true)
+    const outcome = await askOrKeep(true)
     const choice = outcome.choices[0]
     if (!choice) { halt = true; break }
     if (choice.toolCalls.length > 0) {
+      if (config.thinking) appendThought(journal, choice.reasoning ?? '')
       state = { ...state, turns: [...state.turns, { role: 'assistant', content: choice.content, toolCalls: choice.toolCalls }] }
-      const batch = await runToolBatch(state, choice.toolCalls, traces, unknownStreak, ctx, content, onActivity, compacted)
+      const expected = plan[0]
+      const batch = await runToolBatch(state, choice.toolCalls, traces, unknownStreak, ctx, content, watch, compacted)
       state = batch.state
       traces.splice(0, traces.length, ...batch.traces)
       unknownStreak = batch.unknownStreak
@@ -473,7 +560,12 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
       const written = planFromCalls(choice.toolCalls, traces, toolNames)
       if (written) {
         plan = written
-        onActivity?.('已拆成计划', undefined, written.map((step, index) => `${index + 1}.${step.title}`).join(' '))
+        watch('已拆成计划', undefined, written.map((step, index) => `${index + 1}.${step.title}`).join(' '))
+      } else if (expected && !choice.toolCalls.some(call => call.function.name === expected.tool)) {
+        state = {
+          ...state,
+          turns: [...state.turns, { role: 'user', content: `计划的下一步是「${expected.title}」，要调用 ${expected.tool}。刚才做的不是这一步。`, hidden: true }]
+        }
       }
       await persistTranscript()
       if (halt) break
@@ -509,7 +601,7 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
   const wrap = unfinished.length ? `${WRAP_NOTE}\n还没做完：${unfinished.join('、')}。` : WRAP_NOTE
   state = { ...state, turns: [...state.turns, { role: 'user', content: wrap, hidden: true }] }
   try {
-    const outcome = await ask(false)
+    const outcome = await askOrKeep(false)
     const choice = outcome.choices[0]
     const settled = choice && choice.toolCalls.length === 0 ? await resumeCut(choice) : null
     const reply = settled ? replyText(settled, config.thinking) : ''
@@ -517,5 +609,6 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
   } catch (error) {
     if (error instanceof LlmError && error.message === '已停下。') throw error
   }
-  return finish(STEP_LIMIT_REPLY, steps)
+  const stuck = unfinished.length ? `${STEP_LIMIT_REPLY}\n还没做完：${unfinished.join('、')}。` : STEP_LIMIT_REPLY
+  return finish(stuck, steps)
 }

@@ -486,7 +486,8 @@ const SCHEMAS: ToolSchema[] = [
 /** 每轮都带上的工具。其余在用户这句话用得上时才带 schema。 */
 const HOT_TOOLS = new Set([
   'connection_status', 'search_cases', 'search_deadlines', 'list_customers',
-  'lookup_api', 'call_easy', 'ask_user', 'plan_work', 'remember', 'recall', 'create_task', 'draft_mail', 'submit_easy'
+  'lookup_api', 'call_easy', 'ask_user', 'plan_work', 'remember', 'recall', 'create_task', 'draft_mail', 'submit_easy',
+  'list_skills', 'describe_workflows'
 ])
 
 const COLD_TOOLS: ReadonlyArray<readonly [string, RegExp]> = [
@@ -514,6 +515,9 @@ export function agentToolSchemas(texts?: readonly string[]): ToolSchema[] {
   for (const name of requiredTools(blob)) wanted.add(name)
   for (const [name, pattern] of COLD_TOOLS) {
     if (pattern.test(blob)) wanted.add(name)
+  }
+  if (/工作流/.test(blob) || wanted.has('create_workflow')) {
+    for (const name of ['list_skills', 'describe_workflows', 'preview_workflow', 'create_workflow', 'set_workflow_field']) wanted.add(name)
   }
   for (const schema of SCHEMAS) {
     if (blob.includes(schema.function.name)) wanted.add(schema.function.name)

@@ -4,6 +4,7 @@ import type { ChatOutcome } from '../src/agent/llm'
 import { compactAgentMemory, runAgentTurn, type Complete } from '../src/agent/loop'
 import { EMPTY_MEMORY } from '../src/agent/memory'
 import { filterCommands, resolveSlash, SLASH_COMMANDS, slashToken } from '../src/agent/slash'
+import { SKILLS } from '../src/workflow/skills'
 import { emptyPageTools, type ToolContext } from '../src/agent/tools'
 
 const config = { ...AGENT_CONFIG_DEFAULT, maxTokens: 64 }
@@ -31,8 +32,10 @@ describe('slash commands', () => {
     expect(slashToken('/查案件 P001')).toBeNull()
     expect(filterCommands('查').map(command => command.name)).toEqual(['查案件', '查期限'])
     expect(filterCommands('help').map(command => command.name)).toEqual(['帮助'])
-    expect(filterCommands('读').map(command => command.name)).toEqual(['读表格'])
-    expect(filterCommands('表格').map(command => command.name)).toEqual(['读表格'])
+    expect(filterCommands('读')).toEqual([])
+    expect(filterCommands('表格')).toEqual([])
+    const shown = filterCommands('').map(command => command.name)
+    for (const skill of SKILLS) expect(shown).not.toContain(skill.title)
     for (const command of SLASH_COMMANDS) expect(command.description.length).toBeLessThanOrEqual(60)
   })
 
@@ -55,16 +58,9 @@ describe('slash commands', () => {
       expect(skill.guidance).toContain('search_cases')
       expect(skill.guidance).toContain('P001')
     }
-    const letter = resolveSlash('/对上要发的信')
-    if (letter.kind === 'skill') expect(letter.guidance).toContain('draft_mail')
-    const review = resolveSlash('/谁来看一眼')
-    if (review.kind === 'skill') expect(review.guidance).toContain('list_reviewers')
-    const again = resolveSlash('/再查一遍并记下 P001')
-    if (again.kind === 'skill') expect(again.guidance).toContain('search_cases')
-    const sheet = resolveSlash('/读表格')
-    if (sheet.kind === 'skill') expect(sheet.guidance).not.toContain('search_cases')
-    const check = resolveSlash('/核对事项 提醒申请PCT')
-    if (check.kind === 'skill') expect(check.guidance).toContain('search_deadlines')
+    expect(resolveSlash('/对上要发的信')).toMatchObject({ kind: 'unknown' })
+    expect(resolveSlash('/读表格')).toMatchObject({ kind: 'unknown' })
+    expect(resolveSlash('/谁来看一眼')).toMatchObject({ kind: 'unknown' })
   })
 })
 

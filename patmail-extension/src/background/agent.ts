@@ -3,7 +3,7 @@ import type { AgentQuestion } from '../agent/ask'
 import { loadAgentConfig, type AgentConfig } from '../agent/config'
 import { LlmError, chatCompletion } from '../agent/llm'
 import { compactAgentMemory, runAgentTurn } from '../agent/loop'
-import { loadMemory, saveMemory, visibleHistory, type AgentMemoryState } from '../agent/memory'
+import { createAgentSession, loadMemory, openAgentSession, readAgentSessions, removeAgentSession, renameAgentSession, saveMemory, visibleHistory, type AgentMemoryState, type AgentSessionInfo } from '../agent/memory'
 import { helpText, resolveSlash } from '../agent/slash'
 import { formatDraft, type DeadlineRow, type ToolContext } from '../agent/tools'
 import { limitMailItems, summarizeLimitMailSubmit } from '../customer/limit-mail-submit'
@@ -35,6 +35,8 @@ export interface AgentTurnView {
   model: string
   steps: number
   history: Array<{ role: 'user' | 'assistant'; content: string }>
+  sessions: AgentSessionInfo[]
+  activeId: string
 }
 
 const ACTIVITY_CHANNEL = 'patmail-agent-activity'
@@ -101,8 +103,16 @@ function publishActivity(label: string, thought?: string, detail?: string): void
   sendActivity(thought ? '正在思考' : label, thought, detail)
 }
 
-function viewOf(reply: string, model: string, steps: number, memory: AgentMemoryState): AgentTurnView {
-  return { reply, model, steps, history: visibleHistory(memory) }
+async function viewOf(area: LocalArea, reply: string, model: string, steps: number, memory?: AgentMemoryState): Promise<AgentTurnView> {
+  const snapshot = await readAgentSessions(area)
+  return {
+    reply,
+    model,
+    steps,
+    history: visibleHistory(memory ?? snapshot.memory),
+    sessions: snapshot.sessions,
+    activeId: snapshot.activeId
+  }
 }
 
 function factsReply(memory: AgentMemoryState): string {
@@ -114,7 +124,7 @@ async function clearConversation(area: LocalArea, model: string): Promise<ApiRes
   const memory = await loadMemory(area)
   const cleared: AgentMemoryState = { ...memory, summary: '', turns: [] }
   await saveMemory(area, cleared)
-  return { ok: true, data: viewOf('这段对话已清空，长期记忆还在。', model, 0, cleared) }
+  return { ok: true, data: await viewOf(area, '这段对话已清空。其它对话和长期记忆还在。', model, 0) }
 }
 
 async function compactConversation(area: LocalArea, config: AgentConfig): Promise<ApiResult<AgentTurnView>> {
@@ -122,7 +132,7 @@ async function compactConversation(area: LocalArea, config: AgentConfig): Promis
     const current = await loadMemory(area)
     const compacted = await compactAgentMemory(config, current)
     await saveMemory(area, compacted.memory)
-    return { ok: true, data: viewOf(compacted.reply, config.model, 0, compacted.memory) }
+    return { ok: true, data: await viewOf(area, compacted.reply, config.model, 0) }
   } catch (error) {
     if (error instanceof LlmError) return apiError(error.code, error.message, error.status)
     return apiError('NETWORK_ERROR', 'AI 助手调用没有完成。')
@@ -536,29 +546,44 @@ async function createTaskFromSearch(
 }
 
 /** 工作台的助手请求。probe 只测连通；turn 走工具循环并写入记忆。 */
-export async function handleAgentChat(payload: { action?: unknown; message?: unknown }, host: WorkspaceHost): Promise<ApiResult<AgentTurnView>> {
+export async function handleAgentChat(payload: { action?: unknown; message?: unknown; id?: unknown; title?: unknown }, host: WorkspaceHost): Promise<ApiResult<AgentTurnView>> {
   const area = host.area as LocalArea
   const config = await loadAgentConfig(area)
   const action = payload.action
+  if (action === 'create') {
+    const title = typeof payload.title === 'string' ? payload.title : ''
+    const created = await createAgentSession(area, title)
+    return { ok: true, data: await viewOf(area, created.message, config.model, 0, created.memory) }
+  }
+  if (action === 'rename') {
+    const id = typeof payload.id === 'string' ? payload.id : ''
+    const title = typeof payload.title === 'string' ? payload.title : ''
+    const renamed = await renameAgentSession(area, id, title)
+    return { ok: true, data: await viewOf(area, renamed.message, config.model, 0, renamed.memory) }
+  }
+  if (action === 'open' || action === 'remove') {
+    const id = typeof payload.id === 'string' ? payload.id : ''
+    const changed = action === 'open' ? await openAgentSession(area, id) : await removeAgentSession(area, id)
+    return { ok: true, data: await viewOf(area, changed.message, config.model, 0, changed.memory) }
+  }
   if (action === 'history') {
-    const memory = await loadMemory(area)
-    return { ok: true, data: viewOf('', config.model, 0, memory) }
+    return { ok: true, data: await viewOf(area, '', config.model, 0) }
   }
   if (action === 'reset') return clearConversation(area, config.model)
   if (action === 'facts') {
     const memory = await loadMemory(area)
-    return { ok: true, data: viewOf(factsReply(memory), config.model, 0, memory) }
+    return { ok: true, data: await viewOf(area, factsReply(memory), config.model, 0, memory) }
   }
   if (action === 'compact') return compactConversation(area, config)
   if (action === 'answer') {
     const text = typeof payload.message === 'string' ? payload.message.trim() : ''
     const delivered = deliverAgentAnswer(text || '跳过')
-    return { ok: true, data: viewOf(delivered ? '' : '现在没有要答的问题。', config.model, 0, await loadMemory(area)) }
+    return { ok: true, data: await viewOf(area, delivered ? '' : '现在没有要答的问题。', config.model, 0) }
   }
   if (action === 'stop') {
     deliverAgentAnswer('已停下。')
     stopAgentTurn()
-    return { ok: true, data: viewOf('已停下。', config.model, 0, await loadMemory(area)) }
+    return { ok: true, data: await viewOf(area, '已停下。', config.model, 0) }
   }
   const message = typeof payload.message === 'string' ? payload.message.trim() : ''
   if (action === 'probe') {
@@ -572,7 +597,7 @@ export async function handleAgentChat(payload: { action?: unknown; message?: unk
       })
       const reply = outcome.choices[0]?.content?.trim() ?? ''
       if (!reply) return apiError('INVALID_RESPONSE', '模型没有返回内容。')
-      return { ok: true, data: viewOf(reply, config.model, 1, await loadMemory(area)) }
+      return { ok: true, data: await viewOf(area, reply, config.model, 1) }
     } catch (error) {
       if (error instanceof LlmError) return apiError(error.code, error.message, error.status)
       return apiError('NETWORK_ERROR', 'AI 助手调用没有完成。')
@@ -581,15 +606,15 @@ export async function handleAgentChat(payload: { action?: unknown; message?: unk
   const resolved = resolveSlash(message)
   if (resolved.kind === 'local' && resolved.local === 'clear') return clearConversation(area, config.model)
   if (resolved.kind === 'local' && resolved.local === 'help') {
-    return { ok: true, data: viewOf(helpText(), config.model, 0, await loadMemory(area)) }
+    return { ok: true, data: await viewOf(area, helpText(), config.model, 0) }
   }
   if (resolved.kind === 'local' && resolved.local === 'memory') {
     const memory = await loadMemory(area)
-    return { ok: true, data: viewOf(factsReply(memory), config.model, 0, memory) }
+    return { ok: true, data: await viewOf(area, factsReply(memory), config.model, 0, memory) }
   }
   if (resolved.kind === 'local' && resolved.local === 'compact') return compactConversation(area, config)
   if (resolved.kind === 'unknown') {
-    return { ok: true, data: viewOf(resolved.message, config.model, 0, await loadMemory(area)) }
+    return { ok: true, data: await viewOf(area, resolved.message, config.model, 0) }
   }
   const abort = new AbortController()
   turnAbort?.abort()
@@ -598,7 +623,7 @@ export async function handleAgentChat(payload: { action?: unknown; message?: unk
     const turn = await runAgentTurn(config, await loadMemory(area), message, toolContext(host), (next, options) => chatCompletion(next, { ...options, signal: abort.signal }), async state => {
       await saveMemory(area, state)
     }, publishActivity)
-    return { ok: true, data: viewOf(turn.reply, config.model, turn.steps, turn.memory) }
+    return { ok: true, data: await viewOf(area, turn.reply, config.model, turn.steps, turn.memory) }
   } catch (error) {
     if (error instanceof LlmError) return apiError(error.code, error.message, error.status)
     return apiError('NETWORK_ERROR', 'AI 助手调用没有完成。')

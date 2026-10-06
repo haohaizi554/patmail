@@ -63,11 +63,14 @@ export function clipToolResult(text: string, max = TOOL_RESULT_CHARS): string {
   return `${text.slice(0, head)}${TOOL_OMISSION}${text.slice(-tail)}`
 }
 
-export function trimToolResults(state: AgentMemoryState): AgentMemoryState {
+/** 上下文仍超长时再压一档。已经到这一档还超，就不再重试。 */
+export const OVERFLOW_RETRY_CHARS = 800
+
+export function trimToolResults(state: AgentMemoryState, max = TOOL_RESULT_CHARS): AgentMemoryState {
   let changed = false
   const turns = state.turns.map(turn => {
     if (turn.role !== 'tool') return turn
-    const content = clipToolResult(turn.content)
+    const content = clipToolResult(turn.content, max)
     if (content === turn.content) return turn
     changed = true
     return { ...turn, content }
@@ -145,16 +148,244 @@ export function contextChars(state: AgentMemoryState): number {
   return state.summary.length + state.turns.reduce((sum, turn) => sum + turnChars(turn), 0)
 }
 
-export async function loadMemory(area: MemoryStorage): Promise<AgentMemoryState> {
+/** 会话目录。每段对话一份原文，长期记忆放在目录上，各段共用。 */
+export const AGENT_SESSIONS_KEY = 'patmail.agent.sessions.v1'
+/** 新建对话时要不要先问名字。存在本机，和某一段对话无关。 */
+export const AGENT_ASK_SESSION_NAME_KEY = 'patmail.agent.askSessionName'
+const SESSION_PREFIX = 'patmail.agent.session.v1.'
+export const MAX_AGENT_SESSIONS = 30
+const SESSION_TITLE_LIMIT = 24
+
+export interface AgentSessionInfo {
+  id: string
+  title: string
+  updatedAt: string
+  active: boolean
+}
+
+export interface AgentSessionSnapshot {
+  memory: AgentMemoryState
+  sessions: AgentSessionInfo[]
+  activeId: string
+}
+
+interface SessionMeta { id: string; title: string; updatedAt: string; named?: boolean }
+interface SessionIndex { activeId: string; facts: MemoryFact[]; items: SessionMeta[] }
+
+function sessionKey(id: string): string {
+  return `${SESSION_PREFIX}${id}`
+}
+
+function newSessionId(): string {
+  const raw = globalThis.crypto?.randomUUID?.() ?? `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+  return raw.replace(/[^A-Za-z0-9-]/g, '').slice(0, 40)
+}
+
+export function sessionTitleFrom(turns: readonly MemoryTurn[]): string {
+  const first = turns.find(turn => turn.role === 'user' && !turn.hidden && turn.content.trim())
+  if (!first) return '新对话'
+  return clipSessionTitle(first.content)
+}
+
+/** 用户起的名字。空的表示还没起，列表里继续叫「新对话」。 */
+export function clipSessionTitle(value: string): string {
+  const line = value.replace(/\s+/g, ' ').trim()
+  if (!line) return '新对话'
+  return line.length > SESSION_TITLE_LIMIT ? `${line.slice(0, SESSION_TITLE_LIMIT)}…` : line
+}
+
+function sessionBody(state: AgentMemoryState): Pick<AgentMemoryState, 'summary' | 'turns' | 'digestMisses'> {
+  const normalized = normalizeMemory(state)
+  return {
+    summary: normalized.summary,
+    turns: normalized.turns,
+    ...(normalized.digestMisses ? { digestMisses: normalized.digestMisses } : {})
+  }
+}
+
+function transcriptEmpty(state: AgentMemoryState): boolean {
+  return !state.summary && state.turns.every(turn => turn.hidden || !turn.content.trim())
+}
+
+function parseMeta(value: unknown): SessionMeta | null {
+  if (typeof value !== 'object' || value === null) return null
+  const row = value as Record<string, unknown>
+  if (typeof row.id !== 'string' || !/^[A-Za-z0-9-]{8,40}$/.test(row.id)) return null
+  const title = typeof row.title === 'string' && row.title.trim() ? row.title.trim().slice(0, 40) : '新对话'
+  const updatedAt = typeof row.updatedAt === 'string' ? row.updatedAt.slice(0, 40) : ''
+  return { id: row.id, title, updatedAt, ...(row.named === true ? { named: true } : {}) }
+}
+
+function parseIndex(value: unknown): SessionIndex | null {
+  if (typeof value !== 'object' || value === null) return null
+  const record = value as Record<string, unknown>
+  if (!Array.isArray(record.items)) return null
+  const items = record.items.flatMap((item): SessionMeta[] => {
+    const meta = parseMeta(item)
+    return meta ? [meta] : []
+  }).slice(0, MAX_AGENT_SESSIONS)
+  const activeId = typeof record.activeId === 'string' ? record.activeId : ''
+  if (!items.some(item => item.id === activeId)) return null
+  return { activeId, items, facts: normalizeMemory({ facts: record.facts }).facts }
+}
+
+function cardsOf(index: SessionIndex): AgentSessionInfo[] {
+  return [...index.items]
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    .map(item => ({ ...item, active: item.id === index.activeId }))
+}
+
+async function readBody(area: MemoryStorage, id: string): Promise<AgentMemoryState> {
   try {
-    return normalizeMemory((await area.get(AGENT_MEMORY_KEY))[AGENT_MEMORY_KEY])
+    return normalizeMemory((await area.get(sessionKey(id)))[sessionKey(id)])
   } catch {
     return { ...EMPTY_MEMORY, turns: [], facts: [] }
   }
 }
 
+async function ensureIndex(area: MemoryStorage): Promise<SessionIndex> {
+  let stored: unknown
+  try {
+    stored = (await area.get(AGENT_SESSIONS_KEY))[AGENT_SESSIONS_KEY]
+  } catch {
+    stored = undefined
+  }
+  const parsed = parseIndex(stored)
+  if (parsed) return parsed
+  let legacy = { ...EMPTY_MEMORY, turns: [] as MemoryTurn[], facts: [] as MemoryFact[] }
+  try {
+    legacy = normalizeMemory((await area.get(AGENT_MEMORY_KEY))[AGENT_MEMORY_KEY])
+  } catch { /* 旧记录读不到时从空对话开始 */ }
+  const now = new Date().toISOString()
+  const id = newSessionId()
+  const index: SessionIndex = {
+    activeId: id,
+    facts: legacy.facts,
+    items: [{ id, title: sessionTitleFrom(legacy.turns), updatedAt: now }]
+  }
+  await area.set({
+    [AGENT_SESSIONS_KEY]: index,
+    [sessionKey(id)]: sessionBody(legacy),
+    [AGENT_MEMORY_KEY]: null
+  })
+  return index
+}
+
+async function snapshot(area: MemoryStorage, index: SessionIndex): Promise<AgentSessionSnapshot> {
+  const body = await readBody(area, index.activeId)
+  return {
+    memory: { ...body, facts: index.facts },
+    sessions: cardsOf(index),
+    activeId: index.activeId
+  }
+}
+
+export async function readAgentSessions(area: MemoryStorage): Promise<AgentSessionSnapshot> {
+  return snapshot(area, await ensureIndex(area))
+}
+
+export async function loadMemory(area: MemoryStorage): Promise<AgentMemoryState> {
+  return (await readAgentSessions(area)).memory
+}
+
 export async function saveMemory(area: MemoryStorage, state: AgentMemoryState): Promise<void> {
-  await area.set({ [AGENT_MEMORY_KEY]: normalizeMemory(state) })
+  const index = await ensureIndex(area)
+  const now = new Date().toISOString()
+  const next: SessionIndex = {
+    activeId: index.activeId,
+    facts: normalizeMemory({ facts: state.facts }).facts,
+    items: index.items.map(item => {
+      if (item.id !== index.activeId) return item
+      const title = item.named ? item.title : sessionTitleFrom(state.turns)
+      return { id: item.id, title, updatedAt: now, ...(item.named ? { named: true as const } : {}) }
+    })
+  }
+  await area.set({
+    [AGENT_SESSIONS_KEY]: next,
+    [sessionKey(index.activeId)]: sessionBody(state)
+  })
+}
+
+/** 当前这段还没有内容时不另开。满了就停，避免把更早的对话悄悄丢掉。有名字就固定下来，不再被第一句话替换。 */
+export async function createAgentSession(area: MemoryStorage, title = ''): Promise<AgentSessionSnapshot & { message: string }> {
+  const index = await ensureIndex(area)
+  const current = await snapshot(area, index)
+  if (transcriptEmpty(current.memory)) return { ...current, message: '这段对话还是空的，直接说就行。' }
+  if (index.items.length >= MAX_AGENT_SESSIONS) {
+    return { ...current, message: `对话已经有 ${MAX_AGENT_SESSIONS} 段，先删掉不用的再开新的。` }
+  }
+  const now = new Date().toISOString()
+  const id = newSessionId()
+  const named = title.replace(/\s+/g, ' ').trim().length > 0
+  const next: SessionIndex = {
+    activeId: id,
+    facts: index.facts,
+    items: [...index.items, { id, title: named ? clipSessionTitle(title) : '新对话', updatedAt: now, ...(named ? { named: true } : {}) }]
+  }
+  await area.set({
+    [AGENT_SESSIONS_KEY]: next,
+    [sessionKey(id)]: sessionBody(EMPTY_MEMORY)
+  })
+  return { ...(await snapshot(area, next)), message: '新对话已打开。之前的对话还在列表里，长期记忆是共用的。' }
+}
+
+export async function openAgentSession(area: MemoryStorage, id: string): Promise<AgentSessionSnapshot & { message: string }> {
+  const index = await ensureIndex(area)
+  if (!index.items.some(item => item.id === id)) {
+    const current = await snapshot(area, index)
+    return { ...current, message: '没有这段对话。' }
+  }
+  const next: SessionIndex = { ...index, activeId: id }
+  await area.set({ [AGENT_SESSIONS_KEY]: next })
+  return { ...(await snapshot(area, next)), message: '' }
+}
+
+/** 改列表里的名字。改过之后，第一句话不再覆盖它。 */
+export async function renameAgentSession(area: MemoryStorage, id: string, title: string): Promise<AgentSessionSnapshot & { message: string }> {
+  const index = await ensureIndex(area)
+  if (!index.items.some(item => item.id === id)) {
+    const current = await snapshot(area, index)
+    return { ...current, message: '没有这段对话。' }
+  }
+  const named = title.replace(/\s+/g, ' ').trim().length > 0
+  if (!named) {
+    const current = await snapshot(area, index)
+    return { ...current, message: '名字不能是空的。' }
+  }
+  const next: SessionIndex = {
+    ...index,
+    items: index.items.map(item => item.id === id ? { ...item, title: clipSessionTitle(title), named: true } : item)
+  }
+  await area.set({ [AGENT_SESSIONS_KEY]: next })
+  return { ...(await snapshot(area, next)), message: '' }
+}
+
+/** 删的是这一段的上下文。长期记忆留在目录上。最后一段删掉后留一个空对话。 */
+export async function removeAgentSession(area: MemoryStorage, id: string): Promise<AgentSessionSnapshot & { message: string }> {
+  const index = await ensureIndex(area)
+  if (!index.items.some(item => item.id === id)) {
+    const current = await snapshot(area, index)
+    return { ...current, message: '没有这段对话。' }
+  }
+  const rest = index.items.filter(item => item.id !== id)
+  let activeId = index.activeId
+  const created: SessionMeta[] = []
+  if (rest.length === 0) {
+    const now = new Date().toISOString()
+    const fresh = { id: newSessionId(), title: '新对话', updatedAt: now }
+    created.push(fresh)
+    rest.push(fresh)
+    activeId = fresh.id
+  } else if (activeId === id) {
+    activeId = [...rest].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]?.id ?? rest[0].id
+  }
+  const next: SessionIndex = { activeId, facts: index.facts, items: rest }
+  await area.set({
+    [AGENT_SESSIONS_KEY]: next,
+    [sessionKey(id)]: null,
+    ...(created[0] ? { [sessionKey(created[0].id)]: sessionBody(EMPTY_MEMORY) } : {})
+  })
+  return { ...(await snapshot(area, next)), message: '这段对话已删除。长期记忆还在。' }
 }
 
 export function needsCompression(state: AgentMemoryState): boolean {
@@ -190,6 +421,11 @@ function oneLine(text: string, limit: number): string {
   return text.replace(/\s+/g, ' ').trim().slice(0, limit)
 }
 
+/** 旧工具摘录里的文号和长编号不留给后面的轮次照抄。 */
+function redactOldEvidence(text: string): string {
+  return text.replace(/ZL\d{6,}/gi, '文号已略').replace(/\b\d{10,}\b/g, '编号已略')
+}
+
 /** 从原话里摘句子。不改写，避免压缩时编出没出现过的文号或结论。 */
 export function digestTurns(turns: MemoryTurn[]): string {
   const lines: string[] = []
@@ -201,7 +437,7 @@ export function digestTurns(turns: MemoryTurn[]): string {
       continue
     }
     if (turn.role === 'tool') {
-      const text = oneLine(turn.content, 480)
+      const text = oneLine(redactOldEvidence(turn.content), 480)
       if (text) lines.push(`- 工具原文：${text}`)
       continue
     }

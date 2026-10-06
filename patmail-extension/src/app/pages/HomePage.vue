@@ -5,26 +5,33 @@ import { bg, icon } from '../../shell/assets'
 import { greetingForHour } from '../greeting'
 import { barWidth, homeReport } from '../home-report'
 import { pickHomeLine } from '../home-lines'
-import { readLimitMailLedger } from '../../customer/limit-mail-submit'
+import { loadLimitMailLedger, readLimitMailLedger, watchLimitMailLedger, type LimitMailMark } from '../../customer/limit-mail-submit'
 import { useWorkspace } from '../composables/useWorkspace'
 import EmptyGuide from '../components/EmptyGuide.vue'
 import wechatQr from '../assets/wechat-qr.png'
 
 const { connection, customers, tasks } = useWorkspace()
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
+const ledger = ref<LimitMailMark[]>(readLimitMailLedger())
 const report = computed(() => homeReport({
   customers: customers.value,
   tasks: tasks.value,
-  ledger: readLimitMailLedger()
+  ledger: ledger.value
 }))
 const now = ref(new Date())
 let clock = 0
+let stopLedger = (): void => {}
 onMounted(() => {
+  void loadLimitMailLedger().then(marks => { ledger.value = marks })
+  stopLedger = watchLimitMailLedger(() => { void loadLimitMailLedger().then(marks => { ledger.value = marks }) })
   clock = window.setInterval(() => {
     now.value = new Date()
   }, 60_000)
 })
-onUnmounted(() => window.clearInterval(clock))
+onUnmounted(() => {
+  window.clearInterval(clock)
+  stopLedger()
+})
 const title = computed(() => {
   const name = connection.value.displayName
   return name ? `${greetingForHour(now.value.getHours())}，${name}！` : '首页'

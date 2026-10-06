@@ -3,8 +3,10 @@ export const READ_ONLY_AUTO = 'READ_ONLY_AUTO' as const
 
 export const LIVE_WRITE_CALLS = [
   'MailCustomer',
+  'LimitMailCustomer',
   'SaveMailInfo',
   'SaveMailRalteCaseFile',
+  'MailSubmit',
   'FlowSubmit',
   'EndEmailFlowd'
 ] as const

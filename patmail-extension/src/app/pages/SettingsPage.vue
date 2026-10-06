@@ -179,7 +179,7 @@ async function run(action: () => Promise<void>): Promise<void> {
           <ThemeSelect :model-value="concurrency" :disabled="!concurrencyReady" :options="concurrencyOptions" @update:model-value="setConcurrency(Number($event))" />
         </label>
         <label>
-          <input type="checkbox" :checked="open" @change="onToggle" />
+          <input type="checkbox" :checked="open" :disabled="!ready" @change="onToggle" />
           写开关
         </label>
       </div>
