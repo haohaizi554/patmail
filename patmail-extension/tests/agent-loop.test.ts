@@ -4,7 +4,7 @@ import type { ChatOutcome } from '../src/agent/llm'
 import { LlmError } from '../src/agent/llm'
 import { runAgentTurn, splitAgentReply, thoughtLead, type Complete } from '../src/agent/loop'
 import { applySummary, clipToolResult, COMPRESS_AT_CHARS, EMPTY_MEMORY, foldDigest, KEEP_RECENT_CHARS, needsCompression, normalizeMemory, rememberFact, searchFacts, splitForCompression, contextChars, visibleHistory } from '../src/agent/memory'
-import { executeAgentTool, type ToolContext } from '../src/agent/tools'
+import { emptyPageTools, executeAgentTool, formatDraft, type ToolContext } from '../src/agent/tools'
 import { MessageType } from '../src/shared/message'
 
 const config = { ...AGENT_CONFIG_DEFAULT, maxTokens: 64 }
@@ -31,7 +31,8 @@ const idleContext: ToolContext = {
   lookupApi: query => `文档里没有对上「${query}」。`,
   createWorkflow: async () => '已创建工作流。',
   setWorkflowField: async () => '已改这一栏。',
-  createTask: async () => '已记下任务。'
+  createTask: async () => '已记下任务。',
+  ...emptyPageTools()
 }
 
 describe('agent memory', () => {
@@ -399,5 +400,86 @@ describe('agent loop', () => {
     const turn = await runAgentTurn(config, { ...EMPTY_MEMORY, turns, digestMisses: 3 }, '你好', idleContext, complete)
     expect(turn.memory.summary).toBe('')
     expect(turn.memory.turns.some(item => item.content.includes('旧标记'))).toBe(true)
+  })
+
+  it('keeps searched files on this turn and drafts from them', async () => {
+    let volume = ''
+    const ctx: ToolContext = {
+      ...idleContext,
+      rememberFiles(files) { volume = files[0]?.customerVolume ?? '' },
+      recentFiles: () => [],
+      draftMail: async () => formatDraft({
+        letters: 1,
+        subject: 'ZL20250306002-受理',
+        body: '您好',
+        notes: ['模板里的 {未知栏} 还没有对应内容'],
+        who: '收件：未定'
+      }),
+      forward: async () => ({
+        type: MessageType.SearchFilesResult,
+        payload: {
+          ok: true,
+          data: {
+            items: [{ fileId: 'f1', fileName: '受理通知书', customerName: '甲公司', customerVolume: 'ZL20250306002' }],
+            total: 1, pageIndex: 1, pageSize: 10, totalPages: 1
+          }
+        }
+      })
+    }
+    const searched = await executeAgentTool('search_cases', '{"customerName":"甲公司"}', ctx, EMPTY_MEMORY)
+    expect(searched.text).toContain('文件查询共 1 条')
+    expect(volume).toBe('ZL20250306002')
+    let phase = 0
+    const seen: string[] = []
+    const complete: Complete = async (_config, options) => {
+      phase += 1
+      seen.push(options.messages.filter(message => message.role === 'tool').map(message => message.content).join('\n'))
+      if (phase === 1) return outcome('信已经对好了。')
+      if (phase === 2) {
+        return {
+          usage: null,
+          raw: {},
+          choices: [{
+            content: '',
+            reasoning: '',
+            finishReason: 'tool_calls',
+            toolCalls: [{ id: 'd1', type: 'function', function: { name: 'draft_mail', arguments: '{"customerName":"甲公司"}' } }]
+          }]
+        }
+      }
+      return outcome('主题已经起草，还有没收录的占位符。没有提交。')
+    }
+    const turn = await runAgentTurn(config, EMPTY_MEMORY, '帮我对上要发的信', ctx, complete)
+    expect(phase).toBe(3)
+    expect(seen.some(text => text.includes('主题：ZL20250306002-受理') && text.includes('{未知栏}'))).toBe(true)
+    expect(turn.reply).toContain('没有提交')
+  })
+
+  it('submits only after submit_easy succeeds, and still finishes the turn', async () => {
+    let phase = 0
+    const ctx: ToolContext = {
+      ...idleContext,
+      submitEasy: async () => '已提交到 EASY。已提交 1 件给当前登录人审核。'
+    }
+    const complete: Complete = async () => {
+      phase += 1
+      if (phase === 1) return outcome('已提交审核。')
+      if (phase === 2) {
+        return {
+          usage: null,
+          raw: {},
+          choices: [{
+            content: '',
+            reasoning: '',
+            finishReason: 'tool_calls',
+            toolCalls: [{ id: 's1', type: 'function', function: { name: 'submit_easy', arguments: '{"caseVolume":"P001"}' } }]
+          }]
+        }
+      }
+      return outcome('已提交到 EASY，交给当前登录人审核。')
+    }
+    const turn = await runAgentTurn(config, EMPTY_MEMORY, '帮我提交审核', ctx, complete)
+    expect(phase).toBe(3)
+    expect(turn.reply).toContain('已提交到 EASY')
   })
 })

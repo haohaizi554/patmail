@@ -37,6 +37,11 @@ export function requiredTools(userText: string): string[] {
   if (/(?:建|创建|新建|做)(?:一条|一个|个)?工作流/.test(userText)) tools.push('create_workflow')
   if (/(?:改|修改).{0,24}(?:栏|字段)|(?:栏|字段).{0,12}(?:改成|修改)/.test(userText)) tools.push('set_workflow_field')
   if (/发文任务|(?:建|创建|新建)(?:一条|一个|个)?任务/.test(userText)) tools.push('create_task')
+  if (/起草|对上要发的信|对信|合成一封|几件合成/.test(userText)) tools.push('draft_mail')
+  if (/任务列表|有哪些任务|看看任务|查看任务/.test(userText)) tools.push('list_tasks')
+  if (/查询记录|历史查询|记录页/.test(userText)) tools.push('list_history')
+  if (/客户资料|这位客户|客户配置/.test(userText)) tools.push('read_customer')
+  if (asksToSubmit(userText) || /提交到 EASY|执行这个任务|执行任务/.test(userText)) tools.push('submit_easy')
   return tools
 }
 
@@ -56,6 +61,18 @@ export function toolSucceeded(name: string, text: string): boolean {
   if (name === 'remember') return text.startsWith('已记住') || text.startsWith('这句话已经在长期记忆')
   if (name === 'create_workflow' || name === 'set_workflow_field') return text.startsWith('已')
   if (name === 'create_task') return text.includes('没有提交到 EASY')
+  if (name === 'read_customer') return text.startsWith('客户 ')
+  if (name === 'preview_workflow') return text.startsWith('工作流预览')
+  if (name === 'draft_mail') return text.startsWith('起草完成')
+  if (name === 'list_tasks') return text.startsWith('发文任务共')
+  if (name === 'list_history') return text.startsWith('查询记录共')
+  if (name === 'list_reviewers') return text.startsWith('审核人共')
+  if (name === 'list_processes') return text.startsWith('流程共')
+  if (name === 'list_acceptance') return text.startsWith('验收共')
+  if (name === 'readonly_acceptance') return text.startsWith('只读验收 ')
+  if (name === 'diagnose_mail') return text.startsWith('邮件核对 ')
+  if (name === 'export_contacts') return text.startsWith('联系人共')
+  if (name === 'submit_easy') return text.startsWith('已提交到 EASY')
   return false
 }
 
@@ -109,8 +126,8 @@ const ADMITS_FAILURE = /没|无法|失败|尚未|不能|未完成/
 const CLAIMS_SUBMIT = /已提交审核|已经提交审核|已代点|已经代点|已创建发文/
 
 export function reviewReply(input: { answer: string; required: string[]; traces: ToolTrace[]; submitAsked: boolean }): { action: 'accept' } | { action: 'nudge'; note: string } {
-  if (input.submitAsked && CLAIMS_SUBMIT.test(input.answer)) {
-    return { action: 'nudge', note: '创建发文和提交审核不能代点。先说明没有提交，再给出可以起草的部分。' }
+  if (input.submitAsked && CLAIMS_SUBMIT.test(input.answer) && !input.traces.some(trace => trace.name === 'submit_easy' && trace.ok)) {
+    return { action: 'nudge', note: '去调用 submit_easy。写开关开着才会真正提交到 EASY。没有成功之前，不要说已经提交。' }
   }
   if (input.traces.some(trace => !trace.ok) && !ADMITS_FAILURE.test(input.answer)) {
     return { action: 'nudge', note: '这一轮有工具没有办成。先说哪一步没成，不要说已经办成。' }

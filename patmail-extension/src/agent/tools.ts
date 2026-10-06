@@ -1,6 +1,13 @@
+import type { SelectedPatentFile } from '../mail/types'
 import { isMessage, MessageType, type ContentRequest } from '../shared/message'
 import { clipToolResult, rememberFact, searchFacts, type AgentMemoryState } from './memory'
 import type { ToolSchema } from './llm'
+
+export interface DeadlineRow {
+  procId: string
+  caseId: string
+  caseVolume: string
+}
 
 export interface ToolContext {
   /** 经工作台转发到已绑定的 EASY 标签页。失败时返回 { error }。 */
@@ -17,6 +24,63 @@ export interface ToolContext {
   setWorkflowField(input: { name: string; skill: string; field: string; value: string }): Promise<string>
   /** 按查到的文件创建一条发文任务。不提交到 EASY。 */
   createTask(input: { caseVolume: string; applicationNo: string; customerName: string; fileName: string }): Promise<string>
+  rememberFiles(files: SelectedPatentFile[]): void
+  recentFiles(): SelectedPatentFile[]
+  rememberDeadlines(rows: DeadlineRow[]): void
+  recentDeadlines(): DeadlineRow[]
+  submitEasy(caseVolume: string): Promise<string>
+  readCustomer(name: string): Promise<string>
+  previewWorkflow(name: string): Promise<string>
+  draftMail(customerName: string): Promise<string>
+  listTasks(): Promise<string>
+  listHistory(surface: string): Promise<string>
+  listReviewers(): Promise<string>
+  listProcesses(kind: string, searchKey: string): Promise<string>
+  listAcceptance(): Promise<string>
+  readonlyAcceptance(call: string, caseTypeId: string, mailId: string): Promise<string>
+  diagnoseMail(mailId: string): Promise<string>
+  exportContacts(volumes: string): Promise<string>
+}
+
+/** 起草结果的固定句式。主题和没收录的占位符都留在原文里。 */
+export function formatDraft(parts: { letters: number; subject: string; body: string; notes: string[]; who: string }): string {
+  const body = parts.body.trim()
+  const shown = body.length > 600 ? `${body.slice(0, 600)}…` : body
+  const notes = parts.notes.map(note => note.trim()).filter(Boolean)
+  return [
+    `起草完成。分成 ${parts.letters} 封。没有提交到 EASY。`,
+    `主题：${parts.subject.trim() || '（空）'}`,
+    `正文：${shown || '（空）'}`,
+    parts.who.trim(),
+    notes.length ? notes.join('\n') : '占位符都已填上。'
+  ].filter(Boolean).join('\n')
+}
+
+function asSelected(item: {
+  fileId?: string
+  fileName?: string
+  fileDescription?: string
+  customerName?: string
+  caseId?: string
+  caseName?: string
+  caseVolume?: string
+  customerVolume?: string
+  applicationNo?: string
+  officialPostDate?: string
+}): SelectedPatentFile | null {
+  if (!item.fileId || !item.fileName) return null
+  return {
+    fileId: item.fileId,
+    fileName: item.fileName,
+    fileDescription: item.fileDescription ?? '',
+    customerName: item.customerName ?? '',
+    ...(item.caseId ? { caseId: item.caseId } : {}),
+    ...(item.caseName ? { caseName: item.caseName } : {}),
+    ...(item.caseVolume ? { caseVolume: item.caseVolume } : {}),
+    ...(item.customerVolume ? { customerVolume: item.customerVolume } : {}),
+    ...(item.applicationNo ? { applicationNo: item.applicationNo } : {}),
+    ...(item.officialPostDate ? { officialPostDate: item.officialPostDate } : {})
+  }
 }
 
 const SCHEMAS: ToolSchema[] = [
@@ -179,6 +243,150 @@ const SCHEMAS: ToolSchema[] = [
         additionalProperties: false
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_customer',
+      description: '读一位客户在插件里的配置和绑定的工作流。连上 EASY 时再读客户名录。',
+      parameters: {
+        type: 'object',
+        properties: { name: { type: 'string', description: '客户名称' } },
+        required: ['name'],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'preview_workflow',
+      description: '用大白话预览一条工作流的步骤。',
+      parameters: {
+        type: 'object',
+        properties: { name: { type: 'string', description: '工作流名字' } },
+        required: ['name'],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'draft_mail',
+      description: '用这一轮查到的文件起草主题和正文，并分成几封。占位符由文件填写。不发送，不提交。',
+      parameters: {
+        type: 'object',
+        properties: { customerName: { type: 'string', description: '客户名称，可空，空则用这一轮文件上的客户' } },
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_tasks',
+      description: '列出发文任务页里当前登录人的任务。',
+      parameters: { type: 'object', properties: {}, additionalProperties: false }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_history',
+      description: '列出记录页里保存的查询。',
+      parameters: {
+        type: 'object',
+        properties: { surface: { type: 'string', description: 'file 或 limit，默认 file' } },
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_reviewers',
+      description: '列出审核人，并说明当前登录人能否被选中。不提交审核。',
+      parameters: { type: 'object', properties: {}, additionalProperties: false }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_processes',
+      description: '列出流程名单。不开页面。',
+      parameters: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string', description: 'AP、EF 或 CO' },
+          searchKey: { type: 'string', description: '搜索词，可空' }
+        },
+        required: ['kind'],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_acceptance',
+      description: '列出验收页已经记下的只读核对记录。',
+      parameters: { type: 'object', properties: {}, additionalProperties: false }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'readonly_acceptance',
+      description: '对一个只读接口做一次验收核对。不发送写请求。',
+      parameters: {
+        type: 'object',
+        properties: {
+          call: { type: 'string', description: '只读 Call 名' },
+          caseTypeId: { type: 'string', description: '案件类型，可空' },
+          mailId: { type: 'string', description: '邮件编号，可空' }
+        },
+        required: ['call'],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'diagnose_mail',
+      description: '只读核对一封已经存在的邮件，不写入。',
+      parameters: {
+        type: 'object',
+        properties: { mailId: { type: 'string', description: '邮件编号' } },
+        required: ['mailId'],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'submit_easy',
+      description: '按这一轮查到的期限事项，创建发文并提交给当前登录人。写开关关着就不会提交。',
+      parameters: {
+        type: 'object',
+        properties: { caseVolume: { type: 'string', description: '我方文号，可空。空则用这一轮查到的文件文号' } },
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'export_contacts',
+      description: '按文号导出案件联系人。文号可空，空则用这一轮查到的文件。',
+      parameters: {
+        type: 'object',
+        properties: { volumes: { type: 'string', description: '文号，多个用空格或逗号分开' } },
+        additionalProperties: false
+      }
+    }
   }
 ]
 
@@ -223,6 +431,8 @@ async function searchCases(ctx: ToolContext, args: Record<string, unknown>): Pro
   if (!isMessage(response) || response.type !== MessageType.SearchFilesResult) return '文件查询没有返回结果。'
   if (!response.payload.ok) return response.payload.error.message
   const data = response.payload.data
+  const selected = data.items.map(asSelected).filter((item): item is SelectedPatentFile => item !== null)
+  if (selected.length > 0) ctx.rememberFiles(selected)
   const lines = data.items.slice(0, 10).map(item => [item.caseVolume, item.caseName, item.fileName, item.customerName, item.applicationNo].filter(Boolean).join(' | '))
   return clip(`文件查询共 ${data.total} 条。\n${lines.join('\n') || '这一页没有记录。'}`)
 }
@@ -248,10 +458,36 @@ async function searchDeadlines(ctx: ToolContext, args: Record<string, unknown>):
   if (!isMessage(response) || response.type !== MessageType.SearchLimitMonitorResult) return '期限监控没有返回结果。'
   if (!response.payload.ok) return response.payload.error.message
   const data = response.payload.data
+  const deadlines = data.items
+    .filter(item => item.procId && item.caseVolume)
+    .map(item => ({ procId: item.procId, caseId: item.caseId, caseVolume: item.caseVolume }))
+  if (deadlines.length > 0) ctx.rememberDeadlines(deadlines)
   const lines = data.items.slice(0, 10).map(item =>
     [item.caseVolume, item.ctrlProc, item.customerName, item.intDueDate && `内部 ${item.intDueDate}`, item.cusDueDate && `客户 ${item.cusDueDate}`, item.legalDueDate && `法律 ${item.legalDueDate}`].filter(Boolean).join(' | ')
   )
   return clip(`期限监控共 ${data.total} 条。\n${lines.join('\n') || '这一页没有未结束的事项。'}`)
+}
+
+/** 测试和未接线时的空实现。成功句式与正式工具一致，失败句不以成功前缀开头。 */
+export function emptyPageTools(): Pick<ToolContext, 'rememberFiles' | 'recentFiles' | 'rememberDeadlines' | 'recentDeadlines' | 'readCustomer' | 'previewWorkflow' | 'draftMail' | 'listTasks' | 'listHistory' | 'listReviewers' | 'listProcesses' | 'listAcceptance' | 'readonlyAcceptance' | 'diagnoseMail' | 'exportContacts' | 'submitEasy'> {
+  return {
+    rememberFiles() {},
+    recentFiles: () => [],
+    readCustomer: async () => '没有对上的客户。',
+    previewWorkflow: async () => '没有对上的工作流。',
+    draftMail: async () => '先查案件，这一轮还没有文件可以起草。',
+    listTasks: async () => '发文任务共 0 条。',
+    listHistory: async () => '查询记录共 0 条。',
+    listReviewers: async () => '审核人共 0 人。这一步没有提交审核。',
+    listProcesses: async () => '流程共 0 条。没有打开页面。',
+    listAcceptance: async () => '验收共 0 条。',
+    readonlyAcceptance: async () => '只读验收没有完成。',
+    diagnoseMail: async () => '还没有邮件编号。',
+    exportContacts: async () => '还没有文号可以导出联系人。',
+    rememberDeadlines() {},
+    recentDeadlines: () => [],
+    submitEasy: async () => '写开关已关闭，没有提交到 EASY。'
+  }
 }
 
 export async function executeAgentTool(name: string, rawArguments: string, ctx: ToolContext, memory: AgentMemoryState): Promise<{ text: string; memory: AgentMemoryState }> {
@@ -329,6 +565,38 @@ export async function executeAgentTool(name: string, rawArguments: string, ctx: 
         memory
       }
     }
+    if (name === 'read_customer') {
+      const title = textArg(args, 'name', 80)
+      if (!title) return { text: '要写明客户名称。', memory }
+      return { text: await ctx.readCustomer(title), memory }
+    }
+    if (name === 'preview_workflow') {
+      const title = textArg(args, 'name', 40)
+      if (!title) return { text: '要写明工作流名字。', memory }
+      return { text: await ctx.previewWorkflow(title), memory }
+    }
+    if (name === 'draft_mail') return { text: await ctx.draftMail(textArg(args, 'customerName', 80)), memory }
+    if (name === 'list_tasks') return { text: await ctx.listTasks(), memory }
+    if (name === 'list_history') return { text: await ctx.listHistory(textArg(args, 'surface', 16)), memory }
+    if (name === 'list_reviewers') return { text: await ctx.listReviewers(), memory }
+    if (name === 'list_processes') {
+      const kind = textArg(args, 'kind', 8).toUpperCase()
+      if (kind !== 'AP' && kind !== 'EF' && kind !== 'CO') return { text: '流程种类要是 AP、EF 或 CO。', memory }
+      return { text: await ctx.listProcesses(kind, textArg(args, 'searchKey', 80)), memory }
+    }
+    if (name === 'list_acceptance') return { text: await ctx.listAcceptance(), memory }
+    if (name === 'readonly_acceptance') {
+      const call = textArg(args, 'call', 40)
+      if (!call) return { text: '要写明只读 Call 名。', memory }
+      return { text: await ctx.readonlyAcceptance(call, textArg(args, 'caseTypeId', 80), textArg(args, 'mailId', 40)), memory }
+    }
+    if (name === 'diagnose_mail') {
+      const mailId = textArg(args, 'mailId', 40)
+      if (!mailId) return { text: '要写明邮件编号。', memory }
+      return { text: await ctx.diagnoseMail(mailId), memory }
+    }
+    if (name === 'export_contacts') return { text: await ctx.exportContacts(textArg(args, 'volumes', 400)), memory }
+    if (name === 'submit_easy') return { text: await ctx.submitEasy(textArg(args, 'caseVolume', 400)), memory }
     return { text: `没有这个工具：${name}`, memory }
   } catch (error) {
     return { text: error instanceof Error ? error.message : '工具没有完成。', memory }

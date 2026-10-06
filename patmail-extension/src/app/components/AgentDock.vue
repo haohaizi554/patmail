@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { AGENT_FRAME_KEY, normalizeAgentFrame, resizeAgentFrame, type AgentFrame, type ResizeEdge } from '../agent-frame'
 import { AGENT_CONFIG_KEY, normalizeAgentConfig } from '../../agent/config'
 import AgentAnswer from './AgentAnswer.vue'
 import { thoughtLead } from '../../agent/loop'
@@ -12,7 +13,7 @@ interface Job { kind: 'turn' | 'facts' | 'compact' | 'reset'; display: string; m
 type AgentRequest = Extract<BackgroundRequest, { type: typeof MessageType.AgentChat }>
 type AskResult = { ok: true; reply: string; history: Bubble[] } | { ok: false; message: string }
 
-const PANEL_WIDTH = 380
+const RESIZE_EDGES: ResizeEdge[] = ['e', 's', 'se']
 const open = ref(false)
 const loaded = ref(false)
 const placed = ref(false)
@@ -72,11 +73,30 @@ function readThinking(value: unknown): void {
   thinkingOn.value = normalizeAgentConfig(value).thinking
 }
 
+const viewport = ref({ width: window.innerWidth, height: window.innerHeight })
+const preferred = ref<AgentFrame>({ width: 380, height: 560 })
+const frame = computed(() => normalizeAgentFrame(preferred.value, viewport.value))
+let resize: { edge: ResizeEdge; x: number; y: number; width: number; height: number; left: number; top: number } | null = null
+
+function readFrame(value: unknown): void {
+  if (resize) return
+  preferred.value = normalizeAgentFrame(value, viewport.value)
+}
+
+function saveFrame(next: AgentFrame): void {
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) return
+  void chrome.storage.local.set({ [AGENT_FRAME_KEY]: { width: next.width, height: next.height } }).catch(() => {})
+}
+
 if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-  void chrome.storage.local.get(AGENT_CONFIG_KEY).then(stored => readThinking(stored[AGENT_CONFIG_KEY])).catch(() => {})
+  void chrome.storage.local.get([AGENT_CONFIG_KEY, AGENT_FRAME_KEY]).then(stored => {
+    readThinking(stored[AGENT_CONFIG_KEY])
+    readFrame(stored[AGENT_FRAME_KEY])
+  }).catch(() => {})
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local' || !(AGENT_CONFIG_KEY in changes)) return
-    readThinking(changes[AGENT_CONFIG_KEY]?.newValue)
+    if (area !== 'local') return
+    if (AGENT_CONFIG_KEY in changes) readThinking(changes[AGENT_CONFIG_KEY]?.newValue)
+    if (AGENT_FRAME_KEY in changes) readFrame(changes[AGENT_FRAME_KEY]?.newValue)
   })
 }
 const paletteDismissed = ref(false)
@@ -170,7 +190,7 @@ function placeNearEntry(): void {
   if (placed.value) return
   const button = root.value?.querySelector('.agent-entry')
   const rect = button?.getBoundingClientRect()
-  const width = Math.min(PANEL_WIDTH, window.innerWidth - 24)
+  const width = frame.value.width
   if (rect) {
     x.value = Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12))
     y.value = Math.max(12, Math.min(rect.bottom + 10, window.innerHeight - 160))
@@ -414,10 +434,36 @@ function onKey(event: KeyboardEvent): void {
 }
 
 function clamp(nextX: number, nextY: number): void {
-  const width = panel.value?.offsetWidth ?? PANEL_WIDTH
-  const height = panel.value?.offsetHeight ?? 120
+  const width = frame.value.width
+  const height = frame.value.height
   x.value = Math.min(Math.max(8, nextX), Math.max(8, window.innerWidth - width - 8))
   y.value = Math.min(Math.max(8, nextY), Math.max(8, window.innerHeight - Math.min(height, 80) - 8))
+}
+
+function onResizeStart(edge: ResizeEdge, event: PointerEvent): void {
+  event.preventDefault()
+  event.stopPropagation()
+  resize = { edge, x: event.clientX, y: event.clientY, width: frame.value.width, height: frame.value.height, left: x.value, top: y.value }
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+}
+
+function onResizeMove(event: PointerEvent): void {
+  if (!resize) return
+  const next = resizeAgentFrame(resize, resize.edge, { x: event.clientX, y: event.clientY }, viewport.value)
+  preferred.value = next.frame
+  x.value = next.left
+  y.value = next.top
+}
+
+function onResizeEnd(): void {
+  if (!resize) return
+  resize = null
+  saveFrame(preferred.value)
+}
+
+function onViewport(): void {
+  viewport.value = { width: window.innerWidth, height: window.innerHeight }
+  clamp(x.value, y.value)
 }
 
 function onDragStart(event: PointerEvent): void {
@@ -469,7 +515,30 @@ watch(open, async (shown) => {
   await scrollDown()
 })
 
+let agentPort: chrome.runtime.Port | null = null
+let agentPulse = 0
+
+function holdAgentPort(): void {
+  if (agentPort || typeof chrome === 'undefined' || !chrome.runtime?.connect) return
+  try {
+    agentPort = chrome.runtime.connect({ name: 'patmail-agent' })
+    agentPort.onDisconnect.addListener(() => { agentPort = null })
+    agentPulse = window.setInterval(() => {
+      try { agentPort?.postMessage({ kind: 'tick' }) } catch { agentPort = null }
+    }, 15_000)
+  } catch {
+    agentPort = null
+  }
+}
+
+function dropAgentPort(): void {
+  window.clearInterval(agentPulse)
+  try { agentPort?.disconnect() } catch { /* 已经断开 */ }
+  agentPort = null
+}
+
 function onActivity(message: unknown): void {
+  try { agentPort?.postMessage({ kind: 'tick' }) } catch { agentPort = null }
   if (!busy.value || !message || typeof message !== 'object') return
   const record = message as { channel?: unknown; label?: unknown; thought?: unknown }
   if (record.channel !== ACTIVITY_CHANNEL || typeof record.label !== 'string') return
@@ -491,14 +560,18 @@ watch(liveThought, async () => {
   if (stick.value) await scrollDown()
 })
 
+holdAgentPort()
 if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
   chrome.runtime.onMessage.addListener(onActivity)
 }
 
 window.addEventListener('keydown', onEscape)
+window.addEventListener('resize', onViewport)
 onUnmounted(() => {
   window.removeEventListener('keydown', onEscape)
+  window.removeEventListener('resize', onViewport)
   if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) chrome.runtime.onMessage.removeListener(onActivity)
+  dropAgentPort()
   stopLivePump()
   stopWait()
 })
@@ -511,7 +584,18 @@ onUnmounted(() => {
     </button>
   </div>
   <Teleport to="body">
-    <section v-show="open" ref="panel" class="agent-float" role="dialog" aria-label="AI 助手" :style="{ left: `${x}px`, top: `${y}px` }">
+    <section v-show="open" ref="panel" class="agent-float" role="dialog" aria-label="AI 助手" :style="{ left: `${x}px`, top: `${y}px`, width: `${frame.width}px`, height: `${frame.height}px` }">
+      <div
+        v-for="edge in RESIZE_EDGES"
+        :key="edge"
+        class="agent-resize"
+        :class="edge"
+        :aria-label="edge === 'se' ? '拖动调整大小' : undefined"
+        @pointerdown="onResizeStart(edge, $event)"
+        @pointermove="onResizeMove"
+        @pointerup="onResizeEnd"
+        @pointercancel="onResizeEnd"
+      ></div>
       <header @pointerdown="onDragStart" @pointermove="onDragMove" @pointerup="onDragEnd" @pointercancel="onDragEnd">
         <strong>AI 助手</strong>
         <button type="button" aria-label="关闭" @click="open = false">×</button>

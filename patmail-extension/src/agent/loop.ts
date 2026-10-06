@@ -19,7 +19,19 @@ const TOOL_ACTIVITY: Record<string, string> = {
   recall: '正在翻记忆',
   create_workflow: '正在建工作流',
   set_workflow_field: '正在改工作流',
-  create_task: '正在建任务'
+  create_task: '正在建任务',
+  read_customer: '正在读客户',
+  preview_workflow: '正在预览工作流',
+  draft_mail: '正在起草',
+  list_tasks: '正在列任务',
+  list_history: '正在看记录',
+  list_reviewers: '正在看审核人',
+  list_processes: '正在列流程',
+  list_acceptance: '正在看验收',
+  readonly_acceptance: '正在做只读验收',
+  diagnose_mail: '正在核对邮件',
+  export_contacts: '正在导出联系人',
+  submit_easy: '正在提交到 EASY'
 }
 
 export function toolActivity(name: string): string {
@@ -70,7 +82,7 @@ const SYSTEM_PROMPT = [
   '1. 要建工作流就调用 create_workflow。要改某一栏就调用 set_workflow_field。要建发文任务就调用 create_task。缺了名字或文号，先问一句，问清再做。',
   '2. 查案件、期限、客户和接口，是为了把工作流或任务做对。不要编造文号、客户或日期。',
   '3. 查 EASY 之前先看连接状态。没连上就告诉用户打开已经登录的 EASY 页面，然后重新打开工作台。',
-  '4. 创建发文和提交审核不能代点。create_task 只把计划记在发文任务里。',
+  '4. 用户要提交到 EASY 或提交审核时调用 submit_easy。它和页面上的「提交到 EASY」一样，创建发文并交给当前登录人。写开关关着、事项还在审核里、或还没有发文类型时，按工具原文说明，不要说已经提交。create_task 只记计划。起草、对信、合成一封调用 draft_mail，占位符由这一轮查到的文件填写。看任务、查询记录、客户资料分别调用 list_tasks、list_history、read_customer。',
   '5. 长期记忆里的偏好优先遵守。用户明确的偏好用 remember 记下。文号、客户、日期只有用户亲口说过，或这次工具返回了，才能记住，不要把推断写进去。',
   '6. 用简体中文，先说做成了什么，再列依据。',
   '7. 不确定接口、字段或 Call 时，先用 lookup_api 查文档。问一共有多少接口时，检索词用「多少接口」，只报工具给出的个数。文档篇数不是接口数，不要再写一段分类介绍。查到的内容只说明调用方式，真正办理仍用现有工具。',

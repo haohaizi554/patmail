@@ -4,7 +4,7 @@ import type { ChatOutcome } from '../src/agent/llm'
 import { compactAgentMemory, runAgentTurn, type Complete } from '../src/agent/loop'
 import { EMPTY_MEMORY } from '../src/agent/memory'
 import { filterCommands, resolveSlash, SLASH_COMMANDS, slashToken } from '../src/agent/slash'
-import type { ToolContext } from '../src/agent/tools'
+import { emptyPageTools, type ToolContext } from '../src/agent/tools'
 
 const config = { ...AGENT_CONFIG_DEFAULT, maxTokens: 64 }
 
@@ -21,7 +21,8 @@ const idleContext: ToolContext = {
   lookupApi: query => `文档里没有对上「${query}」。`,
   createWorkflow: async () => '已创建工作流。',
   setWorkflowField: async () => '已改这一栏。',
-  createTask: async () => '已记下任务。'
+  createTask: async () => '已记下任务。',
+  ...emptyPageTools()
 }
 
 describe('slash commands', () => {
@@ -46,6 +47,8 @@ describe('slash commands', () => {
       expect(skill.guidance).toContain('search_cases')
       expect(skill.guidance).toContain('P001')
     }
+    const letter = resolveSlash('/对上要发的信')
+    if (letter.kind === 'skill') expect(letter.guidance).toContain('draft_mail')
   })
 })
 

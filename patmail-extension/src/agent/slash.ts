@@ -173,6 +173,8 @@ const ACTIONS: SlashCommand[] = [
   }
 ]
 
+const DRAFT_SKILLS = new Set(['对上要发的信', '几件合成一封', '谁来收'])
+
 const WORKFLOW_COMMANDS: SlashCommand[] = SKILLS.map(skill => ({
   name: skill.title,
   aliases: [],
@@ -181,9 +183,11 @@ const WORKFLOW_COMMANDS: SlashCommand[] = SKILLS.map(skill => ({
   argumentHint: '补充说明，可空',
   args: 'optional' as const,
   guide: (args: string) => told(
-    `这是工作流本领「${skill.title}」。${skill.blurb}。${skill.detail} 可以调用 list_skills 核对原文。用大白话说明要准备什么、在哪一步用。不要改配置，不要代点创建发文或提交审核。`,
+    DRAFT_SKILLS.has(skill.title)
+      ? `这是工作流本领「${skill.title}」。先查到文件，再调用 draft_mail。占位符由查到的文件填写。不要代点创建发文或提交审核。`
+      : `这是工作流本领「${skill.title}」。${skill.blurb}。${skill.detail} 可以调用 list_skills 核对原文。用大白话说明要准备什么、在哪一步用。不要改配置，不要代点创建发文或提交审核。`,
     args,
-    '用户没有写补充，就说明这个本领本身。'
+    DRAFT_SKILLS.has(skill.title) ? '用户没有写补充，就用这一轮已经查到的文件起草。' : '用户没有写补充，就说明这个本领本身。'
   )
 }))
 

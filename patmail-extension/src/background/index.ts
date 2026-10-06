@@ -166,6 +166,16 @@ function publish(response: BackgroundResponse, requestId: string | null, sendRes
   } catch { /* 页面已经离开 */ }
 }
 
+/** 工作台停靠栏连着这条端口时，服务工作线程不会在等模型的空档里被回收。 */
+chrome.runtime.onConnect.addListener(port => {
+  if (port.sender?.id !== chrome.runtime.id || port.name !== 'patmail-agent') {
+    port.disconnect()
+    return
+  }
+  port.onMessage.addListener(() => { /* 停靠栏心跳 */ })
+  port.onDisconnect.addListener(() => { void chrome.runtime.lastError })
+})
+
 /** MV3 Service Worker 是租约、任务和证据的唯一写入方。 */
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return

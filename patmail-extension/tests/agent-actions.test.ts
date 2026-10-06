@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createWorkflowInCatalog, setWorkflowFieldInCatalog } from '../src/agent/actions'
 import { renderAgentMarkdown } from '../src/agent/markdown'
-import { executeAgentTool, type ToolContext } from '../src/agent/tools'
+import { emptyPageTools, executeAgentTool, type ToolContext } from '../src/agent/tools'
 import { EMPTY_MEMORY } from '../src/agent/memory'
 import { defaultWorkflowCatalog } from '../src/workflow/catalog'
 
@@ -14,7 +14,8 @@ const idle: ToolContext = {
   lookupApi: () => '',
   createWorkflow: async input => `创建 ${input.name}：${input.skills}`,
   setWorkflowField: async input => `修改 ${input.name}`,
-  createTask: async input => `任务 ${input.caseVolume}`
+  createTask: async input => `任务 ${input.caseVolume}`,
+  ...emptyPageTools()
 }
 
 describe('agent markdown', () => {
