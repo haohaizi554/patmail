@@ -1,6 +1,6 @@
 import type { App as VueApp } from 'vue'
 import cssText from '../floating/style.css?inline'
-import themeSelectCss from '../../../src/components/theme-select.css?inline'
+import themeSelectCss from '../shell/components/theme-select.css?inline'
 import { mountFloating } from '../floating/main'
 import type { MessageBridge } from '../shared/message'
 

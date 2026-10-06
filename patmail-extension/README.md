@@ -101,6 +101,7 @@ patmail-extension/
 │   ├── api/                    # EASY 参数和响应判断
 │   ├── mail/                   # 规则、签名、草稿
 │   ├── workflow/               # 流程节点、审核人、工作流目录
+│   ├── shell/                  # 工作台外框、下拉框和样式
 │   ├── floating/               # 页面浮窗
 │   ├── popup/
 │   ├── settings/               # 写开关、发文并发数、账号头像
@@ -109,7 +110,7 @@ patmail-extension/
 └── dist/                       # 加载这个目录
 ```
 
-工作台外壳和样式在仓库上一级的 `src/`。接口原文在仓库上一级的 `API/`。
+工作台外壳和样式在 `src/shell/`。接口原文在仓库上一级的 `API/`。
 
 ## 数据与边界
 

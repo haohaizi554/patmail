@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import PageHead from '../../../../src/components/PageHead.vue'
-import { bg } from '../../../../src/assets'
+import PageHead from '../../shell/components/PageHead.vue'
+import { bg } from '../../shell/assets'
 import { computed, inject, ref, watch } from 'vue'
 import { plainClone } from '../../automation/snapshot'
 import { mergeImportedMappings, removeCustomerPolicy, upsertCustomerPolicy, upsertMapping } from '../../mail'

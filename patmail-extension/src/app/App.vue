@@ -18,7 +18,7 @@ import SettingsPage from './pages/SettingsPage.vue'
 import LimitsPage from './pages/LimitsPage.vue'
 import CaseContactsPage from './pages/CaseContactsPage.vue'
 import { CASE_CONTACT_CUSTOMER_NAME } from '../customer/skills'
-import Shell from '../../../src/components/Shell.vue'
+import Shell from '../shell/components/Shell.vue'
 import AppDialog from './components/AppDialog.vue'
 
 const nav = [

@@ -5,7 +5,7 @@ import { MAIL_FLOW_TYPE } from '../workflow/contracts'
 import { reviewersForNode } from '../workflow/reviewer-resolver'
 import { useWriteSwitch } from '../settings/use-write-switch'
 import type { WorkflowView } from '../workflow/types'
-import ThemeSelect from '../../../src/components/ThemeSelect.vue'
+import ThemeSelect from '../shell/components/ThemeSelect.vue'
 
 const props = defineProps<{ bridge?: MessageBridge; mailId: string; ready: boolean }>()
 const { open: writesOpen } = useWriteSwitch()

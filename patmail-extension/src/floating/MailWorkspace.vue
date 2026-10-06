@@ -15,7 +15,7 @@ import { scopeFromConnection } from '../shared/connection'
 import { MessageType, type MessageBridge } from '../shared/message'
 import { sendToBackground } from '../utils/runtime'
 import { useWorkspace } from '../app/composables/useWorkspace'
-import ThemeSelect from '../../../src/components/ThemeSelect.vue'
+import ThemeSelect from '../shell/components/ThemeSelect.vue'
 import EmptyGuide from '../app/components/EmptyGuide.vue'
 
 const props = defineProps<{ bridge?: MessageBridge; userId: string; files: SelectedPatentFile[]; pageOrigin?: string }>()

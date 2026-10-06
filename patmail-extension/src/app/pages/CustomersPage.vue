@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from 'vue'
-import PageHead from '../../../../src/components/PageHead.vue'
-import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
-import { bg } from '../../../../src/assets'
+import PageHead from '../../shell/components/PageHead.vue'
+import ThemeSelect from '../../shell/components/ThemeSelect.vue'
+import { bg } from '../../shell/assets'
 import { fieldLabel } from '../../query/field-registry'
 import { CASE_CONTACT_CUSTOMER_NAME, caseContactSkills, hasCaseContactSkill, rememberCaseContactCustomer, unlocksCaseContacts } from '../../customer/skills'
 import { isQueryGuid } from '../../query/query-validator'

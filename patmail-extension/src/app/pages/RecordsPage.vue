@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from 'vue'
-import PageHead from '../../../../src/components/PageHead.vue'
-import { bg } from '../../../../src/assets'
+import PageHead from '../../shell/components/PageHead.vue'
+import { bg } from '../../shell/assets'
 import { PROCESS_SPECS, type ProcessKind, type ProcessListRow } from '../../api/mail-process'
 import { filterProcessRows } from '../../api/process-list-search'
 import { describeTaskRecord } from '../record-status'

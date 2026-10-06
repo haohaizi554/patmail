@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from 'vue'
-import MailTypeTreeSelect from '../../../../src/components/MailTypeTreeSelect.vue'
-import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
+import MailTypeTreeSelect from '../../shell/components/MailTypeTreeSelect.vue'
+import ThemeSelect from '../../shell/components/ThemeSelect.vue'
 import EmptyGuide from './EmptyGuide.vue'
 import LimitMonitorQuery from './LimitMonitorQuery.vue'
 import type { MailSender } from '../../customer/mailset'

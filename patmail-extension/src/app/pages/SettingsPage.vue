@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import PageHead from '../../../../src/components/PageHead.vue'
-import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
-import { bg } from '../../../../src/assets'
+import PageHead from '../../shell/components/PageHead.vue'
+import ThemeSelect from '../../shell/components/ThemeSelect.vue'
+import { bg } from '../../shell/assets'
 import { AVATAR_PRESET_IDS, presetAvatarUrl } from '../../settings/avatar'
 import { useAccountAvatar } from '../../settings/use-account-avatar'
 import { AGENT_CONFIG_DEFAULT } from '../../agent/config'

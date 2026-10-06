@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { OptionTreeNode } from '../../patmail-extension/src/query/option-tree'
+import type { OptionTreeNode } from '../../query/option-tree'
 
 const props = defineProps<{
   nodeId: string

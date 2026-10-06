@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import PageHead from '../../../../src/components/PageHead.vue'
-import { bg } from '../../../../src/assets'
+import PageHead from '../../shell/components/PageHead.vue'
+import { bg } from '../../shell/assets'
 import { acceptanceBlockReason } from '../../automation/acceptance-context'
 import { READONLY_ACCEPTANCE_CALLS } from '../../automation/acceptance-runner'
 import { MessageType } from '../../shared/message'
 import { useWorkspace } from '../composables/useWorkspace'
-import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
+import ThemeSelect from '../../shell/components/ThemeSelect.vue'
 
 const { connection, call } = useWorkspace()
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')

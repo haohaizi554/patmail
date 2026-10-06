@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import MailTypeTreeSelect from '../../../../../src/components/MailTypeTreeSelect.vue'
+import MailTypeTreeSelect from '../../../shell/components/MailTypeTreeSelect.vue'
 import type { DescriptionMailTypeMapping } from '../../../mail/types'
 
 const props = defineProps<{

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { buildOptionTree, searchOptionTree, type TreeOption } from '../../patmail-extension/src/query/option-tree'
+import { buildOptionTree, searchOptionTree, type TreeOption } from '../../query/option-tree'
 import { menuBoxStyle, placeMenu, treeMenuWidth } from './theme-select'
 import TreeOptionNode from './TreeOptionNode.vue'
 

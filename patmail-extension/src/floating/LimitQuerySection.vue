@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import ThemeSelect from '../../../src/components/ThemeSelect.vue'
-import TreeOptionSelect from '../../../src/components/TreeOptionSelect.vue'
+import ThemeSelect from '../shell/components/ThemeSelect.vue'
+import TreeOptionSelect from '../shell/components/TreeOptionSelect.vue'
 import type { HistoryQueryOption } from '../api/query-history'
 import { LIMIT_BLOCKS, LIMIT_OPTION_KEYS, LIMIT_SELECTS, buildLimitQueryXml, readLimitQueryXml } from '../api/limit-form'
 import { pageSelectOptions } from '../query/form-page'

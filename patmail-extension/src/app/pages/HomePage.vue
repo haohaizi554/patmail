@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import PageHead from '../../../../src/components/PageHead.vue'
-import { bg, icon } from '../../../../src/assets'
+import PageHead from '../../shell/components/PageHead.vue'
+import { bg, icon } from '../../shell/assets'
 import { greetingForHour } from '../greeting'
 import { barWidth, homeReport } from '../home-report'
 import { pickHomeLine } from '../home-lines'

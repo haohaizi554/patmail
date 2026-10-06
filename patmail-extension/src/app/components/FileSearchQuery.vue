@@ -5,7 +5,7 @@ import { assessQueryScope } from '../../api/file-search-params'
 import type { FileSearchResult } from '../../api/file-search-types'
 import { selectPage, toSelectedFile, toggleSelected, type SelectedPatentFile } from '../../mail'
 import QueryTemplateSection from '../../floating/QueryTemplateSection.vue'
-import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
+import ThemeSelect from '../../shell/components/ThemeSelect.vue'
 import { MessageType, type MessageBridge } from '../../shared/message'
 
 const props = withDefaults(defineProps<{

@@ -25,8 +25,8 @@ import { MessageType, type FileSearchFormField, type MessageBridge } from '../sh
 import { useWorkspace } from '../app/composables/useWorkspace'
 import { hasOptionTree } from '../query/option-tree'
 import { describePickerReceipt, FILE_PICKER_FIELDS } from '../api/dictionaries/picker-catalog'
-import ThemeSelect from '../../../src/components/ThemeSelect.vue'
-import TreeOptionSelect from '../../../src/components/TreeOptionSelect.vue'
+import ThemeSelect from '../shell/components/ThemeSelect.vue'
+import TreeOptionSelect from '../shell/components/TreeOptionSelect.vue'
 
 const props = withDefaults(defineProps<{
   bridge?: MessageBridge

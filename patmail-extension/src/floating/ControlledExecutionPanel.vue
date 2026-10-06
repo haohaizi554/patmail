@@ -8,7 +8,7 @@ import type { CustomerQueryProfile } from '../customer/types'
 import type { MailRuleBundle, SelectedPatentFile } from '../mail/types'
 import type { StageId } from '../automation/types'
 import type { MessageBridge } from '../shared/message'
-import ThemeSelect from '../../../src/components/ThemeSelect.vue'
+import ThemeSelect from '../shell/components/ThemeSelect.vue'
 
 const props = defineProps<{
   bridge?: MessageBridge

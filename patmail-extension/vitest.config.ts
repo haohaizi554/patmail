@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 export default defineConfig({
   server: {
     fs: {
-      allow: [resolve(__dirname, '..'), resolve(__dirname, '../src')]
+      allow: [resolve(__dirname, '..')]
     }
   },
   test: {

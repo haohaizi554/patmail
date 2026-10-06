@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import ThemeSelect from '../../../../../src/components/ThemeSelect.vue'
+import ThemeSelect from '../../../shell/components/ThemeSelect.vue'
 import EmptyGuide from '../EmptyGuide.vue'
 import { FILE_MAIL_STYLES, LIMIT_MAIL_STYLES } from '../../../customer/mail-flow'
 import type { CustomerQueryProfile, LimitMailStyle, QuerySurfaceId } from '../../../customer/types'

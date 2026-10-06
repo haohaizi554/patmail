@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, onActivated, onMounted, ref } from 'vue'
-import LimitPage from '../../../../src/pages/LimitPage.vue'
+import LimitPage from '../../shell/pages/LimitPage.vue'
 import LimitQuerySection from '../../floating/LimitQuerySection.vue'
 import BindQueryBar from '../components/BindQueryBar.vue'
 import type { LimitMonitorResult, LimitMonitorRow } from '../../api/limit-monitor-types'

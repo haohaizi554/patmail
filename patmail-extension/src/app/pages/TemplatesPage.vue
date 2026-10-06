@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
-import PageHead from '../../../../src/components/PageHead.vue'
-import { bg } from '../../../../src/assets'
+import PageHead from '../../shell/components/PageHead.vue'
+import { bg } from '../../shell/assets'
 import QueryTemplateSection from '../../floating/QueryTemplateSection.vue'
 import LimitQuerySection from '../../floating/LimitQuerySection.vue'
 import type { MessageBridge } from '../../shared/message'

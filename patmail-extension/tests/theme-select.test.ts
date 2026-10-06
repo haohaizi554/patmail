@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { filterSelectOptions, highlightAfterKey, menuWidthForLabels, placeMenu, selectNeedsSearch, showsGroup, textOptions, treeMenuWidth } from '../../src/components/theme-select'
+import { filterSelectOptions, highlightAfterKey, menuWidthForLabels, placeMenu, selectNeedsSearch, showsGroup, textOptions, treeMenuWidth } from '../src/shell/components/theme-select'
 
 describe('theme select', () => {
   it('opens downward and flips upward when the lower space is tight', () => {

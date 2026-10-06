@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import ThemeSelect from '../../../../../src/components/ThemeSelect.vue'
+import ThemeSelect from '../../../shell/components/ThemeSelect.vue'
 import type { DefaultReviewer } from '../../../mail/types'
 
 const props = defineProps<{

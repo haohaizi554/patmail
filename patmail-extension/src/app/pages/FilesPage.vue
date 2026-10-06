@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import PageHead from '../../../../src/components/PageHead.vue'
-import { bg } from '../../../../src/assets'
+import PageHead from '../../shell/components/PageHead.vue'
+import { bg } from '../../shell/assets'
 import type { FileSearchQuery } from '../../api/file-search-params'
 import { snapshotFromFileQuery } from '../../customer/mail-flow'
 import FileSearchPanel from '../../floating/FileSearchPanel.vue'

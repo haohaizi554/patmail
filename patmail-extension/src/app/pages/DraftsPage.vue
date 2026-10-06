@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import PageHead from '../../../../src/components/PageHead.vue'
-import { bg } from '../../../../src/assets'
+import PageHead from '../../shell/components/PageHead.vue'
+import { bg } from '../../shell/assets'
 import { describeDraftState, describeTaskRecord } from '../record-status'
 import { MessageType } from '../../shared/message'
 import { sendToBackground } from '../../utils/runtime'

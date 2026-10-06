@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, ref, watch } from 'vue'
-import PageHead from '../../../../src/components/PageHead.vue'
-import MailTypeTreeSelect from '../../../../src/components/MailTypeTreeSelect.vue'
-import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
-import { bg } from '../../../../src/assets'
+import PageHead from '../../shell/components/PageHead.vue'
+import MailTypeTreeSelect from '../../shell/components/MailTypeTreeSelect.vue'
+import ThemeSelect from '../../shell/components/ThemeSelect.vue'
+import { bg } from '../../shell/assets'
 import type { PatentFile } from '../../api/file-search-types'
 import { fetchMailSenders } from '../../customer/mailset-load'
 import type { MailSender } from '../../customer/mailset'

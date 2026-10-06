@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
-import Bunny from '../../../../src/components/Bunny.vue'
-import MailTypeTreeSelect from '../../../../src/components/MailTypeTreeSelect.vue'
-import PageHead from '../../../../src/components/PageHead.vue'
-import ThemeSelect from '../../../../src/components/ThemeSelect.vue'
-import { bg } from '../../../../src/assets'
+import Bunny from '../../shell/components/Bunny.vue'
+import MailTypeTreeSelect from '../../shell/components/MailTypeTreeSelect.vue'
+import PageHead from '../../shell/components/PageHead.vue'
+import ThemeSelect from '../../shell/components/ThemeSelect.vue'
+import { bg } from '../../shell/assets'
 import {
   cloneCatalog,
   cloneWorkflow,

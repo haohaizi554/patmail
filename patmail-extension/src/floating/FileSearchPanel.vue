@@ -6,7 +6,7 @@ import { applyConfirmedBind, reviewCustomerBind, type SelectedPatentFile } from 
 import type { BindReviewGroup } from '../mail/selection'
 import MailWorkspace from './MailWorkspace.vue'
 import FileSearchQuery from '../app/components/FileSearchQuery.vue'
-import ThemeSelect from '../../../src/components/ThemeSelect.vue'
+import ThemeSelect from '../shell/components/ThemeSelect.vue'
 import EmptyGuide from '../app/components/EmptyGuide.vue'
 import { MessageType, type MessageBridge } from '../shared/message'
 import { useWorkspace } from '../app/composables/useWorkspace'

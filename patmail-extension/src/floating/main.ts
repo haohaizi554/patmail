@@ -1,5 +1,5 @@
 import { createApp, type App as VueApp } from 'vue'
-import { hintDirective } from '../../../src/components/hint'
+import { hintDirective } from '../shell/components/hint'
 import App from './App.vue'
 import type { MessageBridge } from '../shared/message'
 

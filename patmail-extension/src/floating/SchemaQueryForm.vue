@@ -6,7 +6,7 @@ import type { FileSearchQuery } from '../api/file-search-params'
 import { optionsForCaseType, resolveFileDescriptionDisplay, resolveInternalIdDisplay, formHasQueryScope, formValuesToFields, FILE_SEARCH_SCHEMA } from '../schema'
 import { MessageType, type MessageBridge } from '../shared/message'
 import FileTypePicker from './FileTypePicker.vue'
-import ThemeSelect from '../../../src/components/ThemeSelect.vue'
+import ThemeSelect from '../shell/components/ThemeSelect.vue'
 
 const props = defineProps<{ bridge?: MessageBridge; canSearch: boolean; pageSize: number }>()
 const emit = defineEmits<{ search: [query: FileSearchQuery] }>()
