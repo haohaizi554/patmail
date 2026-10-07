@@ -3,7 +3,7 @@ import type { AgentQuestion } from '../agent/ask'
 import { loadAgentConfig, type AgentConfig } from '../agent/config'
 import { LlmError, chatCompletion } from '../agent/llm'
 import { compactAgentMemory, runAgentTurn } from '../agent/loop'
-import { createAgentSession, loadMemory, openAgentSession, readAgentSessions, removeAgentSession, renameAgentSession, saveMemory, visibleHistory, type AgentMemoryState, type AgentSessionInfo } from '../agent/memory'
+import { AGENT_DEADLINE_KEEP, AGENT_FILE_KEEP, createAgentSession, loadMemory, openAgentSession, readAgentSessions, removeAgentSession, renameAgentSession, saveMemory, visibleHistory, type AgentMemoryState, type AgentSessionInfo } from '../agent/memory'
 import { helpText, resolveSlash } from '../agent/slash'
 import { formatDraft, type DeadlineRow, type ToolContext } from '../agent/tools'
 import { limitMailItems, summarizeLimitMailSubmit } from '../customer/limit-mail-submit'
@@ -122,7 +122,7 @@ function factsReply(memory: AgentMemoryState): string {
 
 async function clearConversation(area: LocalArea, model: string): Promise<ApiResult<AgentTurnView>> {
   const memory = await loadMemory(area)
-  const cleared: AgentMemoryState = { ...memory, summary: '', turns: [] }
+  const cleared: AgentMemoryState = { summary: '', turns: [], facts: memory.facts }
   await saveMemory(area, cleared)
   return { ok: true, data: await viewOf(area, '这段对话已清空。其它对话和长期记忆还在。', model, 0) }
 }
@@ -139,17 +139,46 @@ async function compactConversation(area: LocalArea, config: AgentConfig): Promis
   }
 }
 
-function toolContext(host: WorkspaceHost): ToolContext {
-  const bucket: SelectedPatentFile[] = []
-  const deadlines: DeadlineRow[] = []
+function toolContext(host: WorkspaceHost, memory: AgentMemoryState, signal: AbortSignal): ToolContext {
+  const bucket: SelectedPatentFile[] = [...(memory.work?.files ?? [])]
+  const deadlines: DeadlineRow[] = (memory.work?.deadlines ?? []).map(row => ({ ...row }))
   const forward = async (message: ContentRequest): Promise<unknown> => {
-      const response = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'forward', message } }, host)
+      if (signal.aborted) throw new LlmError('REQUEST_TIMEOUT', '已停下。')
+      const pending = handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'forward', message } }, host)
+      const response = await new Promise<Awaited<ReturnType<typeof handleWorkspaceMessage>>>((resolve, reject) => {
+        const stop = (): void => {
+          const cancelType = message.type === MessageType.SearchFiles
+            ? MessageType.CancelFileSearch
+            : message.type === MessageType.SearchLimitMonitor
+              ? MessageType.CancelLimitMonitor
+              : null
+          if (cancelType) {
+            void handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'forward', message: { type: cancelType } } }, host).catch(() => undefined)
+          }
+          reject(new LlmError('REQUEST_TIMEOUT', '已停下。'))
+        }
+        if (signal.aborted) {
+          stop()
+          return
+        }
+        const onAbort = (): void => stop()
+        signal.addEventListener('abort', onAbort, { once: true })
+        pending.then(value => {
+          signal.removeEventListener('abort', onAbort)
+          if (signal.aborted) stop()
+          else resolve(value)
+        }, error => {
+          signal.removeEventListener('abort', onAbort)
+          reject(error instanceof Error ? error : new LlmError('NETWORK_ERROR', 'EASY 页面没有执行这次查询。'))
+        })
+      })
       if (response.type !== MessageType.WorkspaceResult) return { error: '后台没有转发。' }
       if (!response.payload.ok || !response.payload.forwarded) return { error: response.payload.message || '没有结果。' }
       if (!isMessage(response.payload.forwarded)) return { error: 'EASY 页面没有返回可识别的结果。' }
       return response.payload.forwarded
     }
   return {
+    signal,
     snapshot: () => ({
       connected: host.connection.context.sessionStatus === 'authenticated',
       displayName: host.connection.context.displayName,
@@ -158,11 +187,11 @@ function toolContext(host: WorkspaceHost): ToolContext {
     }),
     forward,
     rememberFiles(files) {
-      bucket.splice(0, bucket.length, ...files.slice(0, 40))
+      bucket.splice(0, bucket.length, ...files.slice(0, AGENT_FILE_KEEP))
     },
     recentFiles: () => bucket.slice(),
     rememberDeadlines(rows) {
-      deadlines.splice(0, deadlines.length, ...rows.slice(0, 40))
+      deadlines.splice(0, deadlines.length, ...rows.slice(0, AGENT_DEADLINE_KEEP))
     },
     recentDeadlines: () => deadlines.slice(),
     async customers() {
@@ -620,7 +649,9 @@ export async function handleAgentChat(payload: { action?: unknown; message?: unk
   turnAbort?.abort()
   turnAbort = abort
   try {
-    const turn = await runAgentTurn(config, await loadMemory(area), message, toolContext(host), (next, options) => chatCompletion(next, { ...options, signal: abort.signal }), async state => {
+    const loaded = await loadMemory(area)
+    const turn = await runAgentTurn(config, loaded, message, toolContext(host, loaded, abort.signal), (next, options) => chatCompletion(next, { ...options, signal: abort.signal }), async state => {
+      if (abort.signal.aborted) return
       await saveMemory(area, state)
     }, publishActivity)
     return { ok: true, data: await viewOf(area, turn.reply, config.model, turn.steps, turn.memory) }

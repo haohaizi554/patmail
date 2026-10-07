@@ -27,12 +27,19 @@ export function hiddenFormFields(fields: FileSearchFormField[] = saved): Set<str
   return new Set(fields.filter(item => !item.visible).map(item => formFieldKey(item.id)))
 }
 
+function meaningfulOption(option: { value: string; label: string }): boolean {
+  const value = option.value.trim()
+  const label = option.label.trim()
+  if (!value || !label) return false
+  return label.replace(/[\s\-—_]/g, '') !== '请选择'
+}
+
 export function pageSelectOptions(key: string, fields: FileSearchFormField[] = fallbackFields()): { value: string; label: string; parent?: string }[] | null {
   const found = fields.find(item => item.visible && (item.control === 'select' || item.control === 'picker') && formFieldKey(item.id) === key && item.options.length)
   if (!found) return null
   return found.options.flatMap(option => {
-    if (!option.label || option.label.replace(/[\s\-—_]/g, '') === '请选择') return []
-    const row = { value: option.value || option.label, label: option.label }
+    if (!meaningfulOption(option)) return []
+    const row = { value: option.value.trim(), label: option.label.trim() }
     return option.parent ? [{ ...row, parent: option.parent }] : [row]
   })
 }
@@ -53,9 +60,9 @@ export function overlayFieldOptions(
 
 export function mergeFormFields(live: FileSearchFormField[], previous: FileSearchFormField[] = fallbackFields()): FileSearchFormField[] {
   return live.map(field => {
-    if (field.options.length) return field
+    if (field.options.some(meaningfulOption)) return field
     const older = previous.find(item => item.id === field.id)
-    return older?.options.length ? { ...field, options: older.options } : field
+    return older?.options.some(meaningfulOption) ? { ...field, options: older.options } : field
   })
 }
 

@@ -78,6 +78,7 @@ export const MessageType = {
   ReadMailAddresses: 'READ_MAIL_ADDRESSES',
   MailAddressResult: 'MAIL_ADDRESS_RESULT',
   CancelFileSearch: 'CANCEL_FILE_SEARCH',
+  CancelLimitMonitor: 'CANCEL_LIMIT_MONITOR',
   FileSearchCancelled: 'FILE_SEARCH_CANCELLED',
   ListHistoryQueries: 'LIST_HISTORY_QUERIES',
   HistoryQueriesResult: 'HISTORY_QUERIES_RESULT',
@@ -142,7 +143,7 @@ type Response<T extends string, P> = Message<P> & { type: T; payload: P }
 export type ContentRequest =
   | Request<'SCAN_PAGE'> | Request<'GET_PAGE_INFO'> | Request<'SHOW_PANEL'> | Request<'PING'>
   | Request<'CHECK_SESSION'> | Request<'CANCEL_SESSION_CHECK'>
-  | Request<'CANCEL_FILE_SEARCH'> | Response<'SEARCH_FILES', { query: FileSearchQuery; continuation?: { querySessionId: string } }>
+  | Request<'CANCEL_FILE_SEARCH'> | Request<'CANCEL_LIMIT_MONITOR'> | Response<'SEARCH_FILES', { query: FileSearchQuery; continuation?: { querySessionId: string } }>
   | Response<'SEARCH_LIMIT_MONITOR', { query: LimitMonitorQuery }>
   | Response<'SUBMIT_LIMIT_MAIL', { userId: string; items: Array<{ procId: string; procIds?: string[]; mailTypeId: string; mailStyle: '1'; mailId?: string; mode: 'ipr' | 'lead'; inventor?: boolean; customerName: string; contactName: string; iprName: string; leadName: string }> }>
   | Response<'EXPORT_CASE_CONTACTS', { volumes: string[] }>
@@ -496,6 +497,7 @@ export function isMessage(value: unknown): value is AppMessage {
     case MessageType.CheckSession:
     case MessageType.CancelSessionCheck:
     case MessageType.CancelFileSearch:
+    case MessageType.CancelLimitMonitor:
       return value.payload === undefined
     case MessageType.ListHistoryQueries:
       return isRecord(value.payload) && (value.payload.force === true || value.payload.force === false) &&
@@ -746,6 +748,7 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.ShowPanel || value.type === MessageType.Ping ||
     value.type === MessageType.CheckSession || value.type === MessageType.CancelSessionCheck ||
     value.type === MessageType.SearchFiles || value.type === MessageType.CancelFileSearch ||
+    value.type === MessageType.CancelLimitMonitor ||
     value.type === MessageType.SearchLimitMonitor || value.type === MessageType.ListMailProcesses ||
     value.type === MessageType.SubmitLimitMail ||
     value.type === MessageType.ExportCaseContacts ||
@@ -771,7 +774,7 @@ export function isContentRequest(value: unknown): value is ContentRequest {
   )
 }
 
-const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'SEARCH_LIMIT_MONITOR', 'LOOKUP_IC_FLOW', 'EXPORT_CASE_CONTACTS', 'LIST_MAIL_PROCESSES', 'OPEN_EASY_FORM', 'LIST_FLOW_REVIEWERS', 'READ_CASE_DEMANDS', 'READ_CASE_BUS_FLOW', 'READ_CUSTOMER_DEMANDS', 'READ_CUSTOMER_DIRECTORY', 'READ_MAIL_CONTACTS', 'READ_MAIL_ADDRESSES', 'GET_PAGE_INFO', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE', 'CALL_EASY'])
+const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'CANCEL_LIMIT_MONITOR', 'SEARCH_LIMIT_MONITOR', 'LOOKUP_IC_FLOW', 'EXPORT_CASE_CONTACTS', 'LIST_MAIL_PROCESSES', 'OPEN_EASY_FORM', 'LIST_FLOW_REVIEWERS', 'READ_CASE_DEMANDS', 'READ_CASE_BUS_FLOW', 'READ_CUSTOMER_DEMANDS', 'READ_CUSTOMER_DIRECTORY', 'READ_MAIL_CONTACTS', 'READ_MAIL_ADDRESSES', 'GET_PAGE_INFO', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE', 'CALL_EASY'])
 const WRITE_FORWARD = new Set(['CREATE_EASY_MAIL', 'SAVE_EASY_MAIL', 'SAVE_HISTORY_QUERY', 'DELETE_HISTORY_QUERY', 'SUBMIT_LIMIT_MAIL'])
 
 /** 不允许转发时给出原因。写开关关掉时，创建、保存和查询模板写回都停在这里。 */

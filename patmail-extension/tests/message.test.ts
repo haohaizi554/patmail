@@ -45,6 +45,7 @@ describe('message validation', () => {
     expect(isContentRequest({ type: 'CHECK_SESSION' })).toBe(true)
     expect(isContentRequest({ type: 'CANCEL_SESSION_CHECK' })).toBe(true)
     expect(isContentRequest({ type: 'CANCEL_FILE_SEARCH' })).toBe(true)
+    expect(isContentRequest({ type: 'CANCEL_LIMIT_MONITOR' })).toBe(true)
     expect(isContentRequest({ type: 'SEARCH_FILES', payload: { query: {
       caseVolume: 'A-123', pageIndex: 1, pageSize: 20
     } } })).toBe(true)

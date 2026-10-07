@@ -1,11 +1,11 @@
 import { activityDetail } from './trace'
 import type { AgentConfig } from './config'
 import { chatCompletion, LlmError, llmFailureKind, type AssistantToolCall, type ChatChoice, type ChatMessage, type ChatOutcome } from './llm'
-import { applySummary, contextChars, foldDigest, needsCompression, OVERFLOW_RETRY_CHARS, projectOldToolText, splitForCompression, trimToolResults, visibleHistory, type AgentMemoryState, type MemoryTurn } from './memory'
+import { applySummary, contextChars, factsForPrompt, foldDigest, needsCompression, OVERFLOW_RETRY_CHARS, projectOldToolText, splitForCompression, trimToolResults, visibleHistory, type AgentMemoryState, type AgentWork, type MemoryTurn } from './memory'
 import { planFromCalls, remainingWork, type WorkStep } from './plan'
 import { resolveSlash } from './slash'
 import { agentToolSchemas, executeAgentTool, type ToolContext } from './tools'
-import { DIGEST_MISS_LIMIT, MAX_NUDGES, RATE_LIMIT_BACKOFF_MS, STEP_LIMIT_REPLY, UNKNOWN_STOP_AT, WRAP_NOTE, asksToSubmit, canonicalArgs, factIsGrounded, failedQueryText, groupToolCalls, isUnknownTool, repeatNote, requiredTools, reviewReply, sameResultAgain, shouldStopFailures, shouldStopRepeat, skippedToolText, stepLimit, stuckQueryText, toolSucceeded, unknownStopNote, type ToolTrace } from './turn-policy'
+import { DIGEST_MISS_LIMIT, MAX_NUDGES, RATE_LIMIT_BACKOFF_MS, STEP_LIMIT_REPLY, UNKNOWN_STOP_AT, WRAP_NOTE, asksToSubmit, canonicalArgs, factIsGrounded, failedQueryText, groupToolCalls, isUnknownTool, previousTrace, repeatNote, requiredTools, reviewReply, sameResultAgain, shouldStopFailures, shouldStopRepeat, skippedToolText, stepLimit, stuckQueryText, unknownStopNote, type ToolTrace } from './turn-policy'
 
 const THOUGHT_MARK = '\u001e'
 
@@ -87,7 +87,7 @@ const SYSTEM_PROMPT = [
   '用户用大白话说要办的事。你调用工具，把工作流和发文任务直接做出来，不要只给一份查询清单。',
   '规则：',
   '1. 要建工作流就调用 create_workflow。要改某一栏就调用 set_workflow_field。要建发文任务就调用 create_task。缺了只有用户知道的名字、文号或步骤时调用 ask_user。问什么、给哪些选项由你决定。用户答完再做。不要只在正文里写还要补上。',
-  '2. 查案件、期限、客户和接口，是为了把工作流或任务做对。不要编造文号、客户或日期。',
+  '2. 查案件、期限、客户和接口，是为了把工作流或任务做对。不要编造文号、客户或日期。查文件和文件查询页一样，默认每页 20 条，也可以 50 或 100。没看完就用同样的条件把页码加 1。查期限和期限页一样，每页 10 条；一次给出多个文号时会全部查完。查到的文件和期限会留在这段对话里，下一句还能接着用。',
   '3. 查 EASY 之前先看连接状态。没连上就告诉用户打开已经登录的 EASY 页面，然后重新打开工作台。',
   '4. 用户要提交到 EASY 或提交审核时调用 submit_easy。它和页面上的「提交到 EASY」一样，创建发文并交给当前登录人。写开关关着、事项还在审核里、或还没有发文类型时，按工具原文说明，不要说已经提交。create_task 只记计划。起草、对信、合成一封调用 draft_mail，占位符由这一轮查到的文件填写。看任务、查询记录、客户资料分别调用 list_tasks、list_history、read_customer。',
   '5. 长期记忆里的偏好优先遵守。用户明确的偏好用 remember 记下。文号、客户、日期只有用户亲口说过，或这次工具返回了，才能记住，不要把推断写进去。',
@@ -95,7 +95,7 @@ const SYSTEM_PROMPT = [
   '7. 不确定接口、字段或 Call 时，先用 lookup_api 查文档。用户要看实时响应时调用 call_easy。页面上已经固定的组合用 recipe，只填 case_id：biology 是生物材料，case-info 是案件信息，case-flow 是案件流程，case-demand 是案件要求。其它接口用 steps 按顺序调用，下一步字段用 @{1.路径} 取第 1 步响应里的值。查案件、查期限给出的案件编号和事项编号原样填进去。不要只调一个就停，回答里不要念这些编号。它使用当前登录会话，只发不会改数据的请求。不要说无法调用 HTTP。问一共有多少接口时，检索词用「多少接口」，只报工具给出的个数。文档篇数不是接口数，不要再写一段分类介绍。会改数据的动作仍用现有工具。',
   '8. 以 /技能名 开头的是用户点名的技能。说明附在这句后面，只办这一件。',
   '9. 更早对话只留原文摘录，不是查证结论。文号、客户、日期、个数以这次工具返回为准。摘录里没有对应工具原文的，要重新查，不要顺着旧说法补细节。',
-  '10. 一件事要分好几步时，先调用 plan_work，写 2 到 6 步。每步一个短标题，并写上要用的工具名。然后按顺序做，一步成功再做下一步。只查一次的小事不要写计划。'
+  '10. 一件事要分好几步时，先调用 plan_work，写 2 到 6 步。每步一个短标题，并写上要用的工具名。查案件或查期限时把参数写进 args。然后按顺序做，一步的工具和参数都对上再做下一步。只查一次的小事不要写计划。'
 ].join('\n')
 
 export interface AgentTurnResult {
@@ -112,14 +112,19 @@ function wait(ms: number): Promise<void> {
 }
 
 function messageOf(turn: { role: string; content: string; guidance?: string }): string {
-  if (turn.role === 'assistant') return splitAgentReply(turn.content).answer || turn.content
+  if (turn.role === 'assistant') {
+    const split = splitAgentReply(turn.content)
+    if (split.thought) return split.answer
+    return turn.content
+  }
   if (turn.role === 'user' && turn.guidance) return `${turn.content}\n\n${turn.guidance}`
   return turn.content
 }
 
 /** 系统提示保持不变。摘录和长期记忆挂在这一轮的用户消息上，不改已经发出的历史。 */
 function toChat(state: AgentMemoryState): ChatMessage[] {
-  const facts = state.facts.slice(-12).map(fact => `- ${fact.text}`).join('\n')
+  const asked = [...state.turns].reverse().find(turn => turn.role === 'user' && !turn.hidden)?.content ?? ''
+  const facts = factsForPrompt(state, asked).map(fact => `- ${fact.text}`).join('\n')
   const visibleUsers = state.turns.flatMap((turn, index) => turn.role === 'user' && !turn.hidden ? [index] : [])
   const firstUser = visibleUsers[0]
   const lastUser = visibleUsers[visibleUsers.length - 1]
@@ -296,6 +301,26 @@ interface ToolBatch {
   halt: boolean
 }
 
+/** 并行查到的文件和期限各留各的，后写上的那一边不要把另一边盖掉。 */
+function absorbWork(current: AgentMemoryState, returned: AgentMemoryState, name: string): AgentMemoryState {
+  const previous = current.work
+  const patch = returned.work
+  if ((name !== 'search_cases' && name !== 'search_deadlines') || !patch) {
+    return previous ? { ...returned, work: previous } : returned
+  }
+  const work: AgentWork = {
+    files: name === 'search_cases' ? patch.files : (previous?.files ?? []),
+    deadlines: name === 'search_deadlines' ? patch.deadlines : (previous?.deadlines ?? []),
+    ...(name === 'search_cases'
+      ? (patch.fileQuery ? { fileQuery: patch.fileQuery } : {})
+      : (previous?.fileQuery ? { fileQuery: previous.fileQuery } : {})),
+    ...(name === 'search_deadlines'
+      ? (patch.deadlineQuery ? { deadlineQuery: patch.deadlineQuery } : {})
+      : (previous?.deadlineQuery ? { deadlineQuery: previous.deadlineQuery } : {}))
+  }
+  return { ...returned, work }
+}
+
 /** 每个工具调用都回一条结果。只读查询同一波一起跑，写操作仍按顺序。重复查询和无此工具在这里停。 */
 async function runToolBatch(state: AgentMemoryState, calls: AssistantToolCall[], traces: ToolTrace[], unknownStreak: number, ctx: ToolContext, userText: string, onActivity?: (label: string, thought?: string, detail?: string) => void, compacted = false): Promise<ToolBatch> {
   let next = state
@@ -333,23 +358,40 @@ async function runToolBatch(state: AgentMemoryState, calls: AssistantToolCall[],
     if (ready.length === 0) break
     for (const call of ready) onActivity?.(toolActivity(call.function.name))
     const base = next
-    const executed = await Promise.all(ready.map(call => executeAgentTool(call.function.name, call.function.arguments, ctx, base)))
-    for (let slot = 0; slot < ready.length; slot += 1) {
-      const call = ready[slot]
-      const result = executed[slot]
-      if (!call || !result) continue
+    const fresh: AssistantToolCall[] = []
+    const reused = new Map<string, ToolTrace>()
+    for (const call of ready) {
+      const prior = previousTrace(seen, call.function.name, canonicalArgs(call.function.arguments))
+      if (prior) reused.set(call.id, prior)
+      else fresh.push(call)
+    }
+    const executed = new Map<string, { text: string; memory: AgentMemoryState; ok: boolean }>()
+    if (fresh.length > 0) {
+      const batch = await Promise.all(fresh.map(async call => {
+        if (ctx.signal?.aborted) throw new LlmError('REQUEST_TIMEOUT', '已停下。')
+        const result = await executeAgentTool(call.function.name, call.function.arguments, ctx, base)
+        return [call.id, result] as const
+      }))
+      for (const [id, result] of batch) executed.set(id, result)
+    }
+    for (const call of ready) {
       const args = canonicalArgs(call.function.arguments)
+      const prior = reused.get(call.id)
+      const result = prior ? { text: prior.text, memory: base, ok: prior.ok } : executed.get(call.id)
+      if (!result) continue
       let text = result.text
-      let memory = result.memory
-      if (call.function.name === 'remember') {
+      let memory = prior ? next : absorbWork(next, result.memory, call.function.name)
+      let ok = result.ok
+      if (!prior && call.function.name === 'remember') {
         const before = new Set(base.facts.map(fact => fact.id))
-        const added = memory.facts.filter(fact => !before.has(fact.id))
-        const fresh = added.filter(fact => factIsGrounded(fact.text, groundSources(base, seen, userText)))
-        if (added.length > 0 && fresh.length !== added.length) {
-          memory = { ...memory, facts: [...base.facts, ...fresh] }
-          text = fresh.length > 0
-            ? `已记住：${fresh.map(fact => fact.text).join('；')}`
+        const added = result.memory.facts.filter(fact => !before.has(fact.id))
+        const freshFacts = added.filter(fact => factIsGrounded(fact.text, groundSources(base, seen, userText)))
+        if (added.length > 0 && freshFacts.length !== added.length) {
+          memory = { ...memory, facts: [...base.facts, ...freshFacts] }
+          text = freshFacts.length > 0
+            ? `已记住：${freshFacts.map(fact => fact.text).join('；')}`
             : '这句话不是用户亲口说的，也不是这次工具返回的，没有写入长期记忆。'
+          ok = freshFacts.length > 0
         }
       }
       const note = isUnknownTool(text) ? '' : repeatNote(seen, call.function.name, args, text)
@@ -358,7 +400,7 @@ async function runToolBatch(state: AgentMemoryState, calls: AssistantToolCall[],
       const stopUnknown = unknown >= UNKNOWN_STOP_AT
       const again = compacted && sameResultAgain(seen, call.function.name, args, text)
       const stored = `${text}${note}${again ? '\n整理过更早对话之后，同一结果又出现了一次，不再重复查。' : ''}${stopUnknown ? unknownStopNote() : ''}`
-      seen.push({ name: call.function.name, args, text, ok: toolSucceeded(call.function.name, text) })
+      seen.push({ name: call.function.name, args, text, ok })
       onActivity?.(toolActivity(call.function.name), undefined, activityDetail(stored))
       next = { ...memory, turns: [...next.turns, { role: 'tool', content: stored, toolCallId: call.id }] }
       if (again) {
@@ -398,7 +440,10 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
   state = trimToolResults(state)
   state = await compress(config, state, complete)
   const compacted = Boolean(state.summary) && state.summary !== summaryBefore
-  const persistTranscript = async (): Promise<void> => { await onMemory?.({ ...state, facts: factsAtStart }) }
+  const persistTranscript = async (): Promise<void> => {
+    if (ctx.signal?.aborted) return
+    await onMemory?.({ ...state, facts: factsAtStart })
+  }
   let plan: WorkStep[] = []
   const journal: JournalEntry[] = []
   const watch = (label: string, thought?: string, detail?: string): void => {
@@ -408,6 +453,7 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
   const finish = async (reply: string, steps: number): Promise<AgentTurnResult> => {
     const packed = packJournal(reply, journal)
     state = { ...state, turns: [...state.turns.filter(turn => !turn.hidden), { role: 'assistant', content: packed }] }
+    if (ctx.signal?.aborted) throw new LlmError('REQUEST_TIMEOUT', '已停下。')
     await onMemory?.(state)
     return { reply: packed, steps, memory: state, history: visibleHistory(state) }
   }
@@ -442,7 +488,11 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
       }
       return complete(active, {
         messages: toChat(current),
-        ...(withTools ? { tools: agentToolSchemas([...state.turns.filter(turn => turn.role === 'user').map(turn => [turn.content, turn.guidance].filter(Boolean).join('\n')), ...plan.map(step => step.tool)]) } : {}),
+        ...(withTools ? { tools: agentToolSchemas([
+          ...state.turns.filter(turn => turn.role === 'user').map(turn => [turn.content, turn.guidance].filter(Boolean).join('\n')),
+          ...plan.map(step => [step.tool, step.args].filter(Boolean).join(' ')),
+          ...traces.filter(trace => trace.ok).map(trace => trace.text)
+        ]) } : {}),
         temperature: 0.2,
         onDelta: partial => {
           thought = partial.reasoning.trim()
@@ -454,6 +504,8 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
     let upstreamTries = 0
     let transientTries = 0
     let overflowTries = 0
+    let rateTries = 0
+    let timeoutTries = 0
     for (;;) {
       try {
         return await send(state)
@@ -461,10 +513,17 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
         if (!(error instanceof LlmError)) throw error
         if (error.message === '已停下。') throw error
         const kind = llmFailureKind(error)
-        if (kind === 'rate_limit') {
+        if (kind === 'rate_limit' && rateTries < 2) {
+          rateTries += 1
           onActivity?.('模型忙，稍等再试')
+          await wait(RATE_LIMIT_BACKOFF_MS * rateTries)
+          continue
+        }
+        if (kind === 'timeout' && timeoutTries < 1) {
+          timeoutTries += 1
+          onActivity?.('模型响应超时，再试一次')
           await wait(RATE_LIMIT_BACKOFF_MS)
-          return await send(state)
+          continue
         }
         if (kind === 'transient' && transientTries < 1) {
           transientTries += 1
@@ -561,10 +620,11 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
       if (written) {
         plan = written
         watch('已拆成计划', undefined, written.map((step, index) => `${index + 1}.${step.title}`).join(' '))
-      } else if (expected && !choice.toolCalls.some(call => call.function.name === expected.tool)) {
+      } else if (expected && !choice.toolCalls.some(call => call.function.name === expected.tool && (!expected.args || expected.args === canonicalArgs(call.function.arguments)))) {
+        const argsNote = expected.args ? `，参数 ${expected.args}` : ''
         state = {
           ...state,
-          turns: [...state.turns, { role: 'user', content: `计划的下一步是「${expected.title}」，要调用 ${expected.tool}。刚才做的不是这一步。`, hidden: true }]
+          turns: [...state.turns, { role: 'user', content: `计划的下一步是「${expected.title}」，要调用 ${expected.tool}${argsNote}。刚才做的不是这一步。`, hidden: true }]
         }
       }
       await persistTranscript()

@@ -1,4 +1,5 @@
 import type { AssistantToolCall } from './llm'
+import type { SelectedPatentFile } from '../mail/types'
 
 export const AGENT_MEMORY_KEY = 'patmail.agent.memory.v1'
 
@@ -21,12 +22,33 @@ export interface MemoryFact {
   at: string
 }
 
+/** 这一段对话里查到、下一句还能接着用的文件和期限。跟对话走，不跟长期记忆走。 */
+export interface AgentDeadlineRef {
+  procId: string
+  caseId: string
+  caseVolume: string
+}
+
+export interface AgentWork {
+  files: SelectedPatentFile[]
+  deadlines: AgentDeadlineRef[]
+  fileQuery?: string
+  deadlineQuery?: string
+}
+
+/** 和文件查询页最大的一页一样。 */
+export const AGENT_FILE_KEEP = 100
+/** 期限页一次收集时每页 100，这里留两页。 */
+export const AGENT_DEADLINE_KEEP = 200
+
 export interface AgentMemoryState {
   summary: string
   turns: MemoryTurn[]
   facts: MemoryFact[]
   /** 原文摘录连续没变短的次数。到 3 次就停，避免同一段反复摘。 */
   digestMisses?: number
+  /** 当前这段对话查到的文件和期限。换一段对话就换一份。 */
+  work?: AgentWork
 }
 
 export const EMPTY_MEMORY: AgentMemoryState = { summary: '', turns: [], facts: [] }
@@ -95,6 +117,68 @@ function isToolCall(value: unknown): value is AssistantToolCall {
     typeof (fn as Record<string, unknown>).arguments === 'string'
 }
 
+function clipText(value: unknown, max: number): string {
+  return typeof value === 'string' ? value.trim().slice(0, max) : ''
+}
+
+function readStoredFile(value: unknown): SelectedPatentFile | null {
+  if (typeof value !== 'object' || value === null) return null
+  const row = value as Record<string, unknown>
+  const fileId = clipText(row.fileId, 80)
+  const fileName = clipText(row.fileName, 300)
+  if (!fileId || !fileName) return null
+  const file: SelectedPatentFile = {
+    fileId,
+    fileName,
+    fileDescription: clipText(row.fileDescription, 300),
+    customerName: clipText(row.customerName, 200)
+  }
+  const caseId = clipText(row.caseId, 80)
+  const caseName = clipText(row.caseName, 300)
+  const caseVolume = clipText(row.caseVolume, 80)
+  const customerVolume = clipText(row.customerVolume, 80)
+  const applicationNo = clipText(row.applicationNo, 80)
+  const officialPostDate = clipText(row.officialPostDate, 40)
+  if (caseId) file.caseId = caseId
+  if (caseName) file.caseName = caseName
+  if (caseVolume) file.caseVolume = caseVolume
+  if (customerVolume) file.customerVolume = customerVolume
+  if (applicationNo) file.applicationNo = applicationNo
+  if (officialPostDate) file.officialPostDate = officialPostDate
+  return file
+}
+
+function readStoredDeadline(value: unknown): AgentDeadlineRef | null {
+  if (typeof value !== 'object' || value === null) return null
+  const row = value as Record<string, unknown>
+  const procId = clipText(row.procId, 80)
+  const caseVolume = clipText(row.caseVolume, 80)
+  if (!procId || !caseVolume) return null
+  return { procId, caseId: clipText(row.caseId, 80), caseVolume }
+}
+
+function readWork(value: unknown): AgentWork | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const row = value as Record<string, unknown>
+  const files = Array.isArray(row.files) ? row.files.flatMap(item => {
+    const file = readStoredFile(item)
+    return file ? [file] : []
+  }).slice(0, AGENT_FILE_KEEP) : []
+  const deadlines = Array.isArray(row.deadlines) ? row.deadlines.flatMap(item => {
+    const deadline = readStoredDeadline(item)
+    return deadline ? [deadline] : []
+  }).slice(0, AGENT_DEADLINE_KEEP) : []
+  const fileQuery = clipText(row.fileQuery, 500)
+  const deadlineQuery = clipText(row.deadlineQuery, 500)
+  if (files.length === 0 && deadlines.length === 0 && !fileQuery && !deadlineQuery) return undefined
+  return {
+    files,
+    deadlines,
+    ...(fileQuery ? { fileQuery } : {}),
+    ...(deadlineQuery ? { deadlineQuery } : {})
+  }
+}
+
 function isTurn(value: unknown): value is MemoryTurn {
   if (typeof value !== 'object' || value === null) return false
   const turn = value as Record<string, unknown>
@@ -135,12 +219,23 @@ export function normalizeMemory(value: unknown): AgentMemoryState {
   const misses = typeof record.digestMisses === 'number' && Number.isFinite(record.digestMisses)
     ? Math.max(0, Math.min(3, Math.floor(record.digestMisses)))
     : 0
-  return { summary, turns: capStoredTurns(turns), facts, ...(misses > 0 ? { digestMisses: misses } : {}) }
+  const work = readWork(record.work)
+  return { summary, turns: capStoredTurns(turns), facts, ...(misses > 0 ? { digestMisses: misses } : {}), ...(work ? { work } : {}) }
+}
+
+/** 发给模型的助手原文。思考和步骤留在页面上，不计入这段长度。 */
+export function modelAnswer(content: string): string {
+  const head = '\u001ethought\u001e'
+  if (!content.startsWith(head)) return content
+  const rest = content.slice(head.length)
+  const cut = rest.indexOf('\u001e')
+  return cut >= 0 ? rest.slice(cut + 1) : ''
 }
 
 export function turnChars(turn: MemoryTurn): number {
   const calls = turn.toolCalls?.reduce((sum, call) => sum + call.function.name.length + call.function.arguments.length, 0) ?? 0
-  return turn.content.length + (turn.guidance?.length ?? 0) + calls
+  const content = turn.role === 'assistant' ? modelAnswer(turn.content) : turn.content
+  return content.length + (turn.guidance?.length ?? 0) + calls
 }
 
 /** 存在本机缓存里、会交给模型的原文有多长。关掉后台再打开，用同一份记录重算。 */
@@ -194,12 +289,13 @@ export function clipSessionTitle(value: string): string {
   return line.length > SESSION_TITLE_LIMIT ? `${line.slice(0, SESSION_TITLE_LIMIT)}…` : line
 }
 
-function sessionBody(state: AgentMemoryState): Pick<AgentMemoryState, 'summary' | 'turns' | 'digestMisses'> {
+function sessionBody(state: AgentMemoryState): Pick<AgentMemoryState, 'summary' | 'turns' | 'digestMisses' | 'work'> {
   const normalized = normalizeMemory(state)
   return {
     summary: normalized.summary,
     turns: normalized.turns,
-    ...(normalized.digestMisses ? { digestMisses: normalized.digestMisses } : {})
+    ...(normalized.digestMisses ? { digestMisses: normalized.digestMisses } : {}),
+    ...(normalized.work ? { work: normalized.work } : {})
   }
 }
 
@@ -480,6 +576,31 @@ export function searchFacts(state: AgentMemoryState, query: string): MemoryFact[
   const needle = query.trim().toLowerCase()
   const matched = needle ? state.facts.filter(fact => fact.text.toLowerCase().includes(needle)) : state.facts
   return matched.slice(-12)
+}
+
+function factTerms(text: string): string[] {
+  const terms: string[] = []
+  for (const match of text.toLowerCase().matchAll(/[a-z0-9]{2,}/g)) terms.push(match[0])
+  for (const run of text.matchAll(/[\u4e00-\u9fff]+/g)) {
+    const chars = [...run[0]]
+    for (let index = 0; index < chars.length - 1; index += 1) terms.push(`${chars[index] ?? ''}${chars[index + 1] ?? ''}`)
+  }
+  return terms
+}
+
+/** 和这句话对得上的长期记忆，再补上最近几条。最多 12 条。 */
+export function factsForPrompt(state: AgentMemoryState, query: string): MemoryFact[] {
+  const asked = new Set(factTerms(query))
+  const matched = state.facts.filter(fact => factTerms(fact.text).some(term => asked.has(term))).slice(-8)
+  const picked: MemoryFact[] = []
+  const seen = new Set<string>()
+  for (const fact of [...matched, ...state.facts.slice(-4)]) {
+    if (seen.has(fact.id)) continue
+    seen.add(fact.id)
+    picked.push(fact)
+    if (picked.length >= 12) break
+  }
+  return picked
 }
 
 /** 页面上只展示人和助手的原话，工具来回留在后台。 */

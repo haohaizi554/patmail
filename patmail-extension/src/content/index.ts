@@ -27,8 +27,19 @@ async function waitForCaseTypes(doc: Document): Promise<void> {
   }
 }
 
+async function waitForSelectOptions(doc: Document, id: string): Promise<void> {
+  const started = Date.now()
+  while (Date.now() - started < 2500) {
+    const select = doc.querySelector(`#${id}`)
+    if (!(select instanceof HTMLSelectElement)) return
+    if (select.options.length > 1) return
+    await new Promise(resolve => window.setTimeout(resolve, 200))
+  }
+}
+
 async function scanDocument(doc: Document): Promise<FileSearchFormField[]> {
   await waitForCaseTypes(doc)
+  await waitForSelectOptions(doc, 'filetemp')
   return scanFileSearchForm(doc).fields
 }
 
@@ -230,6 +241,9 @@ const bridge: MessageBridge = {
       }
       case MessageType.CancelFileSearch:
         easyRuntime.cancelFileSearch()
+        return { type: MessageType.FileSearchCancelled, payload: { ok: true } }
+      case MessageType.CancelLimitMonitor:
+        easyRuntime.cancelLimitMonitor()
         return { type: MessageType.FileSearchCancelled, payload: { ok: true } }
     }
   }

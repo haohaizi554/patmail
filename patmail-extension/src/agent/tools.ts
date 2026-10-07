@@ -1,9 +1,11 @@
 import { applyEasyRefs, documentedCallAllowed, explainEasyArgs, payloadFromSummary, readEasySteps } from '../api/documented-call'
+import type { LimitMonitorRow } from '../api/limit-monitor-types'
+import { joinCaseVolumes, splitCaseVolumes } from '../customer/volume-list'
 import type { SelectedPatentFile } from '../mail/types'
 import { isMessage, MessageType, type ContentRequest } from '../shared/message'
 import { readAgentQuestions, type AgentQuestion } from './ask'
 import { formatWorkPlan, readWorkPlan } from './plan'
-import { clipToolResult, rememberFact, searchFacts, type AgentMemoryState } from './memory'
+import { AGENT_DEADLINE_KEEP, AGENT_FILE_KEEP, clipToolResult, rememberFact, searchFacts, type AgentMemoryState, type AgentWork } from './memory'
 import { LlmError } from './llm'
 import { requiredTools } from './turn-policy'
 import type { ToolSchema } from './llm'
@@ -15,6 +17,8 @@ export interface DeadlineRow {
 }
 
 export interface ToolContext {
+  /** 这一轮的取消信号。停下或新的一句话进来时中止。 */
+  signal?: AbortSignal
   /** 经工作台转发到已绑定的 EASY 标签页。失败时返回 { error }。 */
   forward(message: ContentRequest): Promise<unknown>
   snapshot(): { connected: boolean; displayName: string; origin: string; message: string }
@@ -103,14 +107,16 @@ const SCHEMAS: ToolSchema[] = [
     type: 'function',
     function: {
       name: 'search_cases',
-      description: '在 EASY 文件管理里按我方文号、申请号、客户或文件名查案件文件。至少给一项条件。',
+      description: '在 EASY 文件管理里按我方文号、申请号、客户或文件名查案件文件。至少给一项条件。和文件查询页一样，默认每页 20 条，也可以 50 或 100。没看完就用同样的条件把 page 加 1 再查。',
       parameters: {
         type: 'object',
         properties: {
           caseVolume: { type: 'string', description: '我方文号' },
           applicationNo: { type: 'string', description: '申请号' },
           customerName: { type: 'string', description: '客户名称，可模糊' },
-          fileName: { type: 'string', description: '文件名' }
+          fileName: { type: 'string', description: '文件名' },
+          page: { type: 'integer', description: '页码，从 1 开始。不填是第 1 页' },
+          pageSize: { type: 'integer', enum: [20, 50, 100], description: '每页条数，和文件查询页一样。不填是 20' }
         },
         additionalProperties: false
       }
@@ -120,14 +126,15 @@ const SCHEMAS: ToolSchema[] = [
     type: 'function',
     function: {
       name: 'search_deadlines',
-      description: '在期限监控里查还没结束的处理事项和内部/客户/法律期限。',
+      description: '在期限监控里查还没结束的处理事项和内部/客户/法律期限。和期限页一样，每页 10 条。没看完就用同样的条件把 page 加 1。文号有多个时一次查完，不用填页码。',
       parameters: {
         type: 'object',
         properties: {
-          caseVolume: { type: 'string', description: '我方文号' },
+          caseVolume: { type: 'string', description: '我方文号。多个用空格或分号分开' },
           applicationNo: { type: 'string', description: '申请号' },
           customerName: { type: 'string', description: '客户名称' },
-          kind: { type: 'string', enum: ['all', 'pay', 'suspend', 'abandon', 'recall', 'priority', 'fee'], description: '页签，不确定就用 all' }
+          kind: { type: 'string', enum: ['all', 'pay', 'suspend', 'abandon', 'recall', 'priority', 'fee'], description: '页签，不确定就用 all' },
+          page: { type: 'integer', description: '页码，从 1 开始。不填是第 1 页。多个文号时忽略' }
         },
         additionalProperties: false
       }
@@ -220,7 +227,8 @@ const SCHEMAS: ToolSchema[] = [
               type: 'object',
               properties: {
                 title: { type: 'string', description: '这一步做什么' },
-                tool: { type: 'string', description: '办成这一步要用的工具名' }
+                tool: { type: 'string', description: '办成这一步要用的工具名' },
+                args: { type: 'string', description: '这一步要传的参数，JSON 对象字符串。查案件或查期限时写上，勾选时会对上' }
               },
               required: ['title', 'tool']
             }
@@ -503,7 +511,7 @@ const COLD_TOOLS: ReadonlyArray<readonly [string, RegExp]> = [
   ['list_processes', /流程/],
   ['list_acceptance', /验收/],
   ['readonly_acceptance', /验收/],
-  ['diagnose_mail', /核对邮件|邮件核对/],
+  ['diagnose_mail', /核对邮件|邮件核对|邮件编号|mailId|mail_id/i],
   ['export_contacts', /联系人/]
 ]
 
@@ -530,6 +538,72 @@ function textArg(args: Record<string, unknown>, key: string, max = 80): string {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
 }
 
+function stopIfNeeded(ctx: ToolContext): void {
+  if (ctx.signal?.aborted) throw new LlmError('REQUEST_TIMEOUT', '已停下。')
+}
+
+/** 文件查询页的每页数量。 */
+const FILE_PAGE_SIZES = [20, 50, 100] as const
+const FILE_PAGE_SIZE = 20
+/** 期限页一页一条一条翻时的数量。 */
+const LIMIT_PAGE_SIZE = 10
+/** 期限页把多个文号一起查完时的每页数量和页数上限。 */
+const LIMIT_COLLECT_SIZE = 100
+const LIMIT_COLLECT_PAGES = 20
+
+function wholeArg(args: Record<string, unknown>, key: string): number | null {
+  const value = args[key]
+  if (value === undefined || value === '') return 1
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 10_000) return null
+  return parsed
+}
+
+function filePageSize(args: Record<string, unknown>): number | null {
+  const value = args.pageSize
+  if (value === undefined || value === '') return FILE_PAGE_SIZE
+  const parsed = typeof value === 'number' ? value : Number(value)
+  return (FILE_PAGE_SIZES as readonly number[]).includes(parsed) ? parsed : null
+}
+
+function pageNote(total: number, pageIndex: number, pageSize: number, totalPages: number): string {
+  const pages = Math.max(1, totalPages || 1)
+  const shown = Math.min(Math.max(1, pageIndex), pages)
+  const more = shown < pages ? `\n还有下一页。要看下一页，用同样的条件再查，页码填 ${shown + 1}。` : ''
+  return `第 ${shown} / ${pages} 页，每页 ${pageSize} 条。${more}`
+}
+
+function mergeByKey<T>(previous: readonly T[], incoming: readonly T[], key: (item: T) => string, cap: number): T[] {
+  const map = new Map<string, T>()
+  for (const item of previous) map.set(key(item), item)
+  for (const item of incoming) map.set(key(item), item)
+  return [...map.values()].slice(-cap)
+}
+
+function withFiles(memory: AgentMemoryState, files: SelectedPatentFile[], fileQuery: string, replace: boolean): AgentWork {
+  const previous = memory.work
+  const next = replace ? files.slice(0, AGENT_FILE_KEEP) : mergeByKey(previous?.files ?? [], files, item => item.fileId, AGENT_FILE_KEEP)
+  return {
+    files: next,
+    deadlines: previous?.deadlines ?? [],
+    fileQuery,
+    ...(previous?.deadlineQuery ? { deadlineQuery: previous.deadlineQuery } : {})
+  }
+}
+
+function withDeadlines(memory: AgentMemoryState, rows: DeadlineRow[], deadlineQuery: string, replace: boolean): AgentWork {
+  const previous = memory.work
+  const next = replace
+    ? rows.slice(0, AGENT_DEADLINE_KEEP)
+    : mergeByKey(previous?.deadlines ?? [], rows, item => item.procId, AGENT_DEADLINE_KEEP)
+  return {
+    files: previous?.files ?? [],
+    deadlines: next,
+    ...(previous?.fileQuery ? { fileQuery: previous.fileQuery } : {}),
+    deadlineQuery
+  }
+}
+
 async function callEasy(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
   const explained = explainEasyArgs(args)
   if (explained) return explained
@@ -538,6 +612,7 @@ async function callEasy(ctx: ToolContext, args: Record<string, unknown>): Promis
   const earlier: unknown[] = []
   const parts: string[] = []
   for (const [index, step] of steps.entries()) {
+    stopIfNeeded(ctx)
     const allowed = documentedCallAllowed(step.handler, step.call)
     if (!allowed.ok) return [parts.join('\n\n'), `第 ${index + 1} 步${allowed.reason}`].filter(Boolean).join('\n')
     const filled = applyEasyRefs(step.fields, earlier)
@@ -567,61 +642,138 @@ function forwardedError(value: unknown): string | null {
   return null
 }
 
-async function searchCases(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
+interface ListedRows<T> {
+  text: string
+  ok: boolean
+  rows: T[]
+  queryKey: string
+  replace: boolean
+}
+
+function caseLines(items: Array<{ caseVolume?: string; caseId?: string; caseName?: string; fileName?: string; customerName?: string; applicationNo?: string }>): string {
+  return items.map(item => [item.caseVolume, item.caseId && `案件编号 ${item.caseId}`, item.caseName, item.fileName, item.customerName, item.applicationNo].filter(Boolean).join(' | ')).join('\n')
+}
+
+function deadlineLines(items: Array<{ caseVolume?: string; caseId?: string; procId?: string; ctrlProc?: string; customerName?: string; intDueDate?: string; cusDueDate?: string; legalDueDate?: string }>): string {
+  return items.map(item =>
+    [item.caseVolume, item.caseId && `案件编号 ${item.caseId}`, item.procId && `事项编号 ${item.procId}`, item.ctrlProc, item.customerName, item.intDueDate && `内部 ${item.intDueDate}`, item.cusDueDate && `客户 ${item.cusDueDate}`, item.legalDueDate && `法律 ${item.legalDueDate}`].filter(Boolean).join(' | ')
+  ).join('\n')
+}
+
+async function searchCases(ctx: ToolContext, args: Record<string, unknown>, memory: AgentMemoryState): Promise<ListedRows<SelectedPatentFile>> {
   const caseVolume = textArg(args, 'caseVolume')
   const applicationNo = textArg(args, 'applicationNo')
   const customerName = textArg(args, 'customerName', 120)
   const fileName = textArg(args, 'fileName', 120)
-  if (!caseVolume && !applicationNo && !customerName && !fileName) return '至少给出文号、申请号、客户或文件名中的一项。'
+  const empty = { rows: [] as SelectedPatentFile[], queryKey: '', replace: true }
+  if (!caseVolume && !applicationNo && !customerName && !fileName) {
+    return { ...empty, text: '至少给出文号、申请号、客户或文件名中的一项。', ok: false }
+  }
+  const page = wholeArg(args, 'page')
+  const pageSize = filePageSize(args)
+  if (page === null) return { ...empty, text: '页码从 1 开始。', ok: false }
+  if (pageSize === null) return { ...empty, text: '每页数量要是 20、50 或 100，和文件查询页一样。', ok: false }
+  const queryKey = JSON.stringify({ caseVolume, applicationNo, customerName, fileName, pageSize })
+  const replace = page <= 1 || memory.work?.fileQuery !== queryKey
   const query = {
-    pageIndex: 1,
-    pageSize: 10,
+    pageIndex: page,
+    pageSize,
     ...(caseVolume ? { caseVolume } : {}),
     ...(applicationNo ? { applicationNo } : {}),
     ...(customerName ? { customerName } : {}),
     ...(fileName ? { fileName } : {})
   }
+  stopIfNeeded(ctx)
   const response = await ctx.forward({ type: MessageType.SearchFiles, payload: { query } })
+  stopIfNeeded(ctx)
   const error = forwardedError(response)
-  if (error) return error
-  if (!isMessage(response) || response.type !== MessageType.SearchFilesResult) return '文件查询没有返回结果。'
-  if (!response.payload.ok) return response.payload.error.message
+  if (error) return { ...empty, queryKey, replace, text: error, ok: false }
+  if (!isMessage(response) || response.type !== MessageType.SearchFilesResult) return { ...empty, queryKey, replace, text: '文件查询没有返回结果。', ok: false }
+  if (!response.payload.ok) return { ...empty, queryKey, replace, text: response.payload.error.message, ok: false }
   const data = response.payload.data
   const selected = data.items.map(asSelected).filter((item): item is SelectedPatentFile => item !== null)
-  if (selected.length > 0) ctx.rememberFiles(selected)
-  const lines = data.items.slice(0, 10).map(item => [item.caseVolume, item.caseId && `案件编号 ${item.caseId}`, item.caseName, item.fileName, item.customerName, item.applicationNo].filter(Boolean).join(' | '))
-  return clip(`文件查询共 ${data.total} 条。案件编号只用于下一步调用。\n${lines.join('\n') || '这一页没有记录。'}`)
+  const lines = caseLines(data.items)
+  const text = clip([
+    `文件查询共 ${data.total} 条。${pageNote(data.total, data.pageIndex, data.pageSize, data.totalPages)}`,
+    '案件编号只用于下一步调用。',
+    lines || '这一页没有记录。'
+  ].join('\n'))
+  return { text, ok: true, rows: selected, queryKey, replace }
 }
 
-async function searchDeadlines(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
+async function readDeadlinePage(ctx: ToolContext, query: { type: 'all'; pageIndex: number; pageSize: number; caseVolume?: string; applicationNo?: string; customerName?: string }): Promise<{ ok: true; items: LimitMonitorRow[]; total: number; pageIndex: number; pageSize: number; totalPages: number } | { ok: false; text: string }> {
+  stopIfNeeded(ctx)
+  const response = await ctx.forward({ type: MessageType.SearchLimitMonitor, payload: { query } })
+  stopIfNeeded(ctx)
+  const error = forwardedError(response)
+  if (error) return { ok: false, text: error }
+  if (!isMessage(response) || response.type !== MessageType.SearchLimitMonitorResult) return { ok: false, text: '期限监控没有返回结果。' }
+  if (!response.payload.ok) return { ok: false, text: response.payload.error.message }
+  const data = response.payload.data
+  return { ok: true, items: data.items, total: data.total, pageIndex: data.pageIndex, pageSize: data.pageSize, totalPages: data.totalPages }
+}
+
+function deadlineRefs(items: Array<{ procId?: string; caseId?: string; caseVolume?: string }>): DeadlineRow[] {
+  return items
+    .filter(item => item.procId && item.caseVolume)
+    .map(item => ({ procId: item.procId ?? '', caseId: item.caseId ?? '', caseVolume: item.caseVolume ?? '' }))
+}
+
+async function searchDeadlines(ctx: ToolContext, args: Record<string, unknown>, memory: AgentMemoryState): Promise<ListedRows<DeadlineRow>> {
   const kind = textArg(args, 'kind') || 'all'
   const allowed = ['all', 'pay', 'suspend', 'abandon', 'recall', 'priority', 'fee']
-  if (!allowed.includes(kind)) return '期限页签无效。'
-  const caseVolume = textArg(args, 'caseVolume')
+  const empty = { rows: [] as DeadlineRow[], queryKey: '', replace: true }
+  if (!allowed.includes(kind)) return { ...empty, text: '期限页签无效。', ok: false }
+  const caseVolume = textArg(args, 'caseVolume', 4_000)
   const applicationNo = textArg(args, 'applicationNo')
   const customerName = textArg(args, 'customerName', 120)
-  const query = {
+  const volumes = splitCaseVolumes(caseVolume)
+  if (volumes.length > 1) {
+    const joined = joinCaseVolumes(volumes)
+    const queryKey = JSON.stringify({ caseVolume: joined, applicationNo, customerName, kind, collected: true })
+    const first = await readDeadlinePage(ctx, {
+      type: kind as 'all', pageIndex: 1, pageSize: LIMIT_COLLECT_SIZE,
+      ...(joined ? { caseVolume: joined } : {}),
+      ...(applicationNo ? { applicationNo } : {}),
+      ...(customerName ? { customerName } : {})
+    })
+    if (!first.ok) return { ...empty, queryKey, text: first.text, ok: false }
+    const items = [...first.items]
+    const pages = Math.min(LIMIT_COLLECT_PAGES, Math.max(1, Math.ceil(first.total / LIMIT_COLLECT_SIZE)))
+    for (let page = 2; page <= pages; page += 1) {
+      const next = await readDeadlinePage(ctx, {
+        type: kind as 'all', pageIndex: page, pageSize: LIMIT_COLLECT_SIZE,
+        ...(joined ? { caseVolume: joined } : {}),
+        ...(applicationNo ? { applicationNo } : {}),
+        ...(customerName ? { customerName } : {})
+      })
+      if (!next.ok) return { ...empty, queryKey, text: `第 ${page} 页没有完成：${next.text}`, ok: false }
+      items.push(...next.items)
+    }
+    const rows = deadlineRefs(items)
+    const kept = rows.slice(0, AGENT_DEADLINE_KEEP)
+    const tail = first.total > kept.length ? `\n一共 ${first.total} 条，这次留下 ${kept.length} 条。` : ''
+    const text = clip(`期限监控共 ${first.total} 条。多个文号已一次查完。${tail}\n${deadlineLines(items.slice(0, AGENT_DEADLINE_KEEP)) || '这个条件下没有期限记录。'}`)
+    return { text, ok: true, rows: kept, queryKey, replace: true }
+  }
+  const page = wholeArg(args, 'page')
+  if (page === null) return { ...empty, text: '页码从 1 开始。', ok: false }
+  const queryKey = JSON.stringify({ caseVolume, applicationNo, customerName, kind, pageSize: LIMIT_PAGE_SIZE })
+  const replace = page <= 1 || memory.work?.deadlineQuery !== queryKey
+  const pageResult = await readDeadlinePage(ctx, {
     type: kind as 'all',
-    pageIndex: 1,
-    pageSize: 10,
+    pageIndex: page,
+    pageSize: LIMIT_PAGE_SIZE,
     ...(caseVolume ? { caseVolume } : {}),
     ...(applicationNo ? { applicationNo } : {}),
     ...(customerName ? { customerName } : {})
-  }
-  const response = await ctx.forward({ type: MessageType.SearchLimitMonitor, payload: { query } })
-  const error = forwardedError(response)
-  if (error) return error
-  if (!isMessage(response) || response.type !== MessageType.SearchLimitMonitorResult) return '期限监控没有返回结果。'
-  if (!response.payload.ok) return response.payload.error.message
-  const data = response.payload.data
-  const deadlines = data.items
-    .filter(item => item.procId && item.caseVolume)
-    .map(item => ({ procId: item.procId, caseId: item.caseId, caseVolume: item.caseVolume }))
-  if (deadlines.length > 0) ctx.rememberDeadlines(deadlines)
-  const lines = data.items.slice(0, 10).map(item =>
-    [item.caseVolume, item.caseId && `案件编号 ${item.caseId}`, item.procId && `事项编号 ${item.procId}`, item.ctrlProc, item.customerName, item.intDueDate && `内部 ${item.intDueDate}`, item.cusDueDate && `客户 ${item.cusDueDate}`, item.legalDueDate && `法律 ${item.legalDueDate}`].filter(Boolean).join(' | ')
-  )
-  return clip(`期限监控共 ${data.total} 条。\n${lines.join('\n') || '这一页没有未结束的事项。'}`)
+  })
+  if (!pageResult.ok) return { ...empty, queryKey, replace, text: pageResult.text, ok: false }
+  const text = clip([
+    `期限监控共 ${pageResult.total} 条。${pageNote(pageResult.total, pageResult.pageIndex, pageResult.pageSize, pageResult.totalPages)}`,
+    deadlineLines(pageResult.items) || '这一页没有未结束的事项。'
+  ].join('\n'))
+  return { text, ok: true, rows: deadlineRefs(pageResult.items), queryKey, replace }
 }
 
 /** 测试和未接线时的空实现。成功句式与正式工具一致，失败句不以成功前缀开头。 */
@@ -646,133 +798,187 @@ export function emptyPageTools(): Pick<ToolContext, 'rememberFiles' | 'recentFil
   }
 }
 
-export async function executeAgentTool(name: string, rawArguments: string, ctx: ToolContext, memory: AgentMemoryState): Promise<{ text: string; memory: AgentMemoryState }> {
+export interface ToolOutcome {
+  text: string
+  memory: AgentMemoryState
+  ok: boolean
+}
+
+function done(text: string, memory: AgentMemoryState, ok: boolean): ToolOutcome {
+  return { text, memory, ok }
+}
+
+export async function executeAgentTool(name: string, rawArguments: string, ctx: ToolContext, memory: AgentMemoryState): Promise<ToolOutcome> {
   let args: Record<string, unknown> = {}
   if (rawArguments.trim()) {
     try {
       const parsed = JSON.parse(rawArguments) as unknown
       if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) args = parsed as Record<string, unknown>
     } catch {
-      return { text: '工具参数不是有效 JSON。', memory }
+      return done('工具参数不是有效 JSON。', memory, false)
     }
   }
   try {
+    stopIfNeeded(ctx)
     if (name === 'connection_status') {
       const snap = ctx.snapshot()
-      return { text: snap.connected ? `已连接 ${snap.displayName || '当前登录人'}，站点 ${snap.origin}。` : (snap.message || '尚未连接 EASY。'), memory }
+      return done(snap.connected ? `已连接 ${snap.displayName || '当前登录人'}，站点 ${snap.origin}。` : (snap.message || '尚未连接 EASY。'), memory, snap.connected)
     }
-    if (name === 'search_cases') return { text: await searchCases(ctx, args), memory }
-    if (name === 'search_deadlines') return { text: await searchDeadlines(ctx, args), memory }
+    if (name === 'search_cases') {
+      const found = await searchCases(ctx, args, memory)
+      if (!found.ok || !found.queryKey) return done(found.text, memory, false)
+      const work = withFiles(memory, found.rows, found.queryKey, found.replace)
+      ctx.rememberFiles(work.files)
+      return done(found.text, { ...memory, work }, true)
+    }
+    if (name === 'search_deadlines') {
+      const found = await searchDeadlines(ctx, args, memory)
+      if (!found.ok || !found.queryKey) return done(found.text, memory, false)
+      const work = withDeadlines(memory, found.rows, found.queryKey, found.replace)
+      ctx.rememberDeadlines(work.deadlines)
+      return done(found.text, { ...memory, work }, true)
+    }
     if (name === 'list_customers') {
       const rows = await ctx.customers()
-      if (rows.length === 0) return { text: '当前账号还没有在插件里保存客户。', memory }
-      return { text: clip(rows.slice(0, 40).map(row => `${row.name}｜入口 ${row.surface || '未设'}｜工作流 ${row.workflowId || '未设'}`).join('\n')), memory }
+      if (rows.length === 0) return done('当前账号还没有在插件里保存客户。', memory, true)
+      return done(clip(rows.slice(0, 40).map(row => `${row.name}｜入口 ${row.surface || '未设'}｜工作流 ${row.workflowId || '未设'}`).join('\n')), memory, true)
     }
     if (name === 'describe_workflows') {
       const nameQuery = textArg(args, 'name', 40).toLowerCase()
       const flows = await ctx.workflows()
       const picked = nameQuery ? flows.filter(flow => flow.label.toLowerCase().includes(nameQuery) || flow.summary.toLowerCase().includes(nameQuery)) : flows
-      if (picked.length === 0) return { text: '没有对上的工作流。', memory }
-      return {
-        text: clip(picked.map(flow => `${flow.label}：${flow.summary}\n${flow.steps.map((step, index) => `${index + 1}. ${step.title} ${step.detail}`).join('\n')}`).join('\n\n')),
-        memory
-      }
+      if (picked.length === 0) return done('没有对上的工作流。', memory, false)
+      return done(clip(picked.map(flow => `${flow.label}：${flow.summary}\n${flow.steps.map((step, index) => `${index + 1}. ${step.title} ${step.detail}`).join('\n')}`).join('\n\n')), memory, true)
     }
     if (name === 'list_skills') {
-      return { text: clip(ctx.skills().map(skill => `${skill.title}：${skill.blurb}。${skill.detail}`).join('\n')), memory }
+      return done(clip(ctx.skills().map(skill => `${skill.title}：${skill.blurb}。${skill.detail}`).join('\n')), memory, true)
     }
     if (name === 'plan_work') {
       const names = new Set(SCHEMAS.map(item => item.function.name))
       const steps = readWorkPlan(args, names)
-      if (!steps) return { text: '计划要写 2 到 6 步，每步一个短标题和现有工具名。', memory }
-      return { text: formatWorkPlan(steps), memory }
+      if (!steps) return done('计划要写 2 到 6 步，每步一个短标题和现有工具名。', memory, false)
+      return done(formatWorkPlan(steps), memory, true)
     }
     if (name === 'ask_user') {
       const questions = readAgentQuestions(args)
-      if (!questions) return { text: '问题没有写清，没有向用户提问。', memory }
-      if (!ctx.askUser) return { text: '现在没有人可以回答。', memory }
+      if (!questions) return done('问题没有写清，没有向用户提问。', memory, false)
+      if (!ctx.askUser) return done('现在没有人可以回答。', memory, false)
+      stopIfNeeded(ctx)
       const answer = await ctx.askUser(questions)
       if (answer === '已停下。') throw new LlmError('REQUEST_TIMEOUT', '已停下。')
-      if (answer === '跳过') return { text: '用户跳过了这个问题。', memory }
-      return { text: `用户答：\n${answer}`, memory }
+      if (answer === '跳过') return done('用户跳过了这个问题。', memory, false)
+      return done(`用户答：\n${answer}`, memory, true)
     }
     if (name === 'remember') {
       const text = textArg(args, 'text', 240)
-      if (!text) return { text: '没有可记的内容。', memory }
+      if (!text) return done('没有可记的内容。', memory, false)
       const next = rememberFact(memory, text)
-      return { text: next === memory ? '这句话已经在长期记忆里。' : `已记住：${text}`, memory: next }
+      return done(next === memory ? '这句话已经在长期记忆里。' : `已记住：${text}`, next, true)
     }
     if (name === 'lookup_api') {
       const query = textArg(args, 'query', 120)
-      if (!query) return { text: '请给出 Call 名、入口或中文主题。', memory }
-      return { text: clip(ctx.lookupApi(query)), memory }
+      if (!query) return done('请给出 Call 名、入口或中文主题。', memory, false)
+      return done(clip(ctx.lookupApi(query)), memory, true)
     }
-    if (name === 'call_easy') return { text: await callEasy(ctx, args), memory }
+    if (name === 'call_easy') {
+      const text = await callEasy(ctx, args)
+      return done(text, memory, text.startsWith('已用当前登录会话调用'))
+    }
     if (name === 'recall') {
       const found = searchFacts(memory, textArg(args, 'query', 80))
-      return { text: found.length === 0 ? '长期记忆里没有对上的内容。' : found.map(fact => fact.text).join('\n'), memory }
+      return done(found.length === 0 ? '长期记忆里没有对上的内容。' : found.map(fact => fact.text).join('\n'), memory, true)
     }
     if (name === 'create_workflow') {
       const title = textArg(args, 'name', 40)
       const skills = textArg(args, 'skills', 400)
-      if (!title || !skills) return { text: '要有名字，以及用哪些本领。', memory }
-      return { text: await ctx.createWorkflow({ name: title, summary: textArg(args, 'summary', 400), skills }), memory }
+      if (!title || !skills) return done('要有名字，以及用哪些本领。', memory, false)
+      stopIfNeeded(ctx)
+      const created = await ctx.createWorkflow({ name: title, summary: textArg(args, 'summary', 400), skills })
+      return done(created, memory, created.startsWith('已'))
     }
     if (name === 'set_workflow_field') {
       const title = textArg(args, 'name', 40)
       const skill = textArg(args, 'skill', 40)
       const field = textArg(args, 'field', 40)
       const value = textArg(args, 'value', 200)
-      if (!title || !skill || !field || !value) return { text: '要写明工作流、本领、哪一栏、改成什么。', memory }
-      return { text: await ctx.setWorkflowField({ name: title, skill, field, value }), memory }
+      if (!title || !skill || !field || !value) return done('要写明工作流、本领、哪一栏、改成什么。', memory, false)
+      stopIfNeeded(ctx)
+      const edited = await ctx.setWorkflowField({ name: title, skill, field, value })
+      return done(edited, memory, edited.startsWith('已'))
     }
     if (name === 'create_task') {
-      return {
-        text: await ctx.createTask({
-          caseVolume: textArg(args, 'caseVolume'),
-          applicationNo: textArg(args, 'applicationNo'),
-          customerName: textArg(args, 'customerName', 120),
-          fileName: textArg(args, 'fileName', 120)
-        }),
-        memory
-      }
+      stopIfNeeded(ctx)
+      const text = await ctx.createTask({
+        caseVolume: textArg(args, 'caseVolume'),
+        applicationNo: textArg(args, 'applicationNo'),
+        customerName: textArg(args, 'customerName', 120),
+        fileName: textArg(args, 'fileName', 120)
+      })
+      return done(text, memory, text.startsWith('已') || text.includes('没有提交到 EASY'))
     }
     if (name === 'read_customer') {
       const title = textArg(args, 'name', 80)
-      if (!title) return { text: '要写明客户名称。', memory }
-      return { text: await ctx.readCustomer(title), memory }
+      if (!title) return done('要写明客户名称。', memory, false)
+      const text = await ctx.readCustomer(title)
+      return done(text, memory, text.startsWith('客户 '))
     }
     if (name === 'preview_workflow') {
       const title = textArg(args, 'name', 40)
-      if (!title) return { text: '要写明工作流名字。', memory }
-      return { text: await ctx.previewWorkflow(title), memory }
+      if (!title) return done('要写明工作流名字。', memory, false)
+      const text = await ctx.previewWorkflow(title)
+      return done(text, memory, text.startsWith('工作流预览'))
     }
-    if (name === 'draft_mail') return { text: await ctx.draftMail(textArg(args, 'customerName', 80)), memory }
-    if (name === 'list_tasks') return { text: await ctx.listTasks(), memory }
-    if (name === 'list_history') return { text: await ctx.listHistory(textArg(args, 'surface', 16)), memory }
-    if (name === 'list_reviewers') return { text: await ctx.listReviewers(), memory }
+    if (name === 'draft_mail') {
+      const text = await ctx.draftMail(textArg(args, 'customerName', 80))
+      return done(text, memory, text.startsWith('起草完成'))
+    }
+    if (name === 'list_tasks') {
+      const text = await ctx.listTasks()
+      return done(text, memory, text.startsWith('发文任务共'))
+    }
+    if (name === 'list_history') {
+      const text = await ctx.listHistory(textArg(args, 'surface', 16))
+      return done(text, memory, text.startsWith('查询记录共'))
+    }
+    if (name === 'list_reviewers') {
+      const text = await ctx.listReviewers()
+      return done(text, memory, text.startsWith('审核人共'))
+    }
     if (name === 'list_processes') {
       const kind = textArg(args, 'kind', 8).toUpperCase()
-      if (kind !== 'AP' && kind !== 'EF' && kind !== 'CO') return { text: '流程种类要是 AP、EF 或 CO。', memory }
-      return { text: await ctx.listProcesses(kind, textArg(args, 'searchKey', 80)), memory }
+      if (kind !== 'AP' && kind !== 'EF' && kind !== 'CO') return done('流程种类要是 AP、EF 或 CO。', memory, false)
+      const text = await ctx.listProcesses(kind, textArg(args, 'searchKey', 80))
+      return done(text, memory, text.startsWith('流程共'))
     }
-    if (name === 'list_acceptance') return { text: await ctx.listAcceptance(), memory }
+    if (name === 'list_acceptance') {
+      const text = await ctx.listAcceptance()
+      return done(text, memory, text.startsWith('验收共'))
+    }
     if (name === 'readonly_acceptance') {
       const call = textArg(args, 'call', 40)
-      if (!call) return { text: '要写明只读 Call 名。', memory }
-      return { text: await ctx.readonlyAcceptance(call, textArg(args, 'caseTypeId', 80), textArg(args, 'mailId', 40)), memory }
+      if (!call) return done('要写明只读 Call 名。', memory, false)
+      const text = await ctx.readonlyAcceptance(call, textArg(args, 'caseTypeId', 80), textArg(args, 'mailId', 40))
+      return done(text, memory, text.startsWith('只读验收 '))
     }
     if (name === 'diagnose_mail') {
       const mailId = textArg(args, 'mailId', 40)
-      if (!mailId) return { text: '要写明邮件编号。', memory }
-      return { text: await ctx.diagnoseMail(mailId), memory }
+      if (!mailId) return done('要写明邮件编号。', memory, false)
+      const text = await ctx.diagnoseMail(mailId)
+      return done(text, memory, text.startsWith('邮件核对 '))
     }
-    if (name === 'export_contacts') return { text: await ctx.exportContacts(textArg(args, 'volumes', 400)), memory }
-    if (name === 'submit_easy') return { text: await ctx.submitEasy(textArg(args, 'caseVolume', 400)), memory }
+    if (name === 'export_contacts') {
+      const text = await ctx.exportContacts(textArg(args, 'volumes', 400))
+      return done(text, memory, text.startsWith('联系人共'))
+    }
+    if (name === 'submit_easy') {
+      stopIfNeeded(ctx)
+      const text = await ctx.submitEasy(textArg(args, 'caseVolume', 400))
+      return done(text, memory, text.startsWith('已提交到 EASY'))
+    }
     const names = SCHEMAS.map(item => item.function.name).join('、')
-    return { text: `没有这个工具：${name}。现在可以用：${names}`, memory }
+    return done(`没有这个工具：${name}。现在可以用：${names}`, memory, false)
   } catch (error) {
     if (error instanceof LlmError && error.message === '已停下。') throw error
-    return { text: error instanceof Error ? error.message : '工具没有完成。', memory }
+    return done(error instanceof Error ? error.message : '工具没有完成。', memory, false)
   }
 }

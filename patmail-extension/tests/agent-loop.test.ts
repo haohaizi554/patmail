@@ -3,7 +3,7 @@ import { AGENT_CONFIG_DEFAULT } from '../src/agent/config'
 import type { ChatOutcome } from '../src/agent/llm'
 import { LlmError } from '../src/agent/llm'
 import { runAgentTurn, splitAgentReply, thoughtLead, type Complete } from '../src/agent/loop'
-import { applySummary, clipToolResult, COMPRESS_AT_CHARS, EMPTY_MEMORY, foldDigest, KEEP_RECENT_CHARS, needsCompression, normalizeMemory, projectOldToolText, rememberFact, searchFacts, splitForCompression, contextChars, visibleHistory } from '../src/agent/memory'
+import { applySummary, clipToolResult, COMPRESS_AT_CHARS, EMPTY_MEMORY, factsForPrompt, foldDigest, KEEP_RECENT_CHARS, needsCompression, normalizeMemory, projectOldToolText, rememberFact, searchFacts, splitForCompression, contextChars, visibleHistory, saveMemory, loadMemory, type MemoryStorage } from '../src/agent/memory'
 import { agentToolSchemas, emptyPageTools, executeAgentTool, formatDraft, type ToolContext } from '../src/agent/tools'
 import { groupToolCalls } from '../src/agent/turn-policy'
 import { MessageType } from '../src/shared/message'
@@ -130,6 +130,11 @@ describe('agent memory', () => {
     const twice = rememberFact(once, '先看法律期限')
     expect(twice.facts).toHaveLength(1)
     expect(searchFacts(twice, '法律').map(fact => fact.text)).toEqual(['先看法律期限'])
+    const many = ['宁德时代', '华星光电', '先看法律期限', '内部期限优先', '常用文号P001'].reduce((state, text, index) => rememberFact(state, text, `2026-01-0${index + 1}T00:00:00.000Z`), EMPTY_MEMORY)
+    const prompted = factsForPrompt(many, '查一下华星光电').map(fact => fact.text)
+    expect(prompted[0]).toBe('华星光电')
+    expect(prompted).toContain('常用文号P001')
+    expect(prompted).not.toContain('宁德时代')
   })
 })
 
@@ -154,20 +159,110 @@ describe('agent tools', () => {
             ok: true,
             data: {
               items: [{ fileId: 'f1', fileName: '受理通知书', caseVolume: 'P001', customerName: '甲公司' }],
-              total: 1, pageIndex: 1, pageSize: 10, totalPages: 1
+              total: 1, pageIndex: 1, pageSize: 20, totalPages: 1
             }
           }
         }
       }
     }
     const result = await executeAgentTool('search_cases', '{"caseVolume":"P001"}', ctx, EMPTY_MEMORY)
-    expect(forwarded).toMatchObject({ type: MessageType.SearchFiles, payload: { query: { caseVolume: 'P001', pageIndex: 1 } } })
+    expect(forwarded).toMatchObject({ type: MessageType.SearchFiles, payload: { query: { caseVolume: 'P001', pageIndex: 1, pageSize: 20 } } })
     expect(result.text).toContain('P001')
     expect(result.text).toContain('共 1 条')
+    expect(result.text).toContain('每页 20 条')
+    expect(result.ok).toBe(true)
+    expect(result.memory.work?.files.map(file => file.fileId)).toEqual(['f1'])
+  })
+
+  it('turns the file page like the query screen and keeps the files for the next turn', async () => {
+    const pages = new Map<number, string>([[1, 'f1'], [2, 'f2']])
+    const ctx: ToolContext = {
+      ...idleContext,
+      rememberFiles() {},
+      forward: async message => {
+        const page = message.type === MessageType.SearchFiles ? message.payload.query.pageIndex : 1
+        return {
+          type: MessageType.SearchFilesResult,
+          payload: {
+            ok: true,
+            data: {
+              items: [{ fileId: pages.get(page) ?? 'f', fileName: '受理通知书', caseVolume: 'P001' }],
+              total: 40, pageIndex: page, pageSize: 20, totalPages: 2
+            }
+          }
+        }
+      }
+    }
+    const first = await executeAgentTool('search_cases', '{"caseVolume":"P001"}', ctx, EMPTY_MEMORY)
+    expect(first.text).toContain('第 1 / 2 页')
+    expect(first.text).toContain('页码填 2')
+    const second = await executeAgentTool('search_cases', '{"caseVolume":"P001","page":2}', ctx, first.memory)
+    expect(second.memory.work?.files.map(file => file.fileId)).toEqual(['f1', 'f2'])
+    const rejected = await executeAgentTool('search_cases', '{"caseVolume":"P001","pageSize":10}', ctx, EMPTY_MEMORY)
+    expect(rejected.ok).toBe(false)
+    expect(rejected.text).toContain('20、50 或 100')
+    const area: MemoryStorage = {
+      async get(key) { return { [key]: bag[key] } },
+      async set(items) { Object.assign(bag, items) }
+    }
+    const bag: Record<string, unknown> = {}
+    await saveMemory(area, second.memory)
+    const loaded = await loadMemory(area)
+    expect(loaded.work?.files.map(file => file.fileId)).toEqual(['f1', 'f2'])
+  })
+
+  it('stops before a tool call when the turn is already cancelled', async () => {
+    const signal = AbortSignal.abort()
+    await expect(executeAgentTool('search_cases', '{"caseVolume":"P001"}', { ...idleContext, signal }, EMPTY_MEMORY)).rejects.toThrow('已停下。')
   })
 })
 
 describe('agent loop', () => {
+  it('retries a rate limit before giving up', async () => {
+    let tries = 0
+    const complete: Complete = async () => {
+      tries += 1
+      if (tries === 1) throw new LlmError('HTTP_ERROR', 'slow', 429)
+      return outcome('好。')
+    }
+    const turn = await runAgentTurn(config, EMPTY_MEMORY, '你好', idleContext, complete)
+    expect(tries).toBe(2)
+    expect(turn.reply).toContain('好')
+  })
+
+  it('does not send the same case query twice in one turn', async () => {
+    let calls = 0
+    const ctx: ToolContext = {
+      ...idleContext,
+      forward: async () => {
+        calls += 1
+        return {
+          type: MessageType.SearchFilesResult,
+          payload: { ok: true, data: { items: [], total: 0, pageIndex: 1, pageSize: 20, totalPages: 1 } }
+        }
+      }
+    }
+    let step = 0
+    const complete: Complete = async () => {
+      step += 1
+      if (step < 3) {
+        return {
+          usage: null,
+          raw: {},
+          choices: [{
+            content: '',
+            reasoning: '',
+            finishReason: 'tool_calls',
+            toolCalls: [{ id: `c${step}`, type: 'function', function: { name: 'search_cases', arguments: '{"caseVolume":"P001"}' } }]
+          }]
+        }
+      }
+      return outcome('查过了。')
+    }
+    await runAgentTurn(config, EMPTY_MEMORY, '查 P001', ctx, complete)
+    expect(calls).toBe(1)
+  })
+
   it('calls a tool and then answers from the tool result', async () => {
     const seen: string[] = []
     const activity: string[] = []
@@ -374,7 +469,7 @@ describe('agent loop', () => {
       }
     }
     const turn = await runAgentTurn(config, EMPTY_MEMORY, '查文号 P001', ctx, complete)
-    expect(forwards).toBe(4)
+    expect(forwards).toBe(1)
     expect(seen.some(text => text.includes('第 3 次'))).toBe(true)
     expect(seen.some(text => text.includes('重复了 5 次') && text.includes('search_cases'))).toBe(true)
     expect(turn.reply).toContain('P001')
@@ -688,6 +783,7 @@ describe('tool waves and schemas', () => {
     expect(agentToolSchemas(['帮我建一个工作流']).map(tool => tool.function.name)).toContain('preview_workflow')
     expect(plain).not.toContain('diagnose_mail')
     expect(agentToolSchemas(['审核人有哪些']).map(tool => tool.function.name)).toContain('list_reviewers')
+    expect(agentToolSchemas(['查一下', '邮件编号 M-1']).map(tool => tool.function.name)).toContain('diagnose_mail')
   })
 
   it('overlaps readonly lookups in one model step', async () => {
@@ -761,7 +857,7 @@ describe('tool waves and schemas', () => {
       return outcome('连着没连上，先停在查案件。')
     }
     const turn = await runAgentTurn(config, EMPTY_MEMORY, '查一下 P001', ctx, complete)
-    expect(sent).toBe(2)
+    expect(sent).toBe(1)
     expect(turn.memory.turns.some(item => item.content.includes('连着失败'))).toBe(true)
   })
 

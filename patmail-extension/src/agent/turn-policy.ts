@@ -115,6 +115,15 @@ function sameTraces(traces: ToolTrace[], name: string, args: string): ToolTrace[
   return traces.filter(trace => trace.name === name && trace.args === args)
 }
 
+/** 这一轮里同名同参数的上一次结果。有了就不用再发一次请求。 */
+export function previousTrace(traces: readonly ToolTrace[], name: string, args: string): ToolTrace | null {
+  for (let index = traces.length - 1; index >= 0; index -= 1) {
+    const trace = traces[index]
+    if (trace && trace.name === name && trace.args === args) return trace
+  }
+  return null
+}
+
 /** 会改本轮缓存或会写数据的工具独占。查案件、查期限和查接口可以跟别的只读查询同一波。 */
 const EXCLUSIVE_TOOLS = new Set(['remember', 'create_workflow', 'set_workflow_field', 'create_task', 'draft_mail', 'submit_easy', 'call_easy', 'ask_user', 'plan_work'])
 
