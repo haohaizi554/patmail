@@ -5,7 +5,7 @@ import { handleAuthorityMessage } from './authority'
 import { deliverAgentAnswer, handleAgentChat } from './agent'
 import { scopeExtensionPageMessage } from './scope'
 import { EasyConnectionController, sameConnectionSnapshot, type ConnectionSnapshot } from '../shared/connection'
-import { handleWorkspaceMessage, openWorkspaceTab, recheckBoundSession, type WorkspaceHost } from './workspace'
+import { handleWorkspaceMessage, openWorkspaceTab, recheckBoundSession, resumeEasySession, type WorkspaceHost } from './workspace'
 import { isRecord } from '../shared/guards'
 import { isMessage, MessageType, type AppMessage, type BackgroundResponse } from '../shared/message'
 import { hydrateWriteSwitch, watchWriteSwitch } from '../settings/write-switch'
@@ -33,10 +33,22 @@ function persistConnection(): void {
   void chrome.storage.local.set({ [CONNECTION_SNAPSHOT]: next })
 }
 
-void chrome.storage.local.get(CONNECTION_SNAPSHOT).then(stored => {
-  connection.restoreCandidate(stored[CONNECTION_SNAPSHOT])
-  persistedSnapshot = connection.snapshot()
-})
+let warming: Promise<void> | null = null
+let warmedAt = 0
+
+const reinjected = new Set<number>()
+
+async function sendToTab(tabId: number, message: AppMessage): Promise<unknown> {
+  try {
+    return await chrome.tabs.sendMessage(tabId, message)
+  } catch (error) {
+    const text = error instanceof Error ? error.message : String(error)
+    if (reinjected.has(tabId) || !/Receiving end does not exist|Could not establish connection/i.test(text) || !chrome.scripting?.executeScript) throw error
+    reinjected.add(tabId)
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] })
+    return chrome.tabs.sendMessage(tabId, message)
+  }
+}
 
 const host: WorkspaceHost = {
   connection,
@@ -59,11 +71,32 @@ const host: WorkspaceHost = {
       return created.id
     })
   },
-  sendToTab: (tabId, message) => chrome.tabs.sendMessage(tabId, message),
+  sendToTab,
   persist: persistConnection
 }
 
+function warmEasySession(): Promise<void> {
+  if (warming) return warming
+  if (connection.context.sessionStatus === 'authenticated' && Date.now() - warmedAt < 1500) return Promise.resolve()
+  warming = resumeEasySession(host).finally(() => {
+    warming = null
+    warmedAt = Date.now()
+  })
+  return warming
+}
+
+/** 先把上次的标签页捡回来，再向页面重读登录。这条完成前不回答工作台，避免把空连接当成没登录。 */
+const connectionReady = (async () => {
+  try {
+    const stored = await chrome.storage.local.get(CONNECTION_SNAPSHOT)
+    connection.restoreCandidate(stored[CONNECTION_SNAPSHOT])
+    persistedSnapshot = connection.snapshot()
+  } catch { /* 没有存过连接 */ }
+  await warmEasySession()
+})()
+
 chrome.tabs.onRemoved.addListener((tabId) => {
+  reinjected.delete(tabId)
   connection.detach(tabId)
   persistConnection()
 })
@@ -106,6 +139,7 @@ const READS = new Set<string>([
 
 /** 页面和后台用长连接。查询过程中还会调用 EASY 页面，不能占用一次性消息口。 */
 async function dispatchExtensionMessage(message: unknown, sender: chrome.runtime.MessageSender): Promise<BackgroundResponse> {
+  await connectionReady
   if (!isMessage(message)) {
     const type = message && typeof message === 'object' && 'type' in message ? String((message as { type?: unknown }).type) : '未知'
     const inner = message && typeof message === 'object' && 'payload' in message
@@ -114,7 +148,10 @@ async function dispatchExtensionMessage(message: unknown, sender: chrome.runtime
       : ''
     return { type: MessageType.Error, payload: { message: `后台没有接住${inner ? `转发 ${inner}` : type}。请在扩展管理页重新加载后再试。` } }
   }
-  if (message.type === MessageType.Ping) return { type: MessageType.Pong, payload: { ok: true } }
+  if (message.type === MessageType.Ping) {
+    if (connection.context.sessionStatus !== 'authenticated') void warmEasySession()
+    return { type: MessageType.Pong, payload: { ok: true } }
+  }
   if (message.type === MessageType.AgentChat) {
     const pageUrl = sender.url ?? sender.tab?.url ?? ''
     if (!pageUrl.startsWith(chrome.runtime.getURL(''))) {
@@ -168,10 +205,39 @@ function publish(response: BackgroundResponse, requestId: string | null, sendRes
   } catch { /* 页面已经离开 */ }
 }
 
+/** 每 20 秒碰一次扩展接口，空闲计时就不会到 30 秒。知易通或工作台还开着时，后台不会被睡过去。 */
+const HEARTBEAT_MS = 20_000
+function beat(): void {
+  void chrome.runtime.getPlatformInfo()
+}
+beat()
+setInterval(beat, HEARTBEAT_MS)
+if (chrome.alarms) {
+  chrome.alarms.onAlarm.addListener(alarm => {
+    if (alarm.name !== 'patmail-keepalive') return
+    beat()
+    if (connection.context.sessionStatus !== 'authenticated') void warmEasySession()
+  })
+  const created = chrome.alarms.create('patmail-keepalive', { periodInMinutes: 0.5 })
+  void Promise.resolve(created).catch(() => {
+    void chrome.alarms.create('patmail-keepalive', { periodInMinutes: 1 })
+  })
+}
+
 /** 工作台停靠栏连着这条端口时，服务工作线程不会在等模型的空档里被回收。 */
 let agentPorts = 0
 chrome.runtime.onConnect.addListener(port => {
-  if (port.sender?.id !== chrome.runtime.id || port.name !== 'patmail-agent') {
+  if (port.sender?.id !== chrome.runtime.id) {
+    port.disconnect()
+    return
+  }
+  if (port.name === 'patmail-page') {
+    port.onMessage.addListener(() => { /* 页面心跳，重置空闲计时 */ })
+    void connectionReady.then(() => warmEasySession())
+    port.onDisconnect.addListener(() => { void chrome.runtime.lastError })
+    return
+  }
+  if (port.name !== 'patmail-agent') {
     port.disconnect()
     return
   }

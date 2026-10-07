@@ -2,9 +2,9 @@
   "manifest_version": 3,
   "minimum_chrome_version": "114",
   "name": "PatMail",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "专利发文辅助插件：页面语义扫描、只读文件查询与本地查询模板。",
-  "permissions": ["tabs", "storage"],
+  "permissions": ["tabs", "storage", "scripting", "alarms"],
   "host_permissions": ["http://183.36.43.66:88/*", "https://ip.pcl.ac.cn:81/*", "http://127.0.0.1/*", "http://localhost/*", "http://43.138.138.200:8588/*"],
   "background": {
     "service_worker": "background.js",

@@ -235,19 +235,47 @@ const bridge: MessageBridge = {
   }
 }
 
-// Popup 发给当前顶层页面；返回 true 保持异步响应通道存活。
-chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
-  if (sender.id !== chrome.runtime.id) return
-  if (!isContentRequest(message)) {
-    const type = message && typeof message === 'object' && 'type' in message ? String((message as { type?: unknown }).type) : '未知'
-    sendResponse({ type: MessageType.Error, payload: { message: `当前 EASY 页面脚本不认识 ${type}。请刷新这个 EASY 标签页。` } } satisfies ContentResponse)
-    return
-  }
-  void bridge.request(message).then(sendResponse).catch(() => {
-    sendResponse({ type: MessageType.Error, payload: { message: '页面读取失败，请刷新后重试。' } } satisfies ContentResponse)
+const pageWorld = globalThis as typeof globalThis & { __patmailContent?: boolean }
+if (!pageWorld.__patmailContent) {
+  pageWorld.__patmailContent = true
+
+  // Popup 发给当前顶层页面；返回 true 保持异步响应通道存活。
+  chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+    if (sender.id !== chrome.runtime.id) return
+    if (!isContentRequest(message)) {
+      const type = message && typeof message === 'object' && 'type' in message ? String((message as { type?: unknown }).type) : '未知'
+      sendResponse({ type: MessageType.Error, payload: { message: `当前 EASY 页面脚本不认识 ${type}。请刷新这个 EASY 标签页。` } } satisfies ContentResponse)
+      return
+    }
+    void bridge.request(message).then(sendResponse).catch(() => {
+      sendResponse({ type: MessageType.Error, payload: { message: '页面读取失败，请刷新后重试。' } } satisfies ContentResponse)
+    })
+    return true
   })
-  return true
-})
+
+  let pagePort: chrome.runtime.Port | null = null
+  let pagePulse = 0
+  function holdBackground(): void {
+    if (!chrome.runtime?.id || pagePort) return
+    try {
+      const port = chrome.runtime.connect({ name: 'patmail-page' })
+      pagePort = port
+      pagePulse = window.setInterval(() => {
+        try { port.postMessage({ kind: 'tick' }) } catch { /* 端口已断，等 onDisconnect 重连 */ }
+      }, 20_000)
+      port.onDisconnect.addListener(() => {
+        void chrome.runtime.lastError
+        window.clearInterval(pagePulse)
+        if (pagePort === port) pagePort = null
+        window.setTimeout(holdBackground, 500)
+      })
+    } catch { /* 扩展刚重新加载，等页面再次可见 */ }
+  }
+  holdBackground()
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') holdBackground()
+  })
+}
 
 // 正式入口是完整工作台。浮窗只在收到 SHOW_PANEL 时挂载。
 

@@ -174,7 +174,11 @@ export function useWorkspace() {
       else if (planned.refresh === 'session') void call({ action: 'refreshSession' })
     })
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState !== 'visible' || connection.value.sessionStatus !== 'authenticated') return
+      if (document.visibilityState !== 'visible') return
+      if (connection.value.sessionStatus !== 'authenticated') {
+        void call({ action: 'refreshSession' })
+        return
+      }
       const planned = absorbStorageEvent({ inflight, pending: storagePending }, storagePending ?? 'data')
       storagePending = planned.pending
       if (planned.refresh === 'data') void call({ action: 'load' })

@@ -620,6 +620,12 @@ async function ensureEasySession(host: WorkspaceHost): Promise<EasyTabCandidate[
   return tabs
 }
 
+/** 服务工作线程被浏览器停掉后重新醒来时调用。候选标签还在就重读登录，不在就再找已打开的 EASY 页。 */
+export async function resumeEasySession(host: WorkspaceHost): Promise<void> {
+  await ensureEasySession(host)
+  host.persist?.(host.connection.context)
+}
+
 async function readBoundSession(host: WorkspaceHost, attempt = 0): Promise<void> {
   const target = await boundTab(host)
   if (!target.ok) return
