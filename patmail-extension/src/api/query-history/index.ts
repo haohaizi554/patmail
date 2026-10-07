@@ -1,5 +1,0 @@
-export { HistoryQueryService } from './service'
-export { historyDeleteRequest, historyRequest, historySaveRequest, isHistorySurface } from './surfaces'
-export type { HistorySurface } from './surfaces'
-export { normalizeHistoryDetail, normalizeHistoryOptions, normalizeHistorySave } from './normalizer'
-export type { HistoryQueryDetail, HistoryQueryOption } from './types'
