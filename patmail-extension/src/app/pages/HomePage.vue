@@ -57,7 +57,7 @@ watch(qrOpen, (open) => {
       <button ref="wechatButton" type="button" class="contact-hit" :aria-expanded="qrOpen" aria-haspopup="dialog" @click="qrOpen = true">
         <span>WeChat</span><b>MemoryLeak2023</b>
       </button>
-      <p><span>GitHub</span><a href="https://github.com/haohaizi554/patmail" target="_blank" rel="noreferrer">haohaizi554</a></p>
+      <p><span>GitHub</span><a href="https://github.com/haohaizi554/patmail/releases" target="_blank" rel="noreferrer">haohaizi554</a></p>
       <p><span>phone</span><a href="tel:15603838733">15603838733</a></p>
     </address>
   </PageHead>
