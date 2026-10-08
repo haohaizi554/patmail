@@ -185,6 +185,10 @@ img { max-width: 100%; }
 .grid th { text-align: left; color: #8b95ad; font-weight: 650; height: 36px; background: #fafbfe; }
 .grid td { height: 48px; border-top: 1px solid #f4f6fb; white-space: nowrap; }
 .grid th, .grid td { padding: 0 8px; }
+.grid td.query-memory {
+  white-space: normal; max-width: 220px; height: auto;
+  line-height: 1.45; padding-top: 8px; padding-bottom: 8px;
+}
 .grid tr.is-pending td { color: #9aa3b5; }
 .grid td.shade-open { background: #e7f0ff; color: #1d4ed8; }
 .grid td.shade-done { background: #e5f8ee; color: #157a45; }

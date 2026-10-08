@@ -1,5 +1,6 @@
 import { fileSearchValueLimit, isFileSearchBusinessField, type FileSearchQuery } from '../api/file-search-params'
-import { isForbiddenFieldName } from '../query/field-registry'
+import { isForbiddenFieldName, fieldLabel } from '../query/field-registry'
+import { PAGE_OPTIONS } from '../query/form-layout'
 import { PCT_CUSTOMER_VOLUME_TYPE_NAME, PCT_OUR_VOLUME_TYPE_NAME, resolvePctRuntime, type PctRuntimeConfig } from '../workflow/pct-config'
 import type { CustomerQueryProfile, FileMailStyle, LimitMailStyle, QuerySurfaceId, WorkflowId } from './types'
 
@@ -197,14 +198,30 @@ const BOUND_LABELS: Record<string, string> = {
   file_name: '文件名',
   filetype: '文件描述'
 }
+const SUMMARY_LATER = new Set(['case_type', 'fileclass'])
+
+function boundLabel(key: string): string {
+  return BOUND_LABELS[key] ?? (fieldLabel(key) === '其他条件' ? '条件' : fieldLabel(key))
+}
+
+function boundValue(key: string, value: string): string {
+  const option = PAGE_OPTIONS[key]?.find(item => item.value === value)
+  if (option?.label) return option.label
+  if (key === 'fileclass' && value === 'general') return '所有文件'
+  const parts = value.split(',').map(item => item.trim()).filter(Boolean)
+  if (parts.length > 1 && parts.every(part => GUID.test(part))) return `${parts.length} 项`
+  if (GUID.test(value)) return '已选择'
+  return value.length > 18 ? `${value.slice(0, 18)}…` : value
+}
 
 export function summarizeBoundQuery(fields: Record<string, string> | undefined): string {
   const entries = Object.entries(fields ?? {}).filter(([, value]) => value.trim())
   if (!entries.length) return '还没绑定'
-  return entries.slice(0, 4).map(([key, value]) => {
-    const shown = GUID.test(value) ? '已选择' : value.length > 24 ? `${value.slice(0, 24)}…` : value
-    return `${BOUND_LABELS[key] ?? key}：${shown}`
-  }).join('，')
+  const ranked = [
+    ...entries.filter(([key]) => !SUMMARY_LATER.has(key)),
+    ...entries.filter(([key]) => SUMMARY_LATER.has(key))
+  ]
+  return ranked.slice(0, 4).map(([key, value]) => `${boundLabel(key)}：${boundValue(key, value)}`).join('，')
 }
 
 /** 鹏城实验室这份清单里，处理事项整列都是这个值。查询时对的是处理事项，不是文号。 */

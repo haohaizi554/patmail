@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { isCustomerProfile } from '../src/customer/guards'
-import { applyBoundQuery, mailStylesFor, matchPctMailTypes, pctMailTypeFor, pctVolumeSlot, querySnapshot } from '../src/customer/mail-flow'
+import { applyBoundQuery, mailStylesFor, matchPctMailTypes, pctMailTypeFor, pctVolumeSlot, querySnapshot, summarizeBoundQuery } from '../src/customer/mail-flow'
 import type { CustomerQueryProfile } from '../src/customer/types'
 
 function profile(extra: Partial<CustomerQueryProfile> = {}): CustomerQueryProfile {
@@ -87,5 +87,16 @@ describe('绑定最后提交的字段', () => {
     expect(isCustomerProfile(profile({ querySurface: 'file', fileMailStyle: 'merge_by_customer_description' }))).toBe(true)
     expect(isCustomerProfile(profile({ querySurface: 'limit', workflowId: 'pct-reminder', limitMailStyle: '1' }))).toBe(true)
     expect(isCustomerProfile(profile({ workflowId: 'other' as 'pct-reminder' }))).toBe(false)
+  })
+
+  it('记住的查询用页面上的说法，不露出字段名和内部代号', () => {
+    const ids = Array.from({ length: 3 }, () => 'a52c7405-5303-47a6-8ab9-b7823cbe7df6').join(',')
+    expect(summarizeBoundQuery({
+      case_type: '31D1A147-2931-43B5-94AE-B72B1525BA8A',
+      customer_name_vague: '广汽丰田',
+      file_status: 'UN',
+      fileclass: 'general',
+      filetype: ids
+    })).toBe('客户名称：广汽丰田，文件处理状态：未处理，文件描述：3 项，案件类型：专利')
   })
 })

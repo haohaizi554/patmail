@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, ref, watch } from 'vue'
+import { computed, inject, nextTick, ref, watch } from 'vue'
 import PageHead from '../../shell/components/PageHead.vue'
 import ThemeSelect from '../../shell/components/ThemeSelect.vue'
 import { bg } from '../../shell/assets'
@@ -65,6 +65,7 @@ const surface = ref<QuerySurfaceId | ''>('')
 const workflow = ref<WorkflowId | ''>('')
 const mailStyle = ref('')
 const workflowRemark = ref('')
+const remarkBox = ref<HTMLInputElement | null>(null)
 const reviewChoice = ref('')
 const reviewers = ref<Array<{ id: string; name: string }>>([])
 const reviewerMessage = ref('')
@@ -210,7 +211,11 @@ async function loadReviewers(force: boolean): Promise<void> {
 }
 function writeRemark(id: string): void {
   edit(id)
-  formMessage.value = '在下面的备注里写一句，再点保存。同一客户有多条工作流时靠这句分辨。'
+  formMessage.value = '在备注里写一句，再点保存。同一客户有多条时靠这句分辨。'
+  void nextTick(() => {
+    remarkBox.value?.focus()
+    remarkBox.value?.scrollIntoView({ block: 'center' })
+  })
 }
 const workflowChoices = computed(() => workflowsFor(surface.value).map(item => ({
   value: item.id,
@@ -496,7 +501,7 @@ watch(() => connection.value.operatorId, () => {
   <template v-else>
     <section class="card">
       <h2>已保存的客户</h2>
-      <p class="hint">点「绑定查询」到查询页填好条件再绑定回来。点「写备注」在下面写一句，用来区分同一客户的多条工作流。</p>
+      <p class="hint">点「绑定查询」到查询页填好条件再绑定回来。点「写备注」给这一条写一句，同一客户有多条时靠这句分辨。</p>
       <p v-if="listMessage" class="hint">{{ listMessage }}</p>
       <p v-if="customers.length === 0" class="empty">还没有客户。在下面选好名称后保存。</p>
       <table v-else class="grid">
@@ -508,7 +513,7 @@ watch(() => connection.value.operatorId, () => {
             <td>{{ item.workflowId === 'pct-reminder' ? pctName : (WORKFLOWS.find(flow => flow.id === item.workflowId)?.label ?? '—') }}</td>
             <td>{{ item.workflowRemark || '—' }}</td>
             <td>{{ customerMailStyleLabel(item) }}</td>
-            <td v-hint="describe(item)">{{ describe(item) }}</td>
+            <td class="query-memory" v-hint="describe(item)">{{ describe(item) }}</td>
             <td>{{ item.enabled ? '启用中' : '已停用' }}</td>
             <td>
               <button type="button" class="ghost" @click="openQuery(item.id, item.querySurface)">绑定查询</button>
@@ -534,9 +539,6 @@ watch(() => connection.value.operatorId, () => {
         </label>
         <label v-if="workflowChoices.length">工作流
           <ThemeSelect :model-value="workflow" :options="workflowChoices" @update:model-value="workflow = String($event) as WorkflowId" />
-        </label>
-        <label v-if="workflow">备注
-          <input v-model="workflowRemark" type="text" maxlength="40" placeholder="同一客户有多条时写一句，方便分辨" />
         </label>
         <template v-if="activeWorkflow">
           <p class="hint">{{ activeWorkflow.label }}里，表格能决定的项按列走。这里选择表格决定不了的模式。</p>
@@ -586,6 +588,10 @@ watch(() => connection.value.operatorId, () => {
           <p v-if="mailStyle === defaultStyle" class="hint">当前就是默认：同客户合并发文。</p>
         </div>
         <p v-else-if="!surface" class="hint">先选查询入口。期限监控会带出已封装的工作流。</p>
+        <label>备注
+          <input ref="remarkBox" v-model="workflowRemark" type="text" maxlength="40" placeholder="同一客户有多条时写一句，方便分辨" />
+        </label>
+        <p class="hint">可留空。写上一句，表格里就能看出这一条是哪一套。</p>
       </div>
       <div v-if="editingId" class="hint">
         <p>客户要求按原网站客户编号读取，只在这里看，不会改原网站。</p>
