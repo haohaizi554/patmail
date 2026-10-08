@@ -9,12 +9,13 @@ const customers = ref<WorkspaceResultPayload['customers']>([])
 const templates = ref<WorkspaceResultPayload['templates']>([])
 const rules = ref<WorkspaceResultPayload['rules']>(null)
 const tasks = ref<WorkspaceResultPayload['tasks']>([])
+const fileManageRuns = ref<WorkspaceResultPayload['fileManageRuns']>([])
 const notice = ref('尚未连接 EASY。')
 const accountEpoch = ref(0)
 const demo = import.meta.env.DEV && location.protocol !== 'chrome-extension:'
 
-const keepsData = new Set(['load', 'bind', 'refreshSession', 'saveCustomer', 'deleteCustomer', 'saveQueryTemplate', 'deleteQueryTemplate', 'saveRules', 'createTaskPlan'])
-const mutations = new Set(['saveCustomer', 'deleteCustomer', 'saveQueryTemplate', 'deleteQueryTemplate', 'saveRules', 'createTaskPlan'])
+const keepsData = new Set(['load', 'bind', 'refreshSession', 'saveCustomer', 'deleteCustomer', 'saveQueryTemplate', 'deleteQueryTemplate', 'saveRules', 'createTaskPlan', 'recordFileManageRun'])
+const mutations = new Set(['saveCustomer', 'deleteCustomer', 'saveQueryTemplate', 'deleteQueryTemplate', 'saveRules', 'createTaskPlan', 'recordFileManageRun'])
 let listening = false
 let requestSerial = 0
 let mutationSerial = 0
@@ -62,6 +63,7 @@ function clearAccount(): void {
   templates.value = []
   rules.value = null
   tasks.value = []
+  fileManageRuns.value = []
 }
 
 function noteAccount(next: EasyConnectionContext): void {
@@ -103,12 +105,14 @@ export function useWorkspace() {
         templates.value = payload.templates
         rules.value = payload.rules
         tasks.value = payload.tasks
+        fileManageRuns.value = payload.fileManageRuns ?? []
       }
     } else if (keepsData.has(action.action)) {
       customers.value = payload.customers
       templates.value = payload.templates
       rules.value = payload.rules
       tasks.value = payload.tasks
+      fileManageRuns.value = payload.fileManageRuns ?? []
     }
   }
 
@@ -164,7 +168,7 @@ export function useWorkspace() {
     listening = true
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local') return
-      const dataChanged = Object.keys(changes).some(key => key.startsWith('patmail.query.') || key.startsWith('patmail.mail.'))
+      const dataChanged = Object.keys(changes).some(key => key.startsWith('patmail.query.') || key.startsWith('patmail.mail.') || key.startsWith('patmail.fileManageRuns.'))
       const snapshot = changes['patmail.connection.snapshot.v1']?.newValue as ConnectionSnapshot | undefined
       const sessionChanged = Boolean(snapshot && !sameConnectionSnapshot(snapshotOf(connection.value), snapshot))
       const change = dataChanged ? 'data' : sessionChanged ? 'session' : null
@@ -186,5 +190,5 @@ export function useWorkspace() {
     })
   }
 
-  return { connection, tabs, customers, templates, rules, tasks, notice, accountEpoch, demo, call }
+  return { connection, tabs, customers, templates, rules, tasks, fileManageRuns, notice, accountEpoch, demo, call }
 }

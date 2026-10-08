@@ -38,6 +38,7 @@ import { loadMailContactText, type MailContactAsset } from '../mail/easy/mail-co
 import { isQueryGuid } from '../query/query-validator'
 import { EasyMailReadService } from '../mail/easy/read-service'
 import type { ExistingMailDiagnostic } from '../shared/message'
+import { submitFileManageBatch, type FileManageSubmitItem, type FileManageSubmitResult } from '../customer/file-manage-submit'
 import { submitLimitMailBatch, type LimitMailSubmitItem, type LimitMailSubmitResult } from '../customer/limit-mail-submit'
 import { loadCaseContacts } from '../case-contact/load'
 import type { CaseContactExport } from '../case-contact/query'
@@ -621,6 +622,10 @@ export class EasyRuntime {
 
   submitLimitMails(userId: string, items: LimitMailSubmitItem[]): Promise<{ stopped: boolean; results: LimitMailSubmitResult[] }> {
     return submitLimitMailBatch(this.transport, userId, items)
+  }
+
+  submitFileManageMails(items: FileManageSubmitItem[]): Promise<{ stopped: boolean; results: FileManageSubmitResult[] }> {
+    return submitFileManageBatch(this.transport, items)
   }
 
   cancelLimitMonitor(): void {

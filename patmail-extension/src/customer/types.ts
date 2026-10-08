@@ -50,7 +50,7 @@ export interface PctTaskDraft {
   createdAt: string
 }
 /** 已封装的工作流。PCT提醒是第一条。 */
-export type WorkflowId = 'pct-reminder' | 'pct-pengcheng'
+export type WorkflowId = 'pct-reminder' | 'pct-pengcheng' | 'file-manage'
 
 /** 创建指定客户后默认带上的能力。案件联系人导出目前只给鹏城国家实验室，而且只认当前名称。 */
 export type CustomerSkillId = 'case-contacts'

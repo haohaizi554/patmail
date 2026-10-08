@@ -11,6 +11,7 @@ export type EasyOperation =
   | 'getFlowInfo' | 'getFlowHistory' | 'getUrgencyList' | 'getFlowSubmit' | 'getFlowLastStatus' | 'caseBusFlow'
   | 'limitMonitor' | 'limitMailCustomer' | 'mailSubmit' | 'mailProcess' | 'processAP' | 'processEF' | 'getIsNewCpc'
   | 'agencySearchCase' | 'agencyCaseInfo' | 'patentCaseData' | 'icSearch' | 'customerList'
+  | 'caseManageInfo' | 'caseCustomField' | 'caseInventor'
 
 export interface TransportOptions {
   fetcher?: typeof fetch
@@ -73,6 +74,9 @@ const ROUTES: Record<EasyOperation, { path: string; call: string }> = {
   getIsNewCpc: { path: '/AjaxServers/CaseInfo.ashx', call: 'GetIsNewCPC' },
   agencySearchCase: { path: '/AjaxServers/AgencyAction.ashx', call: 'AgencySearchCase' },
   agencyCaseInfo: { path: '/AjaxServers/AgencyAction.ashx', call: 'GetCaseInfo' },
+  caseManageInfo: { path: '/AjaxServers/CaseInfo.ashx', call: 'GetCaseInfo' },
+  caseCustomField: { path: '/AjaxServers/BaseInfo.ashx', call: 'GetCustomField' },
+  caseInventor: { path: '/AjaxServers/PatentAction.ashx', call: 'GetCaseInventor' },
   patentCaseData: { path: '/AjaxServers/PatentAction.ashx', call: 'GetPatentData' },
   icSearch: { path: '/AjaxServers/CaseInfo.ashx', call: 'ICSearchList' },
   customerList: { path: '/AjaxServers/Customer.ashx', call: 'GetCustomerlist' }

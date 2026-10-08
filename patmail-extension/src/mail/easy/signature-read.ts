@@ -73,6 +73,32 @@ export function readSignatureRows(data: unknown): SignatureListRow[] {
   return items
 }
 
+/** 下拉选中后写进正文的 HTML。只解码，不去标签。 */
+export function signatureHtml(value: string): string {
+  return decodeEntities(value).trim().slice(0, 20000)
+}
+
+/** 操作员自己写的签名没有下拉 HTML。换行写成编辑器能排版的换行。 */
+export function operatorSignatureHtml(value: string): string {
+  const text = value.trim()
+  if (!text) return ''
+  if (/<[a-z][\s\S]*>/i.test(text)) return text.slice(0, 20000)
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>')
+    .slice(0, 20000)
+}
+
+/** GetSignature 里指定那一条的 signature_content。 */
+export function readSignatureHtml(data: unknown, signatureId: string): string {
+  if (!isRecord(data) || !Array.isArray(data.Signature) || !isQueryGuid(signatureId)) return ''
+  const row = data.Signature.find(item => isRecord(item) && typeof item.signature_id === 'string' && item.signature_id.toLowerCase() === signatureId.toLowerCase())
+  if (!isRecord(row) || typeof row.signature_content !== 'string') return ''
+  return signatureHtml(row.signature_content)
+}
+
 /** GetSignatureset 的 SignatureInfo[0].signature_content。 */
 export function readSignatureContent(data: unknown): string {
   if (!isRecord(data) || !Array.isArray(data.SignatureInfo) || !isRecord(data.SignatureInfo[0])) return ''

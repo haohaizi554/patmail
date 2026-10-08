@@ -75,6 +75,22 @@ export const WORKFLOWS: PackagedWorkflow[] = [
       { id: 'cc', label: '抄送', decidedBy: '表格「客户联系人(IPR)」，再加上发文页的商务。邮箱那一列不读。' },
       { id: 'review', label: '审核', options: [{ value: 'self', label: '提交给当前登录人' }] }
     ]
+  },
+  {
+    id: 'file-manage',
+    label: '文件管理',
+    surface: 'file',
+    modes: [
+      { id: 'query', label: '查询条件', decidedBy: '这位客户已绑定的查询条件。' },
+      { id: 'mail_style', label: '发文方式', options: FILE_MAIL_STYLES },
+      { id: 'mail_type', label: '发文类型', decidedBy: '发文映射里，文件描述一对一对应的发文类型。' },
+      { id: 'to', label: '收件人', decidedBy: '发文页的案件联系人。' },
+      { id: 'cc', label: '抄送', decidedBy: '默认发件人，同时抄送商务。' },
+      { id: 'sender', label: '发件人', decidedBy: '发文映射里的默认发件人。' },
+      { id: 'reviewer', label: '审核人', decidedBy: '发文映射里的默认审核人。' },
+      { id: 'subject', label: '标题', decidedBy: '发文映射里的标题模板。' },
+      { id: 'signature', label: '签名', decidedBy: '发文映射里选中的默认签名。原站的按发文页邮件签名下拉的格式写进正文。' }
+    ]
   }
 ]
 

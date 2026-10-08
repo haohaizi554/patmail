@@ -66,18 +66,22 @@ function waitForAnswer(questions: AgentQuestion[]): Promise<string> {
   }
   return new Promise(resolve => {
     pendingAnswer = resolve
+    const giveUp = (): void => {
+      if (pendingAnswer !== resolve) return
+      pendingAnswer = null
+      resolve('跳过')
+    }
     try {
-      chrome.runtime.sendMessage({ channel: ASK_CHANNEL, questions }, () => {
-        if (chrome.runtime.lastError && pendingAnswer === resolve) {
-          pendingAnswer = null
-          resolve('跳过')
-        }
+      chrome.runtime.sendMessage({ channel: ASK_CHANNEL, questions }, (response: unknown) => {
+        const error = chrome.runtime.lastError?.message ?? ''
+        if (pendingAnswer !== resolve) return
+        if (isRecord(response) && response.shown === true) return
+        // 提问已经画出来时，页面不会回包，Chrome 仍报 port closed。这不是用户点了跳过。
+        if (!error || error.includes('port closed before a response was received')) return
+        giveUp()
       })
     } catch {
-      if (pendingAnswer === resolve) {
-        pendingAnswer = null
-        resolve('跳过')
-      }
+      giveUp()
     }
   })
 }

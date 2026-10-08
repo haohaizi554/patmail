@@ -60,7 +60,7 @@ export function beginProgress(title: string, total: number): void {
 /** 一封提交结果归到成功、失败、异常或跳过。对不上邮箱算异常。 */
 export function classifySubmitText(text: string): keyof ProgressCounts {
   if (text.startsWith('已提交')) return 'success'
-  if (/对上邮箱|没有商务邮箱|对上了多个邮箱|没有可用的.+邮箱/.test(text)) return 'abnormal'
+  if (/对上邮箱|没有商务邮箱|没有客户联系人|没有案件联系人|对上了多个邮箱|没有可用的.+邮箱/.test(text)) return 'abnormal'
   if (/还在审核里|已经提交过|没有要提交/.test(text)) return 'skipped'
   return 'failed'
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { mergeImportedMappings } from '../src/mail/rules/description-import'
+import { readXlsxRows, xlsxBytes } from '../src/customer/xlsx-table'
+import { mappingExportRows, mergeImportedMappings } from '../src/mail/rules/description-import'
 import type { DescriptionMailTypeMapping } from '../src/mail/types'
 
 const certificate = 'cccccccc-1111-4111-8111-111111111111'
@@ -163,5 +164,22 @@ describe('文件描述映射导入', () => {
     if (!replaced.ok) return
     expect(replaced.mappings).toHaveLength(2)
     expect(replaced.mappings[1]).toMatchObject({ fileDescriptionText: '专利证书', mailTypeId: notice, enabled: true })
+  })
+
+  it('导出的两列能被导入认出来', async () => {
+    const rows = mappingExportRows([
+      saved('专利证书', certificate),
+      saved('登记手续', notice, { fileDescriptionText: '登记手续', mailTypeName: '办理登记手续通知书' })
+    ], types)
+    expect(rows[0]).toEqual(['文件描述', '发文类型'])
+    expect(rows[1]).toEqual(['专利证书', '通知书/专利电子证书'])
+    const read = await readXlsxRows(xlsxBytes(rows, '发文映射'))
+    const imported = merge(read)
+    expect(imported.ok && imported.added).toBe(2)
+    if (!imported.ok) return
+    expect(imported.mappings.map(item => [item.fileDescriptionText, item.mailTypeId])).toEqual([
+      ['专利证书', certificate],
+      ['登记手续', notice]
+    ])
   })
 })

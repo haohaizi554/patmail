@@ -9,7 +9,8 @@ import type { MailRuleBundle } from '../mail/types'
 import type { QueryTemplate } from '../query/query-types'
 import { chooseAppTab, EasyConnectionController, emptyConnection, accountScopeMatches, freezeAccount, sameAccountContext, tabOrigin, type AccountContextSnapshot, type BrowserTabRef, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope, type SessionObservation } from '../shared/connection'
 import { caseContactExportBlock } from '../customer/skills'
-import { isMessage, workspaceForwardBlock, MessageType, type AppMessage, type BackgroundResponse, type CreatedTaskResult } from '../shared/message'
+import { appendFileManageRun, enqueueFileManageWrite, fileManageRunKey, parseFileManageRuns } from '../customer/file-manage-runs'
+import { isMessage, workspaceForwardBlock, MessageType, type AppMessage, type BackgroundResponse, type CreatedTaskResult, type FileManageRun } from '../shared/message'
 import { loadAccount, deleteCustomerAccount, deleteQueryTemplateAccount, refreshStaleTasks, saveCustomerAccount, saveQueryTemplateAccount, saveRuleAccount, type LocalArea } from './account-data'
 import { observeSearchPage, resolveSelectedFiles, toQueryObservation, type QueryObservationResult } from '../automation/file-search-snapshot'
 import { rememberFileTypeTree } from '../automation/file-description-resolver'
@@ -26,6 +27,7 @@ export interface WorkspacePayload {
   templates: QueryTemplate[]
   rules: MailRuleBundle | null
   tasks: { taskId: string; createdAt: string; customerName: string; fileCount: number; mailCount: number; status: string; verifiedAt: string; updatedAt: string }[]
+  fileManageRuns: FileManageRun[]
   forwarded: AppMessage | null
   appTab: { tabId: number; created: boolean } | null
   createdTask: CreatedTaskResult | null
@@ -45,6 +47,7 @@ export function workspaceResult(partial: Partial<WorkspacePayload> & { connectio
     templates: partial.templates ?? [],
     rules: partial.rules ?? null,
     tasks: partial.tasks ?? [],
+    fileManageRuns: partial.fileManageRuns ?? [],
     forwarded: partial.forwarded ?? null,
     appTab: partial.appTab ?? null,
     createdTask: partial.createdTask ?? null,
@@ -72,12 +75,14 @@ class StaleContextError extends Error {
   constructor() { super('STALE_CONTEXT') }
 }
 
-async function accountPayload(host: WorkspaceHost, frozen?: AccountContextSnapshot): Promise<Pick<WorkspacePayload, 'customers' | 'templates' | 'rules' | 'tasks'>> {
+async function accountPayload(host: WorkspaceHost, frozen?: AccountContextSnapshot): Promise<Pick<WorkspacePayload, 'customers' | 'templates' | 'rules' | 'tasks' | 'fileManageRuns'>> {
   const start = frozen ?? freezeAccount(host.connection.context)
-  if (!start) return { customers: [], templates: [], rules: null, tasks: [] }
+  if (!start) return { customers: [], templates: [], rules: null, tasks: [], fileManageRuns: [] }
   if (!sameAccountContext(host.connection.context, start)) throw new StaleContextError()
   const account = await loadAccount(host.area, start.easyOrigin, start.operatorId)
   const tasks = host.tasks ? await host.tasks.list(start.easyOrigin, start.operatorId) : []
+  const key = fileManageRunKey(start.easyOrigin, start.operatorId)
+  const stored = await host.area.get(key)
   if (!sameAccountContext(host.connection.context, start)) throw new StaleContextError()
   return {
     customers: account.customers,
@@ -87,11 +92,12 @@ async function accountPayload(host: WorkspaceHost, frozen?: AccountContextSnapsh
       taskId: task.taskId, createdAt: task.createdAt, customerName: task.customerName,
       fileCount: task.selectedFiles.length, mailCount: task.items.length, status: task.status,
       verifiedAt: task.verifiedAt, updatedAt: task.updatedAt
-    }))
+    })),
+    fileManageRuns: parseFileManageRuns(stored[key])
   }
 }
 
-async function readAccount(host: WorkspaceHost, frozen?: AccountContextSnapshot): Promise<Pick<WorkspacePayload, 'customers' | 'templates' | 'rules' | 'tasks'> | null> {
+async function readAccount(host: WorkspaceHost, frozen?: AccountContextSnapshot): Promise<Pick<WorkspacePayload, 'customers' | 'templates' | 'rules' | 'tasks' | 'fileManageRuns'> | null> {
   try {
     return await accountPayload(host, frozen)
   } catch (error) {
@@ -263,7 +269,7 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
     return workspaceResult({ ok: host.connection.context.sessionStatus === 'authenticated', message: host.connection.context.message, connection: host.connection.context, tabs, ...account })
   }
   let frozenAccount: AccountContextSnapshot | null = null
-  if (action.action === 'saveCustomer' || action.action === 'deleteCustomer' || action.action === 'saveQueryTemplate' || action.action === 'deleteQueryTemplate' || action.action === 'saveRules' || action.action === 'createTaskPlan') {
+  if (action.action === 'saveCustomer' || action.action === 'deleteCustomer' || action.action === 'saveQueryTemplate' || action.action === 'deleteQueryTemplate' || action.action === 'saveRules' || action.action === 'createTaskPlan' || action.action === 'recordFileManageRun') {
     const gate = await mutationGuard(host, action.expectedScope)
     if (!gate.ok) return gate.response
     frozenAccount = gate.account
@@ -283,6 +289,31 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
     const account = await readAccount(host, frozenAccount)
     if (!account) return staleResult(host)
     return workspaceResult({ ok: true, message, connection: host.connection.context, createdTask, ...account })
+  }
+  if (action.action === 'recordFileManageRun') {
+    try {
+      const frozen = frozenNow()
+      const key = fileManageRunKey(frozen.easyOrigin, frozen.operatorId)
+      await enqueueFileManageWrite(key, async () => {
+        if (!sameAccountContext(host.connection.context, frozen)) throw new StaleContextError()
+        const stored = await host.area.get(key)
+        const next = appendFileManageRun(parseFileManageRuns(stored[key]), {
+          id: crypto.randomUUID(),
+          at: new Date().toISOString(),
+          customerName: action.run.customerName.trim(),
+          subject: action.run.subject,
+          fileCount: action.run.fileCount,
+          status: action.run.status,
+          note: action.run.note
+        })
+        if (!sameAccountContext(host.connection.context, frozen)) throw new StaleContextError()
+        await host.area.set({ [key]: next })
+      })
+      return await finishWrite('文件管理发文已记入本地记录。')
+    } catch (error) {
+      if (error instanceof StaleContextError) return staleResult(host)
+      return await failWrite(error instanceof Error ? error.message : '本地记录没有写入。')
+    }
   }
   if (action.action === 'saveCustomer') {
     try {
@@ -414,12 +445,16 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
       return workspaceResult({ ok: false, message: forwardBlock, connection: host.connection.context })
     }
     let outbound = action.message
-    if (outbound.type === MessageType.SubmitLimitMail) {
+    if (outbound.type === MessageType.SubmitLimitMail || outbound.type === MessageType.SubmitFileManage) {
       const operatorId = host.connection.context.operatorId
       if (!isConfirmedOperator(operatorId)) {
         return workspaceResult({ ok: false, message: '当前登录人还没确认，没有提交。', connection: host.connection.context })
       }
-      outbound = { ...outbound, payload: { ...outbound.payload, userId: operatorId } }
+      if (outbound.type === MessageType.SubmitLimitMail) {
+        outbound = { ...outbound, payload: { ...outbound.payload, userId: operatorId } }
+      } else {
+        outbound = { ...outbound, payload: { ...outbound.payload, userId: operatorId } }
+      }
     }
     if (action.message.type === MessageType.ExportCaseContacts) {
       const frozen = freezeAccount(host.connection.context)

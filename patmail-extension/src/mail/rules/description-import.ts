@@ -214,6 +214,24 @@ function noticeOf(stats: {
   return parts.join('')
 }
 
+/** 按导入认的两列表头写出当前映射。发文类型写成树上的路径，没有树时用保存的名称。 */
+export function mappingExportRows(
+  mappings: ReadonlyArray<Pick<DescriptionMailTypeMapping, 'fileDescriptionText' | 'fileDescriptionId' | 'mailTypeId' | 'mailTypeName'>>,
+  mailTypes: ImportMailType[]
+): string[][] {
+  const nodes = mailTypes.filter(node => node.id && clean(node.name))
+  const byId = new Map(nodes.map(node => [node.id, node]))
+  const rows = [['文件描述', '发文类型']]
+  for (const item of mappings) {
+    const description = clean(item.fileDescriptionText ?? '') || clean(item.fileDescriptionId ?? '')
+    const node = byId.get(item.mailTypeId)
+    const typeName = node ? pathOf(node, byId) : clean(item.mailTypeName)
+    if (!description && !typeName) continue
+    rows.push([description, typeName])
+  }
+  return rows
+}
+
 /** 从表格并入文件描述映射。相同描述只保留一条，已经存在的不改、不重复添加。 */
 export function mergeImportedMappings(
   mappings: DescriptionMailTypeMapping[],

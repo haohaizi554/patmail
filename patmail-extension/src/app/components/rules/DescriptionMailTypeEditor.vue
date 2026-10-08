@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { downloadXlsxRows } from '../../../customer/xlsx-table'
+import { mappingExportRows } from '../../../mail/rules/description-import'
 import MailTypeTreeSelect from '../../../shell/components/MailTypeTreeSelect.vue'
 import type { DescriptionMailTypeMapping } from '../../../mail/types'
 
@@ -39,6 +41,10 @@ function typePath(id: string, fallback: string): string {
   return names.length ? names.join(' / ') : fallback
 }
 
+function exportSheet(): void {
+  downloadXlsxRows(mappingExportRows(props.mappings, props.mailTypes), '发文映射.xlsx', '发文映射')
+}
+
 function onFile(event: Event): void {
   const input = event.target
   if (!(input instanceof HTMLInputElement)) return
@@ -71,6 +77,7 @@ watch(() => props.mappings, (rows) => {
     <div class="mapping-head">
       <h2>文件描述映射</h2>
       <div class="mapping-actions">
+        <button type="button" class="text-button" @click="exportSheet">导出 Excel</button>
         <label class="text-button file-button">
           {{ importing ? '正在导入…' : '导入 Excel' }}
           <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="importing" aria-label="导入 Excel" @change="onFile" />
@@ -78,7 +85,7 @@ watch(() => props.mappings, (rows) => {
         <button type="button" class="text-button" @click="emit('reload')">重新读取发文类型</button>
       </div>
     </div>
-    <p class="hint">发文类型由文件描述或发文内容决定。一行对应一种，文件描述填来文上的说法，发文类型在树里点选。也可以导入 Excel：认「文件描述」和「发文类型」两列，相同的不会重复写入，已经有的不会改。</p>
+    <p class="hint">发文类型由文件描述或发文内容决定。一行对应一种，文件描述填来文上的说法，发文类型在树里点选。也可以导入 Excel：认「文件描述」和「发文类型」两列，相同的不会重复写入，已经有的不会改。导出的表就是这个格式，发文类型写成从根到叶子的路径。</p>
     <p v-if="notice" class="hint">{{ notice }}</p>
     <table class="mapping-table">
       <thead>

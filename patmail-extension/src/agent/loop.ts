@@ -75,10 +75,39 @@ export function splitAgentReply(content: string): { thought: string; answer: str
   return splitLegacyThought(content) ?? { thought: '', answer: content }
 }
 
-/** 收起时只露思考的第一行，和 DeepSeek 结算后的摘要一样。 */
+export interface JournalViewEntry {
+  kind: 'thought' | 'step'
+  text: string
+  detail: string
+}
+
+/** 把收好的过程拆开。一整段都是「- 」的是步骤，其余是思考。 */
+export function journalEntries(thought: string): JournalViewEntry[] {
+  const entries: JournalViewEntry[] = []
+  for (const block of thought.split(/\n{2,}/)) {
+    const lines = block.split('\n').map(line => line.trim()).filter(Boolean)
+    if (lines.length > 0 && lines.every(line => line.startsWith('- '))) {
+      for (const line of lines) {
+        const body = line.slice(2)
+        const cut = body.indexOf('：')
+        entries.push(cut > 0
+          ? { kind: 'step', text: body.slice(0, cut), detail: body.slice(cut + 1) }
+          : { kind: 'step', text: body, detail: '' })
+      }
+      continue
+    }
+    if (block.trim()) entries.push({ kind: 'thought', text: block.trim(), detail: '' })
+  }
+  return entries
+}
+
+/** 收起时优先露最近一步。没有步骤才露思考的第一行。 */
 export function thoughtLead(thought: string): string {
-  const line = thought.split('\n').map(item => item.trim()).find(Boolean) ?? ''
-  const plain = line.replace(/^#{1,6}\s*/, '').replace(/[*_`]/g, '')
+  const step = [...journalEntries(thought)].reverse().find(item => item.kind === 'step')
+  const line = step
+    ? (step.detail ? `${step.text}：${step.detail}` : step.text)
+    : (thought.split('\n').map(item => item.trim()).find(Boolean) ?? '')
+  const plain = line.replace(/^#{1,6}\s*/, '').replace(/[*_`]/g, '').replace(/^- /, '')
   return plain.length > 36 ? `${plain.slice(0, 36)}…` : plain
 }
 
@@ -233,6 +262,27 @@ function renderJournal(items: readonly JournalEntry[]): string {
   return blocks.join('\n\n')
 }
 
+function isStepBlock(block: string): boolean {
+  const lines = block.split('\n').map(line => line.trim()).filter(Boolean)
+  return lines.length > 0 && lines.every(line => line.startsWith('- '))
+}
+
+/** 超长时先丢掉前面的思考，步骤留下。否则结束后折叠里就只剩思考。 */
+function clipJournal(body: string): string {
+  if (body.length <= 12_000) return body
+  const blocks = body.split(/\n{2,}/).map(block => block.trim()).filter(Boolean)
+  const chosen: string[] = []
+  let used = 0
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    const block = blocks[index] ?? ''
+    const next = used + block.length + 2
+    if (next > 12_000 && (!isStepBlock(block) || used > 0)) continue
+    chosen.push(block)
+    used = next
+  }
+  return chosen.reverse().join('\n\n')
+}
+
 /** 思考和步骤按发生顺序收成一段。展开后先看到先发生的那一件。 */
 export function packJournal(reply: string, journal: readonly JournalEntry[]): string {
   const split = splitAgentReply(reply)
@@ -241,8 +291,7 @@ export function packJournal(reply: string, journal: readonly JournalEntry[]): st
   if (split.thought.trim() && split.thought.trim() !== answer) appendThought(items, split.thought)
   const body = renderJournal(items)
   if (!body) return answer
-  const clipped = body.length > 12_000 ? body.slice(body.length - 12_000) : body
-  return `${THOUGHT_MARK}thought${THOUGHT_MARK}${clipped}${THOUGHT_MARK}${answer}`
+  return `${THOUGHT_MARK}thought${THOUGHT_MARK}${clipJournal(body)}${THOUGHT_MARK}${answer}`
 }
 
 /** 思考模式打开时，把思考链放在正文前面。正文还没写出来时不把思考当成回复。 */

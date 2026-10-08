@@ -314,7 +314,7 @@ const SCHEMAS: ToolSchema[] = [
     type: 'function',
     function: {
       name: 'set_workflow_field',
-      description: '修改一条自己创建的工作流里某一栏的值。不能改系统自带的 PCT提醒 和 PCT鹏城专案。',
+      description: '修改一条自己创建的工作流里某一栏的值。不能改系统自带的 PCT提醒、PCT鹏城专案和文件管理。',
       parameters: {
         type: 'object',
         properties: {

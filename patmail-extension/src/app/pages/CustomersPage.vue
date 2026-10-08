@@ -410,6 +410,7 @@ async function save(goAfter: boolean): Promise<void> {
       ...(sameSurface && surface.value === 'limit' && (workflow.value === 'pct-reminder' || workflow.value === 'pct-pengcheng') && existing?.pctTask && (existing.workflowId ?? 'pct-reminder') === workflow.value ? { pctTask: clonePctTask(existing.pctTask) } : {}),
       querySurface: surface.value,
       ...(surface.value === 'limit' && workflow.value ? { workflowId: workflow.value } : {}),
+      ...(surface.value === 'file' && workflow.value === 'file-manage' ? { workflowId: 'file-manage' as const } : {}),
       ...(remark ? { workflowRemark: remark } : {}),
       ...(surface.value === 'limit' ? { limitMailStyle: mailStyle.value as LimitMailStyle } : {}),
       ...(surface.value === 'file' ? { fileMailStyle: mailStyle.value as FileMailStyle } : {}),
@@ -541,7 +542,8 @@ watch(() => connection.value.operatorId, () => {
           <ThemeSelect :model-value="workflow" :options="workflowChoices" @update:model-value="workflow = String($event) as WorkflowId" />
         </label>
         <template v-if="activeWorkflow">
-          <p class="hint">{{ activeWorkflow.label }}里，表格能决定的项按列走。这里选择表格决定不了的模式。</p>
+          <p v-if="surface === 'limit'" class="hint">{{ activeWorkflow.label }}里，表格能决定的项按列走。这里选择表格决定不了的模式。</p>
+          <p v-else class="hint">{{ activeWorkflow.label }}按这位客户绑定的查询条件和下面的发文方式执行。发件人、审核人、标题和签名用发文映射里的配置。</p>
           <template v-for="mode in activeWorkflow.modes" :key="mode.id">
             <div v-if="mode.id === 'mail_style'">
               <label>{{ mode.label }}

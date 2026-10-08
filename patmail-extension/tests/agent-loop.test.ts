@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { AGENT_CONFIG_DEFAULT } from '../src/agent/config'
 import type { ChatOutcome } from '../src/agent/llm'
 import { LlmError } from '../src/agent/llm'
-import { runAgentTurn, splitAgentReply, thoughtLead, type Complete } from '../src/agent/loop'
+import { journalEntries, packJournal, runAgentTurn, splitAgentReply, thoughtLead, type Complete } from '../src/agent/loop'
 import { applySummary, clipToolResult, COMPRESS_AT_CHARS, EMPTY_MEMORY, factsForPrompt, foldDigest, KEEP_RECENT_CHARS, needsCompression, normalizeMemory, projectOldToolText, rememberFact, searchFacts, splitForCompression, contextChars, visibleHistory, saveMemory, loadMemory, type MemoryStorage } from '../src/agent/memory'
 import { agentToolSchemas, emptyPageTools, executeAgentTool, formatDraft, type ToolContext } from '../src/agent/tools'
 import { groupToolCalls } from '../src/agent/turn-policy'
@@ -408,6 +408,27 @@ describe('agent loop', () => {
 
   it('keeps only the first line of a long thought as the collapsed lead', () => {
     expect(thoughtLead(`${'字'.repeat(40)}\n第二行不该露出来。`)).toBe(`${'字'.repeat(36)}…`)
+  })
+
+  it('keeps finished steps in the fold and leads with the latest step', () => {
+    const thought = '先看规则。\n\n- 正在查接口：文档里有这个 Call\n- 正在等你回答'
+    expect(journalEntries(thought)).toEqual([
+      { kind: 'thought', text: '先看规则。', detail: '' },
+      { kind: 'step', text: '正在查接口', detail: '文档里有这个 Call' },
+      { kind: 'step', text: '正在等你回答', detail: '' }
+    ])
+    expect(thoughtLead(thought)).toBe('正在等你回答')
+  })
+
+  it('drops extra thinking before it drops the steps', () => {
+    const reply = packJournal('结论', [
+      { kind: 'thought', text: '想'.repeat(13_000), detail: '' },
+      { kind: 'step', text: '正在查接口', detail: '有这个 Call' }
+    ])
+    const split = splitAgentReply(reply)
+    expect(split.answer).toBe('结论')
+    expect(split.thought).toContain('正在查接口')
+    expect(split.thought.includes('想'.repeat(13_000))).toBe(false)
   })
 
   it('nudges a workflow claim until the tool succeeds, and hides the nudge', async () => {

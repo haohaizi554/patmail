@@ -46,6 +46,14 @@ const liveThoughtTarget = ref('')
 const liveDraft = ref('')
 const liveThoughtOpen = ref(true)
 const liveThoughtBox = ref<HTMLElement | null>(null)
+const liveLead = computed(() => {
+  const step = [...liveLog.value].reverse().find(item => item.kind === 'step')
+  if (step) {
+    const line = step.detail ? `${step.text}：${step.detail}` : step.text
+    return line.length > 36 ? `${line.slice(0, 36)}…` : line
+  }
+  return thoughtLead(liveThought.value || [...liveLog.value].reverse().find(item => item.kind === 'thought')?.text || '')
+})
 let livePump = 0
 
 function stopLivePump(): void {
@@ -741,26 +749,26 @@ function dropAgentPort(): void {
   agentPort = null
 }
 
-function onActivity(message: unknown): void {
+function onActivity(message: unknown): boolean {
   try { agentPort?.postMessage({ kind: 'tick' }) } catch { agentPort = null }
-  if (!message || typeof message !== 'object') return
+  if (!message || typeof message !== 'object') return false
   const record = message as { channel?: unknown; questions?: unknown; label?: unknown; thought?: unknown; detail?: unknown; phase?: unknown }
   if (record.channel === ASK_CHANNEL) {
-    if (!busy.value || stopped || !Array.isArray(record.questions)) return
+    if (!busy.value || stopped || !Array.isArray(record.questions)) return false
     const questions = record.questions.filter(isAgentQuestion).slice(0, 3)
-    if (questions.length === 0) return
+    if (questions.length === 0) return false
     beginAsk(questions)
     if (stick.value) void scrollDown()
-    return
+    return true
   }
-  if (!busy.value) return
-  if (record.channel !== ACTIVITY_CHANNEL || typeof record.label !== 'string') return
-  if (stopped) return
+  if (!busy.value) return false
+  if (record.channel !== ACTIVITY_CHANNEL || typeof record.label !== 'string') return false
+  if (stopped) return false
   if (record.label === '正在写' && typeof record.thought === 'string' && record.thought.trim()) {
     liveDraft.value = record.thought
     waitLabel.value = '正在写'
     if (stick.value) void scrollDown()
-    return
+    return false
   }
   if (typeof record.thought === 'string' && record.thought.trim()) {
     const next = record.thought.trim()
@@ -769,7 +777,7 @@ function onActivity(message: unknown): void {
     liveThoughtTarget.value = record.thought
     waitLabel.value = '正在思考'
     if (!livePump) livePump = requestAnimationFrame(pumpLiveThought)
-    return
+    return false
   }
   const quiet = record.label === '正在思考' || record.label === '正在组织回答'
   if (!quiet) commitStreamingThought()
@@ -794,6 +802,7 @@ function onActivity(message: unknown): void {
   })
   waitLabel.value = record.label.slice(0, 40)
   if (stick.value) void scrollDown()
+  return false
 }
 
 watch(liveThought, async () => {
@@ -803,9 +812,19 @@ watch(liveThought, async () => {
   if (stick.value) await scrollDown()
 })
 
+function onRuntimeMessage(message: unknown, _sender: unknown, sendResponse: (response?: unknown) => void): boolean | undefined {
+  const shown = onActivity(message)
+  const channel = message && typeof message === 'object' ? (message as { channel?: unknown }).channel : ''
+  if (channel === ASK_CHANNEL) {
+    sendResponse({ shown })
+    return true
+  }
+  return undefined
+}
+
 holdAgentPort()
 if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
-  chrome.runtime.onMessage.addListener(onActivity)
+  chrome.runtime.onMessage.addListener(onRuntimeMessage)
 }
 
 window.addEventListener('keydown', onEscape)
@@ -814,7 +833,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onEscape)
   window.removeEventListener('resize', onViewport)
   if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) chrome.storage.onChanged.removeListener(onStoredAgent)
-  if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) chrome.runtime.onMessage.removeListener(onActivity)
+  if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) chrome.runtime.onMessage.removeListener(onRuntimeMessage)
   dropAgentPort()
   stopLivePump()
   stopWait()
@@ -879,7 +898,7 @@ onUnmounted(() => {
           </div>
         </div>
         <div v-for="(item, index) in history" :key="index" class="agent-row" :class="[item.role, { skill: item.role === 'user' && item.content.startsWith('/') }]">
-          <AgentAnswer v-if="item.role === 'assistant'" :content="item.content" :copied="copied === index" @copy="copyAnswer($event, index)" />
+          <AgentAnswer v-if="item.role === 'assistant'" :content="item.content" :copied="copied === index" :start-open="index === history.length - 1" @copy="copyAnswer($event, index)" />
           <p v-else>{{ item.content }}</p>
         </div>
         <div v-for="(item, index) in aside" :key="`aside-${index}`" class="agent-row assistant">
@@ -890,8 +909,8 @@ onUnmounted(() => {
             <div v-if="liveThought || liveLog.some(item => item.kind === 'thought')" class="think">
               <button type="button" class="think-bar" :aria-expanded="liveThoughtOpen" @click="liveThoughtOpen = !liveThoughtOpen">
                 <span class="think-chevron" :class="{ open: liveThoughtOpen }" aria-hidden="true"></span>
-                <span class="think-label">正在思考</span>
-                <span v-if="!liveThoughtOpen" class="think-lead">{{ thoughtLead(liveThought || [...liveLog].reverse().find(item => item.kind === 'thought')?.text || '') }}</span>
+                <span class="think-label">{{ liveLog.some(item => item.kind === 'step') ? '过程' : '正在思考' }}</span>
+                <span v-if="!liveThoughtOpen" class="think-lead">{{ liveLead }}</span>
               </button>
               <template v-if="liveThoughtOpen">
                 <template v-for="(item, index) in liveLog" :key="index">

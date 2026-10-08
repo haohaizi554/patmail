@@ -1,22 +1,23 @@
 <script setup lang="ts">
 import { computed, reactive } from 'vue'
 import { renderAgentMarkdown } from '../../agent/markdown'
-import { splitAgentReply, thoughtLead } from '../../agent/loop'
+import { journalEntries, splitAgentReply, thoughtLead } from '../../agent/loop'
 
-const props = defineProps<{ content: string; copied: boolean }>()
+const props = defineProps<{ content: string; copied: boolean; startOpen?: boolean }>()
 const emit = defineEmits<{ copy: [text: string] }>()
-const view = reactive({ open: false })
+const view = reactive({ open: props.startOpen === true })
 function toggleThought(): void {
   view.open = !view.open
 }
 const reply = computed(() => splitAgentReply(props.content))
+const entries = computed(() => journalEntries(reply.value.thought))
+const hasSteps = computed(() => entries.value.some(item => item.kind === 'step'))
 const lead = computed(() => thoughtLead(reply.value.thought))
-const thoughtTitle = computed(() => {
-  const lines = reply.value.thought.split('\n').map(line => line.trim()).filter(Boolean)
-  return lines.length > 0 && lines.every(line => line.startsWith('- ')) ? '过程' : '已思考'
-})
+const thoughtTitle = computed(() => hasSteps.value ? '过程' : '已思考')
 const answerHtml = computed(() => reply.value.answer ? renderAgentMarkdown(reply.value.answer) : '')
-const thoughtHtml = computed(() => reply.value.thought ? renderAgentMarkdown(reply.value.thought) : '')
+function thoughtHtml(text: string): string {
+  return renderAgentMarkdown(text)
+}
 </script>
 
 <template>
@@ -27,7 +28,16 @@ const thoughtHtml = computed(() => reply.value.thought ? renderAgentMarkdown(rep
         <span class="think-label">{{ thoughtTitle }}</span>
         <span v-if="!view.open && lead" class="think-lead">{{ lead }}</span>
       </button>
-      <div v-if="view.open" class="think-body" v-html="thoughtHtml"></div>
+      <div v-if="view.open">
+        <template v-for="(item, index) in entries" :key="index">
+          <div v-if="item.kind === 'thought'" class="think-body" v-html="thoughtHtml(item.text)"></div>
+          <p v-else class="think-step done">
+            <span class="agent-step-mark" aria-hidden="true"></span>
+            <span class="agent-step-label">{{ item.text }}</span>
+            <span v-if="item.detail" class="agent-step-detail">{{ item.detail }}</span>
+          </p>
+        </template>
+      </div>
     </div>
     <div v-if="answerHtml" class="agent-bubble">
       <div class="agent-md" v-html="answerHtml"></div>

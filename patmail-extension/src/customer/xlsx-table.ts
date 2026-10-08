@@ -118,6 +118,134 @@ function firstSheetPath(files: Map<string, string>): string | null {
   return files.has('xl/worksheets/sheet1.xml') ? 'xl/worksheets/sheet1.xml' : null
 }
 
+function crc32(data: Uint8Array): number {
+  let crc = 0xffffffff
+  for (const byte of data) {
+    crc ^= byte
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0)
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}
+
+function xmlText(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+function columnRef(index: number): string {
+  let value = index + 1
+  let letters = ''
+  while (value > 0) {
+    value -= 1
+    letters = String.fromCharCode(65 + (value % 26)) + letters
+    value = Math.floor(value / 26)
+  }
+  return letters
+}
+
+function sheetXml(rows: string[][]): string {
+  const body = rows.map((line, index) => {
+    const cells = line.map((value, column) => `<c r="${columnRef(column)}${index + 1}" t="inlineStr"><is><t>${xmlText(value)}</t></is></c>`).join('')
+    return `<row r="${index + 1}">${cells}</row>`
+  }).join('')
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${body}</sheetData></worksheet>`
+}
+
+function storedZip(files: Array<{ name: string; data: Uint8Array }>): Uint8Array {
+  const locals: Uint8Array[] = []
+  const centrals: Uint8Array[] = []
+  let offset = 0
+  for (const file of files) {
+    const name = new TextEncoder().encode(file.name)
+    const crc = crc32(file.data)
+    const local = new Uint8Array(30 + name.length)
+    const view = new DataView(local.buffer)
+    view.setUint32(0, 0x04034b50, true)
+    view.setUint16(4, 20, true)
+    view.setUint16(8, 0, true)
+    view.setUint16(10, 0, true)
+    view.setUint32(14, crc, true)
+    view.setUint32(18, file.data.length, true)
+    view.setUint32(22, file.data.length, true)
+    view.setUint16(26, name.length, true)
+    local.set(name, 30)
+    const central = new Uint8Array(46 + name.length)
+    const directory = new DataView(central.buffer)
+    directory.setUint32(0, 0x02014b50, true)
+    directory.setUint16(4, 20, true)
+    directory.setUint16(6, 20, true)
+    directory.setUint16(10, 0, true)
+    directory.setUint16(12, 0, true)
+    directory.setUint32(16, crc, true)
+    directory.setUint32(20, file.data.length, true)
+    directory.setUint32(24, file.data.length, true)
+    directory.setUint16(28, name.length, true)
+    directory.setUint32(42, offset, true)
+    central.set(name, 46)
+    locals.push(local, file.data)
+    centrals.push(central)
+    offset += local.length + file.data.length
+  }
+  const centralSize = centrals.reduce((sum, item) => sum + item.length, 0)
+  const end = new Uint8Array(22)
+  const tail = new DataView(end.buffer)
+  tail.setUint32(0, 0x06054b50, true)
+  tail.setUint16(8, files.length, true)
+  tail.setUint16(10, files.length, true)
+  tail.setUint32(12, centralSize, true)
+  tail.setUint32(16, offset, true)
+  const output = new Uint8Array(offset + centralSize + end.length)
+  let cursor = 0
+  for (const part of [...locals, ...centrals, end]) {
+    output.set(part, cursor)
+    cursor += part.length
+  }
+  return output
+}
+
+function zipFile(name: string, text: string): { name: string; data: Uint8Array } {
+  return { name, data: new TextEncoder().encode(text) }
+}
+
+/** 一张表。单元格都是文本，表头就是第一行。 */
+export function xlsxBytes(rows: string[][], sheetName = 'Sheet1'): ArrayBuffer {
+  const name = xmlText(sheetName.replace(/[\\/?*[\]:]/g, ' ').trim().slice(0, 31) || 'Sheet1')
+  const bytes = storedZip([
+    zipFile('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+      `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+      `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
+      `<Default Extension="xml" ContentType="application/xml"/>` +
+      `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>` +
+      `<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>` +
+      `</Types>`),
+    zipFile('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>` +
+      `</Relationships>`),
+    zipFile('xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+      `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
+      `<sheets><sheet name="${name}" sheetId="1" r:id="rId1"/></sheets></workbook>`),
+    zipFile('xl/_rels/workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>` +
+      `</Relationships>`),
+    zipFile('xl/worksheets/sheet1.xml', sheetXml(rows))
+  ])
+  const copy = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(copy).set(bytes)
+  return copy
+}
+
+export function downloadXlsxRows(rows: string[][], filename: string, sheetName = 'Sheet1'): void {
+  const blob = new Blob([xlsxBytes(rows, sheetName)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 export async function readXlsxRows(buffer: ArrayBuffer): Promise<string[][]> {
   const files = await readZip(buffer)
   const sheetPath = firstSheetPath(files)

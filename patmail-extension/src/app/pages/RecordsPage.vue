@@ -4,13 +4,14 @@ import PageHead from '../../shell/components/PageHead.vue'
 import { bg } from '../../shell/assets'
 import { PROCESS_SPECS, type ProcessKind, type ProcessListRow } from '../../api/mail-process'
 import { filterProcessRows } from '../../api/process-list-search'
+import { fileManageRunLabel } from '../../customer/file-manage-runs'
 import { describeTaskRecord } from '../record-status'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useWorkspace } from '../composables/useWorkspace'
 import EmptyGuide from '../components/EmptyGuide.vue'
 
 const bridge = inject<MessageBridge>('bridge')
-const { connection, tasks } = useWorkspace()
+const { connection, tasks, fileManageRuns } = useWorkspace()
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
 const specs = [PROCESS_SPECS.AP, PROCESS_SPECS.CO, PROCESS_SPECS.EF]
 const kind = ref<ProcessKind>('AP')
@@ -45,6 +46,23 @@ const placeholders: Record<ProcessKind, string> = {
   CO: '搜索主题、客户或收件人'
 }
 const staleBackground = computed(() => message.value.includes('没有接住转发'))
+const localRecords = computed(() => {
+  const fromRuns = fileManageRuns.value.map(run => ({
+    id: run.id,
+    at: run.at,
+    customer: run.customerName || '未命名',
+    status: fileManageRunLabel(run.status),
+    note: [run.subject, run.note].filter(Boolean).join(' · ')
+  }))
+  const fromTasks = tasks.value.map(task => ({
+    id: task.taskId,
+    at: task.updatedAt || task.createdAt,
+    customer: task.customerName || '未命名',
+    status: task.status,
+    note: describeTaskRecord(task.status)
+  }))
+  return [...fromRuns, ...fromTasks].sort((left, right) => right.at.localeCompare(left.at))
+})
 
 function reloadExtension(): void {
   const runtime = (globalThis as { chrome?: { runtime?: { reload?: () => void } } }).chrome?.runtime
@@ -299,18 +317,18 @@ watch(ready, (ok) => {
     </div>
   </section>
   <section class="card">
-    <h2>本地任务记录</h2>
-    <p class="hint">记录从已保存任务推导。没有发送核验时，不会显示已成功发送。</p>
+    <h2>本机任务记录</h2>
+    <p class="hint">文件管理每次提交会记在这里。发文任务里拼出来的计划也会留在这里。没有发送核验时，不会显示已成功发送。</p>
     <p v-if="!ready" class="empty">还没确认当前登录的人，本地记录先不显示。</p>
-    <EmptyGuide v-else-if="tasks.length === 0" text="还没有本地发文任务。去发文任务里拼一封之后，记录会出现在这里。" action="去发文任务" hash="/tasks" />
-    <table v-else class="grid">
-      <thead><tr><th>时间</th><th>客户</th><th>状态</th><th>说明</th></tr></thead>
+    <EmptyGuide v-else-if="localRecords.length === 0" text="还没有本机发文记录。文件管理提交之后，或在发文任务里拼一封之后，会出现在这里。" action="去工作流" hash="/workflow" />
+    <table v-else class="grid local-record-grid">
+      <thead><tr><th style="width: 196px">时间</th><th style="width: 22%">客户</th><th style="width: 140px">状态</th><th>说明</th></tr></thead>
       <tbody>
-        <tr v-for="task in tasks" :key="task.taskId">
-          <td>{{ task.updatedAt || task.createdAt }}</td>
-          <td>{{ task.customerName || '未命名' }}</td>
-          <td>{{ task.status }}</td>
-          <td>{{ describeTaskRecord(task.status) }}</td>
+        <tr v-for="row in localRecords" :key="row.id">
+          <td>{{ row.at.replace('T', ' ').replace(/\.\d+Z$/, '') }}</td>
+          <td>{{ row.customer }}</td>
+          <td>{{ row.status }}</td>
+          <td><span class="note">{{ row.note }}</span></td>
         </tr>
       </tbody>
     </table>

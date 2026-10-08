@@ -143,8 +143,20 @@ export function skillById(id: string | undefined): SkillTemplate | null {
   return SKILLS.find(item => item.id === id) ?? null
 }
 
+const FILE_CAPTIONS: Record<string, string> = {
+  'file-customer': '先选客户，读他的配置',
+  'file-query': '按绑定的查询条件和发文方式',
+  'file-type': '文件描述一对一对应发文类型',
+  'file-people': '案件联系人收，默认发件人和商务抄送',
+  'file-sender': '用默认发件人',
+  'file-review': '用默认审核人',
+  'file-subject': '标题用模板，正文用下拉里的签名',
+  'file-inventor': '研发本部在文件描述右侧写全部发明人'
+}
+
 /** 流程图节点上的一句说明。鹏城专案的收件人跟默认技能不同，不能沿用「发给 IPR」。 */
-export function stepCaption(step: { skillId?: string; params?: Array<{ id: string; value: string }> }): string {
+export function stepCaption(step: { id?: string; skillId?: string; params?: Array<{ id: string; value: string }> }): string {
+  if (step.id && FILE_CAPTIONS[step.id]) return FILE_CAPTIONS[step.id]
   const mode = step.params?.find(item => item.id === 'recipient_mode')?.value
   if (step.skillId === 'people' && mode === 'lead') return '发给技术负责人，抄送 IPR 和商务'
   return skillById(step.skillId)?.blurb ?? '自己加的一步'

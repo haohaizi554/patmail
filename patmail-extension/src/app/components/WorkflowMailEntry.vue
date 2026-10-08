@@ -23,7 +23,8 @@ import { MessageType, type MessageBridge } from '../../shared/message'
 import { scopeFromConnection } from '../../shared/connection'
 import { useWorkspace } from '../composables/useWorkspace'
 import { endProgress, logProgress, progressSummaryLine } from '../dialog'
-import { packagedPctWorkflow, pctRuntimeFrom, workflowSender, type WorkflowCatalog, type WorkflowDefinition } from '../../workflow/catalog'
+import { FILE_MANAGE_ID, packagedPctWorkflow, pctRuntimeFrom, workflowSender, type WorkflowCatalog, type WorkflowDefinition } from '../../workflow/catalog'
+import FileManageMail from './FileManageMail.vue'
 
 const props = defineProps<{
   customers: CustomerQueryProfile[]
@@ -713,7 +714,7 @@ async function onRefreshStatus(payload: { targets: Array<{ caseVolume: string; p
 }
 
 function definitionHint(item: WorkflowDefinition | null): string {
-  if (!item || isRunnableWorkflow(item)) return ''
+  if (!item || isRunnableWorkflow(item) || item.id === FILE_MANAGE_ID) return ''
   return '这条还缺读取表格、对收件人和提交审核要用的步骤，现在还不能按它生成预览。'
 }
 </script>
@@ -721,7 +722,8 @@ function definitionHint(item: WorkflowDefinition | null): string {
 <template>
   <section class="card">
     <div class="card-head"><h2>按工作流发文</h2></div>
-    <p class="hint">传入表格。同一客户里，收件人和抄送都相同的合成一封。PCT提醒发给 IPR、抄送商务。PCT鹏城专案发给技术负责人（去掉括号里的拼音），抄送 IPR 和商务。邮箱那一列不读。</p>
+    <p v-if="workflowId === FILE_MANAGE_ID" class="hint">选择已经绑好文件管理的客户。按这位客户保存的查询条件和发文方式查出文件。文件描述按发文映射对上发文类型。收件人是案件联系人，抄送是默认发件人和商务，审核人是默认审核人，标题用标题模板，正文用发文页邮件签名下拉里的格式。所属部门包含研发本部时，在文件描述右侧写入全部发明人，顿号分隔。</p>
+    <p v-else class="hint">传入表格。同一客户里，收件人和抄送都相同的合成一封。PCT提醒发给 IPR、抄送商务。PCT鹏城专案发给技术负责人（去掉括号里的拼音），抄送 IPR 和商务。邮箱那一列不读。</p>
     <div class="form-grid">
       <div v-if="workflowOptions.length === 0" class="span-all">
         <EmptyGuide text="还没有工作流。去工作流里看 PCT提醒。" action="去工作流" hash="/workflow" />
@@ -732,7 +734,8 @@ function definitionHint(item: WorkflowDefinition | null): string {
     </div>
     <p v-if="definitionHint(definition)" class="hint">{{ definitionHint(definition) }}</p>
 
-    <template v-if="runnable">
+    <FileManageMail v-if="workflowId === FILE_MANAGE_ID" :customers="customers" :rules="rules" :senders="senders" />
+    <template v-else-if="runnable">
       <div class="form-grid">
         <label v-if="senderMissing">发件人 <span class="need-mark">必填</span>
           <ThemeSelect :model-value="senderId" placeholder="选择发件邮箱" empty-text="发件邮箱还没读到。先确认已经连上，再重新打开这一页。" :options="senderOptions" @update:model-value="chooseSender(String($event))" />

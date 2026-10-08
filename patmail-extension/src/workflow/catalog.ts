@@ -37,7 +37,8 @@ export interface WorkflowCatalog {
 
 const PCT_ID = 'pct-reminder'
 const PENGCHENG_ID = 'pct-pengcheng'
-const SYSTEM_IDS = new Set([PCT_ID, PENGCHENG_ID])
+export const FILE_MANAGE_ID = 'file-manage'
+const SYSTEM_IDS = new Set([PCT_ID, PENGCHENG_ID, FILE_MANAGE_ID])
 
 const PCT_SKILLS: Array<[string, string]> = [
   ['entry', 'start'],
@@ -118,8 +119,28 @@ export function defaultPengchengWorkflow(): WorkflowDefinition {
   }
 }
 
+/** 文件管理不读表格。客户、查询条件、发文方式和发文映射都用已经保存的配置。 */
+export function defaultFileManageWorkflow(): WorkflowDefinition {
+  return {
+    id: FILE_MANAGE_ID,
+    label: '文件管理',
+    summary: '按客户已绑定的查询条件和发文方式，把文件描述对上的发文类型写成信。',
+    system: true,
+    steps: [
+      { id: 'file-customer', title: '选择客户', detail: '先选一位客户，读取这位客户保存的查询条件和发文方式。', params: [] },
+      { id: 'file-query', title: '按绑定条件查询', detail: '用客户管理里绑定的查询条件去文件查询。发文方式用这位客户保存的那一种。', params: [] },
+      { id: 'file-type', title: '对上发文类型', detail: '文件描述和发文类型一对一，从发文映射里读。对不上，或一个描述对上多种类型，这一封不创建。', params: [] },
+      { id: 'file-people', title: '谁来收', detail: '收件人是发文页的案件联系人。抄送是默认发件人，同时抄送商务。', params: [] },
+      { id: 'file-sender', title: '从哪个邮箱发', detail: '发件人用发文映射里的默认发件人。', params: [] },
+      { id: 'file-review', title: '谁来看一眼', detail: '审核人用发文映射里的默认审核人。', params: [] },
+      { id: 'file-subject', title: '标题', detail: '标题用发文映射里的标题模板。正文写入发文页邮件签名下拉里的格式。', params: [] },
+      { id: 'file-inventor', title: '研发本部发明人', detail: '案件所属部门包含「研发本部」时，在发文类型带出的正文表格里，于「文件描述」右侧加一列「发明人」，写入该案全部发明人，顿号分隔。其他部门不加这一列。', params: [] }
+    ]
+  }
+}
+
 export function defaultWorkflowCatalog(): WorkflowCatalog {
-  return { workflows: [defaultPctWorkflow(), defaultPengchengWorkflow()] }
+  return { workflows: [defaultPctWorkflow(), defaultPengchengWorkflow(), defaultFileManageWorkflow()] }
 }
 
 function cloneData<T>(value: T): T {
@@ -421,13 +442,13 @@ export function normalizeWorkflowCatalog(input: unknown): WorkflowCatalog {
   for (const item of rawList) {
     if (!isRecord(item)) continue
     if (item.id === PCT_ID) pct = mergePct(item)
-    else if (item.id === PENGCHENG_ID) continue
+    else if (item.id === PENGCHENG_ID || item.id === FILE_MANAGE_ID) continue
     else {
       const extra = parseExtraWorkflow(item)
       if (extra && !extras.some(flow => flow.id === extra.id)) extras.push(extra)
     }
   }
-  return { workflows: [pct ?? defaultPctWorkflow(), defaultPengchengWorkflow(), ...extras] }
+  return { workflows: [pct ?? defaultPctWorkflow(), defaultPengchengWorkflow(), defaultFileManageWorkflow(), ...extras] }
 }
 
 const FILLED_ON_SAVE = new Set([

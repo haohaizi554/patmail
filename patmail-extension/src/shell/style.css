@@ -189,6 +189,34 @@ img { max-width: 100%; }
   white-space: normal; max-width: 220px; height: auto;
   line-height: 1.45; padding-top: 8px; padding-bottom: 8px;
 }
+.file-manage-grid { table-layout: fixed; width: 100%; }
+.file-manage-grid col.pick { width: 36px; }
+.file-manage-grid col.to { width: 88px; }
+.file-manage-grid col.cc { width: 128px; }
+.file-manage-grid col.type { width: 16%; }
+.file-manage-grid col.desc { width: 14%; }
+.file-manage-grid col.state { width: 14%; }
+.file-manage-grid th,
+.file-manage-grid td { overflow: hidden; min-width: 0; vertical-align: middle; }
+.file-manage-grid th { white-space: nowrap; text-overflow: ellipsis; }
+.file-manage-grid td { height: auto; white-space: normal; padding-top: 8px; padding-bottom: 8px; }
+.file-manage-grid td.pick,
+.file-manage-grid th.pick { width: 36px; text-align: center; padding-left: 0; padding-right: 0; overflow: visible; }
+.file-manage-grid .clip { display: block; max-width: 100%; overflow: hidden; line-height: 1.45; }
+.file-manage-grid .clip.wrap {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow-wrap: anywhere; word-break: break-all;
+}
+.file-manage-grid .clip.one { white-space: nowrap; text-overflow: ellipsis; }
+.local-record-grid { table-layout: fixed; width: 100%; }
+.local-record-grid td { white-space: normal; vertical-align: top; height: auto; padding-top: 8px; padding-bottom: 8px; }
+.local-record-grid .note {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.45;
+}
 .grid tr.is-pending td { color: #9aa3b5; }
 .grid td.shade-open { background: #e7f0ff; color: #1d4ed8; }
 .grid td.shade-done { background: #e5f8ee; color: #157a45; }

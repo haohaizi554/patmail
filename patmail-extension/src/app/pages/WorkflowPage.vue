@@ -523,7 +523,7 @@ function chooseReviewer(param: WorkflowParam, id: string): void {
 
   <section v-else-if="screen === 'ocean'" class="card ocean">
     <button type="button" class="flow-text" @click="screen = 'sea'">回到海边</button>
-    <p class="hint">现在会自己跑起来的，仍是 PCT提醒。新加的会按你排的步骤保存下来。</p>
+    <p class="hint">现在会自己跑起来的，是 PCT提醒、PCT鹏城专案和文件管理。新加的会按你排的步骤保存下来。</p>
     <div class="skill-sea">
       <button
         v-for="skill in SKILLS"

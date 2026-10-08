@@ -55,6 +55,8 @@ export const MessageType = {
   SearchLimitMonitorResult: 'SEARCH_LIMIT_MONITOR_RESULT',
   SubmitLimitMail: 'SUBMIT_LIMIT_MAIL',
   SubmitLimitMailResult: 'SUBMIT_LIMIT_MAIL_RESULT',
+  SubmitFileManage: 'SUBMIT_FILE_MANAGE',
+  SubmitFileManageResult: 'SUBMIT_FILE_MANAGE_RESULT',
   ExportCaseContacts: 'EXPORT_CASE_CONTACTS',
   ExportCaseContactsResult: 'EXPORT_CASE_CONTACTS_RESULT',
   ListMailProcesses: 'LIST_MAIL_PROCESSES',
@@ -146,6 +148,7 @@ export type ContentRequest =
   | Request<'CANCEL_FILE_SEARCH'> | Request<'CANCEL_LIMIT_MONITOR'> | Response<'SEARCH_FILES', { query: FileSearchQuery; continuation?: { querySessionId: string } }>
   | Response<'SEARCH_LIMIT_MONITOR', { query: LimitMonitorQuery }>
   | Response<'SUBMIT_LIMIT_MAIL', { userId: string; items: Array<{ procId: string; procIds?: string[]; mailTypeId: string; mailStyle: '1'; mailId?: string; mode: 'ipr' | 'lead'; inventor?: boolean; customerName: string; contactName: string; iprName: string; leadName: string }> }>
+  | Response<'SUBMIT_FILE_MANAGE', { userId: string; items: Array<{ fileId: string; fileIds: string[]; fileNames: string[]; mailTypeId: string; mailStyle: '1'; mailId?: string; recall?: boolean; subject: string; senderId: string; senderName: string; senderEmail: string; reviewerId: string; reviewerName: string; signature: string }> }>
   | Response<'EXPORT_CASE_CONTACTS', { volumes: string[] }>
   | Response<'LIST_MAIL_PROCESSES', { query: ProcessListQuery }>
   | Response<'OPEN_EASY_FORM', { target: ProcessOpenTarget }>
@@ -238,6 +241,7 @@ export type WorkspaceAction =
   | { action: 'deleteQueryTemplate'; id: string; expectedScope: ExpectedAccountScope }
   | { action: 'saveRules'; bundle: MailRuleBundle; expectedScope: ExpectedAccountScope }
   | { action: 'createTaskPlan'; files: SelectedPatentFile[]; queryTemplateVersion: number; expectedScope: ExpectedAccountScope }
+  | { action: 'recordFileManageRun'; expectedScope: ExpectedAccountScope; run: FileManageRunInput }
   | { action: 'forward'; message: ContentRequest }
   | { action: 'runAcceptance'; call: string; caseTypeId?: string; mailId?: string; flowType?: string; expectedFields?: Record<string, string> }
 
@@ -260,6 +264,7 @@ export interface WorkspaceResultPayload {
   templates: QueryTemplate[]
   rules: MailRuleBundle | null
   tasks: TaskSummary[]
+  fileManageRuns: FileManageRun[]
   forwarded: AppMessage | null
   appTab: { tabId: number; created: boolean } | null
   createdTask: CreatedTaskResult | null
@@ -267,6 +272,19 @@ export interface WorkspaceResultPayload {
   rulesSaved?: boolean
   tasksRevalidated?: boolean
   pendingRevalidation?: boolean
+}
+
+export interface FileManageRunInput {
+  customerName: string
+  subject: string
+  fileCount: number
+  status: 'submitted' | 'held' | 'skipped' | 'failed'
+  note: string
+}
+
+export interface FileManageRun extends FileManageRunInput {
+  id: string
+  at: string
 }
 
 export interface TaskSummary {
@@ -299,6 +317,7 @@ export type ContentResponse =
   | Response<'SEARCH_FILES_RESULT', ApiResult<FileSearchResult>>
   | Response<'SEARCH_LIMIT_MONITOR_RESULT', ApiResult<LimitMonitorResult>>
   | Response<'SUBMIT_LIMIT_MAIL_RESULT', { stopped: boolean; results: Array<{ procId: string; mailId: string; state: 'submitted' | 'created' | 'unknown' | 'failed'; message: string }> }>
+  | Response<'SUBMIT_FILE_MANAGE_RESULT', { stopped: boolean; results: Array<{ fileId: string; mailId: string; state: 'submitted' | 'created' | 'unknown' | 'failed'; message: string }> }>
   | Response<'EXPORT_CASE_CONTACTS_RESULT', ApiResult<CaseContactExport>>
   | Response<'LIST_MAIL_PROCESSES_RESULT', ApiResult<ProcessListResult>>
   | Response<'OPEN_EASY_FORM_RESULT', { ok: boolean; message: string }>
@@ -474,6 +493,41 @@ function isLimitMailSubmitItem(value: unknown): boolean {
     value.procIds.some(id => String(id).toLowerCase() === String(value.procId).toLowerCase())
 }
 
+function isFileManageSubmitItem(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  const keys = Object.keys(value)
+  const allowed = ['fileId', 'fileIds', 'fileNames', 'mailTypeId', 'mailStyle', 'mailId', 'recall', 'subject', 'senderId', 'senderName', 'senderEmail', 'reviewerId', 'reviewerName', 'signature']
+  if (!keys.every(key => allowed.includes(key))) return false
+  if (!isQueryGuid(String(value.fileId)) || !isQueryGuid(String(value.mailTypeId)) || !isQueryGuid(String(value.senderId)) || !isQueryGuid(String(value.reviewerId))) return false
+  if (value.mailStyle !== '1') return false
+  if (value.mailId !== undefined && !isQueryGuid(String(value.mailId))) return false
+  if (value.recall !== undefined && value.recall !== true) return false
+  if (value.recall === true && !isQueryGuid(String(value.mailId))) return false
+  if (!isShortText(value.subject, 500) || !value.subject.trim()) return false
+  if (!isShortText(value.senderName, 80) || !value.senderName.trim()) return false
+  if (!isShortText(value.senderEmail, 120) || !value.senderEmail.includes('@') || /[();；]/.test(value.senderEmail)) return false
+  if (!isShortText(value.reviewerName, 80) || !value.reviewerName.trim()) return false
+  if (!isShortText(value.signature, 4000) || !value.signature.trim()) return false
+  if (!Array.isArray(value.fileIds) || !Array.isArray(value.fileNames)) return false
+  if (value.fileIds.length === 0 || value.fileIds.length > 100 || value.fileIds.length !== value.fileNames.length) return false
+  if (!value.fileIds.every(id => isQueryGuid(String(id)))) return false
+  if (!value.fileIds.some(id => String(id).toLowerCase() === String(value.fileId).toLowerCase())) return false
+  return value.fileNames.every(name => isShortText(name, 180) && name.trim() && !name.includes(';'))
+}
+
+function isFileManageSubmitRequest(value: unknown): boolean {
+  if (!isRecord(value) || !isQueryGuid(String(value.userId)) || !Array.isArray(value.items)) return false
+  return value.items.length > 0 && value.items.length <= 20 && value.items.every(isFileManageSubmitItem) && Object.keys(value).length === 2
+}
+
+function isFileManageSubmitResponse(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.stopped !== 'boolean' || !Array.isArray(value.results) || Object.keys(value).length !== 2) return false
+  return value.results.every(item => isRecord(item) &&
+    typeof item.fileId === 'string' && typeof item.mailId === 'string' && typeof item.message === 'string' && item.message.length <= 8000 &&
+    (item.state === 'submitted' || item.state === 'created' || item.state === 'unknown' || item.state === 'failed') &&
+    Object.keys(item).length === 4)
+}
+
 function isLimitMailSubmitRequest(value: unknown): boolean {
   if (!isRecord(value) || !isQueryGuid(String(value.userId)) || !Array.isArray(value.items)) return false
   return value.items.length > 0 && value.items.every(isLimitMailSubmitItem) && Object.keys(value).length === 2
@@ -609,6 +663,10 @@ export function isMessage(value: unknown): value is AppMessage {
       return isLimitMailSubmitRequest(value.payload)
     case MessageType.SubmitLimitMailResult:
       return isLimitMailSubmitResponse(value.payload)
+    case MessageType.SubmitFileManage:
+      return isFileManageSubmitRequest(value.payload)
+    case MessageType.SubmitFileManageResult:
+      return isFileManageSubmitResponse(value.payload)
     case MessageType.ExportCaseContacts:
       return isRecord(value.payload) && isVolumeList(value.payload.volumes) && Object.keys(value.payload).length === 1
     case MessageType.ListMailProcesses:
@@ -751,6 +809,7 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.CancelLimitMonitor ||
     value.type === MessageType.SearchLimitMonitor || value.type === MessageType.ListMailProcesses ||
     value.type === MessageType.SubmitLimitMail ||
+    value.type === MessageType.SubmitFileManage ||
     value.type === MessageType.ExportCaseContacts ||
     value.type === MessageType.OpenEasyForm ||
     value.type === MessageType.ListFlowReviewers ||
@@ -775,7 +834,7 @@ export function isContentRequest(value: unknown): value is ContentRequest {
 }
 
 const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'CANCEL_LIMIT_MONITOR', 'SEARCH_LIMIT_MONITOR', 'LOOKUP_IC_FLOW', 'EXPORT_CASE_CONTACTS', 'LIST_MAIL_PROCESSES', 'OPEN_EASY_FORM', 'LIST_FLOW_REVIEWERS', 'READ_CASE_DEMANDS', 'READ_CASE_BUS_FLOW', 'READ_CUSTOMER_DEMANDS', 'READ_CUSTOMER_DIRECTORY', 'READ_MAIL_CONTACTS', 'READ_MAIL_ADDRESSES', 'GET_PAGE_INFO', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE', 'CALL_EASY'])
-const WRITE_FORWARD = new Set(['CREATE_EASY_MAIL', 'SAVE_EASY_MAIL', 'SAVE_HISTORY_QUERY', 'DELETE_HISTORY_QUERY', 'SUBMIT_LIMIT_MAIL'])
+const WRITE_FORWARD = new Set(['CREATE_EASY_MAIL', 'SAVE_EASY_MAIL', 'SAVE_HISTORY_QUERY', 'DELETE_HISTORY_QUERY', 'SUBMIT_LIMIT_MAIL', 'SUBMIT_FILE_MANAGE'])
 
 /** 不允许转发时给出原因。写开关关掉时，创建、保存和查询模板写回都停在这里。 */
 export function workspaceForwardBlock(value: unknown): string {
@@ -835,6 +894,9 @@ function isWorkspaceAction(value: unknown): value is WorkspaceAction {
     return isPlanFiles(value.files) && Number.isSafeInteger(value.queryTemplateVersion) && Number(value.queryTemplateVersion) >= 0 &&
       isExpectedScope(value.expectedScope) && Object.keys(value).length === 4 && JSON.stringify(value).length <= 200_000
   }
+  if (value.action === 'recordFileManageRun') {
+    return isFileManageRunInput(value.run) && isExpectedScope(value.expectedScope) && Object.keys(value).length === 3
+  }
   if (value.action === 'runAcceptance') return isAcceptanceAction(value)
   if (value.action === 'forward') return Object.keys(value).length === 2 && isWorkspaceForwardRequest(value.message)
   return false
@@ -847,6 +909,7 @@ function isWorkspaceResult(value: unknown): value is WorkspaceResultPayload {
   if (!Array.isArray(value.templates) || !value.templates.every(isQueryTemplate)) return false
   if (value.rules !== null && !isRuleBundle(value.rules)) return false
   if (!Array.isArray(value.tasks) || !value.tasks.every(isTaskSummary)) return false
+  if (value.fileManageRuns !== undefined && (!Array.isArray(value.fileManageRuns) || !value.fileManageRuns.every(isFileManageRun))) return false
   if (!isForwardedMessage(value.forwarded)) return false
   if (value.createdTask != null && !isCreatedTask(value.createdTask)) return false
   if (value.contextError !== undefined && value.contextError !== 'STALE_CONTEXT') return false
@@ -909,6 +972,27 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   if (!isRecord(value)) return false
   const keys = Object.keys(value).join(',')
   return !/cookie|authorization|password|token/i.test(keys)
+}
+
+function isFileManageRunInput(value: unknown): value is FileManageRunInput {
+  if (!isRecord(value) || Object.keys(value).length !== 5) return false
+  return typeof value.customerName === 'string' && value.customerName.trim().length > 0 && value.customerName.length <= 120 &&
+    typeof value.subject === 'string' && value.subject.length <= 500 &&
+    typeof value.note === 'string' && value.note.length <= 200 &&
+    Number.isInteger(value.fileCount) && Number(value.fileCount) >= 1 && Number(value.fileCount) <= 100 &&
+    (value.status === 'submitted' || value.status === 'held' || value.status === 'skipped' || value.status === 'failed')
+}
+
+function isFileManageRun(value: unknown): value is FileManageRun {
+  return isRecord(value) && typeof value.id === 'string' && value.id.length > 0 && value.id.length <= 80 &&
+    typeof value.at === 'string' && value.at.length > 0 && value.at.length <= 40 &&
+    isFileManageRunInput({
+      customerName: value.customerName,
+      subject: value.subject,
+      fileCount: value.fileCount,
+      status: value.status,
+      note: value.note
+    })
 }
 
 function isTaskSummary(value: unknown): boolean {

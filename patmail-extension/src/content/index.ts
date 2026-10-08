@@ -148,6 +148,9 @@ const bridge: MessageBridge = {
       case MessageType.SubmitLimitMail:
         return { type: MessageType.SubmitLimitMailResult,
           payload: await easyRuntime.submitLimitMails(message.payload.userId, message.payload.items) }
+      case MessageType.SubmitFileManage:
+        return { type: MessageType.SubmitFileManageResult,
+          payload: await easyRuntime.submitFileManageMails(message.payload.items) }
       case MessageType.ExportCaseContacts:
         return { type: MessageType.ExportCaseContactsResult,
           payload: await easyRuntime.exportCaseContacts(message.payload.volumes) }
