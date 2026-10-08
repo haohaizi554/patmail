@@ -8,11 +8,13 @@ import { EasyConnectionController, sameConnectionSnapshot, type ConnectionSnapsh
 import { handleWorkspaceMessage, openWorkspaceTab, recheckBoundSession, resumeEasySession, type WorkspaceHost } from './workspace'
 import { isRecord } from '../shared/guards'
 import { isMessage, MessageType, type AppMessage, type BackgroundResponse } from '../shared/message'
+import { prepareApiDocs } from '../agent/rag-store'
 import { hydrateWriteSwitch, watchWriteSwitch } from '../settings/write-switch'
 
 watchWriteSwitch()
 // 扩展 Service Worker 不能用顶层 await，否则 Chrome 直接拒绝启动，工具栏点击没有监听。
 void hydrateWriteSwitch()
+void prepareApiDocs()
 
 const CALL_CHANNEL = 'patmail-call'
 const RESULT_CHANNEL = 'patmail-result'

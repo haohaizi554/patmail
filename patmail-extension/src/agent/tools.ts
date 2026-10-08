@@ -26,7 +26,7 @@ export interface ToolContext {
   workflows(): Promise<Array<{ label: string; summary: string; steps: Array<{ title: string; detail: string }> }>>
   skills(): Array<{ title: string; blurb: string; detail: string }>
   /** 在 API/ 全部接口文档里按 Call、入口或中文主题取片段。 */
-  lookupApi(query: string): string
+  lookupApi(query: string): string | Promise<string>
   /** 按本领创建一条工作流，写进工作流目录。 */
   createWorkflow(input: { name: string; summary: string; skills: string }): Promise<string>
   /** 改一条非系统工作流上的某一栏。 */
@@ -203,7 +203,7 @@ const SCHEMAS: ToolSchema[] = [
     type: 'function',
     function: {
       name: 'lookup_api',
-      description: '查阅全部原站接口文档。问句不用和原文一致，按相关片段检索。用 Call 名（如 GetSearchFiles）、ashx 入口或中文主题。问一共有多少接口时，query 用「多少接口」。真实响应用 call_easy 发，不要说发不出请求。',
+      description: '查阅全部原站接口文档。词法和语义两路同时检索，再合并最相关的片段。用 Call 名（如 GetSearchFiles）、ashx 入口或中文主题。问一共有多少接口时，query 用「多少接口」。真实响应用 call_easy 发，不要说发不出请求。',
       parameters: {
         type: 'object',
         properties: { query: { type: 'string', description: 'Call 名、入口或中文主题' } },
@@ -878,7 +878,7 @@ export async function executeAgentTool(name: string, rawArguments: string, ctx: 
     if (name === 'lookup_api') {
       const query = textArg(args, 'query', 120)
       if (!query) return done('请给出 Call 名、入口或中文主题。', memory, false)
-      return done(clip(ctx.lookupApi(query)), memory, true)
+      return done(clip(await ctx.lookupApi(query)), memory, true)
     }
     if (name === 'call_easy') {
       const text = await callEasy(ctx, args)

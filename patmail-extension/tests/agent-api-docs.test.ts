@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { apiCatalogBrief, apiDocFiles, searchApiDocs, searchApiSections, sectionsFromMarkdown } from '../src/agent/api-docs'
+import { HYBRID_RAG_GRAPH, runHybridRag } from '../src/agent/rag-graph'
 
 describe('api docs', () => {
   it('splits a note on second-level headings', () => {
@@ -38,5 +39,20 @@ describe('api docs', () => {
     const corpus = searchApiDocs('登陆方面的')
     expect(corpus).toContain('Login.ashx')
     expect(corpus).not.toContain('没有对上')
+  })
+
+  it('merges a semantic prefix hit that the word index does not contain', () => {
+    const sections = sectionsFromMarkdown('04-文件查询.md', '# 文件查询\n\n## 其它\n\n这里没有那个调用名。\n\n## GetSearchFiles\n\nCall=GetSearchFiles\n')
+    const state = runHybridRag(sections, 'GetSearch', 2)
+    expect(HYBRID_RAG_GRAPH.edges).toEqual([
+      ['analyze', 'lexical'],
+      ['analyze', 'dense'],
+      ['lexical', 'fuse'],
+      ['dense', 'fuse']
+    ])
+    const hit = state.hits.find(item => item.section.body.includes('GetSearchFiles'))
+    expect(hit?.lexicalRank).toBe(0)
+    expect(hit?.denseRank).toBeGreaterThan(0)
+    expect(searchApiSections(sections, 'GetSearch')).toContain('词法和语义两路合并')
   })
 })

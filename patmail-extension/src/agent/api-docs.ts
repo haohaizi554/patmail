@@ -1,4 +1,6 @@
-/** 仓库 API/ 下的接口记录。构建时打进后台，问句按词检索相关片段，不整库塞进每一轮。 */
+/** 仓库 API/ 下的接口记录。构建时打进后台，问句走混合检索图，不整库塞进每一轮。 */
+
+import { renderRagHits, runHybridRag } from './rag-graph'
 
 export interface ApiDocSection {
   file: string
@@ -110,121 +112,11 @@ function asksForCatalog(query: string): boolean {
   return /多少|几个|一共|总数|数量|清单|有哪些入口|入口一览/.test(text) && /接口|Call|入口/.test(text)
 }
 
-const WEAK_CHAR = new Set('的了吗呢啊吧呀方面些么怎这那个和与或及为在是有不要会能把被对从到也就都很还又而但过着'.split(''))
-
-function foldTerms(text: string): string {
-  return text.toLowerCase().replace(/登陆/g, '登录').replace(/登入/g, '登录')
-}
-
-/** 英文 Call、ashx 名，以及中文二字词。虚词不进检索。 */
-function termsOf(text: string): string[] {
-  const norm = foldTerms(text)
-  const terms: string[] = []
-  for (const match of norm.matchAll(/[a-z][a-z0-9_]{2,}/g)) terms.push(match[0])
-  for (const match of norm.matchAll(/[a-z0-9]+(?:\.[a-z0-9]+)+/g)) {
-    for (const part of match[0].split('.')) if (part.length >= 2) terms.push(part)
-  }
-  for (const run of norm.matchAll(/[\u4e00-\u9fff]+/g)) {
-    const chars = [...run[0]].filter(char => !WEAK_CHAR.has(char))
-    for (let index = 0; index < chars.length - 1; index += 1) terms.push(chars[index] + chars[index + 1])
-    if (chars.length >= 2 && chars.length <= 8) terms.push(chars.join(''))
-  }
-  return [...new Set(terms)]
-}
-
-function passagesOf(section: ApiDocSection): ApiDocSection[] {
-  const body = section.body.trim()
-  if (body.length <= 720) return [section]
-  const chunks: ApiDocSection[] = []
-  let start = 0
-  while (start < body.length) {
-    let end = Math.min(body.length, start + 720)
-    if (end < body.length) {
-      const breakAt = body.lastIndexOf('\n', end)
-      if (breakAt > start + 400) end = breakAt
-    }
-    const slice = body.slice(start, end).trim()
-    if (slice) chunks.push({ file: section.file, heading: section.heading, body: slice })
-    if (end >= body.length) break
-    start = Math.max(end - 80, start + 1)
-  }
-  return chunks
-}
-
-interface IndexedPassage {
-  section: ApiDocSection
-  tf: Map<string, number>
-  length: number
-  heading: Set<string>
-  file: Set<string>
-}
-
-interface DocIndex {
-  passages: IndexedPassage[]
-  df: Map<string, number>
-  avg: number
-}
-
-const indexes = new WeakMap<ApiDocSection[], DocIndex>()
-
-function indexOf(sections: ApiDocSection[]): DocIndex {
-  const cached = indexes.get(sections)
-  if (cached) return cached
-  const df = new Map<string, number>()
-  const passages = sections.flatMap(passagesOf).map(section => {
-    const counts = new Map<string, number>()
-    for (const term of termsOf(section.body)) counts.set(term, (counts.get(term) ?? 0) + 1)
-    for (const term of counts.keys()) df.set(term, (df.get(term) ?? 0) + 1)
-    const length = [...counts.values()].reduce((sum, count) => sum + count, 0)
-    return { section, tf: counts, length, heading: new Set(termsOf(section.heading)), file: new Set(termsOf(section.file)) }
-  })
-  for (const passage of passages) {
-    for (const term of new Set([...passage.heading, ...passage.file])) {
-      if (!passage.tf.has(term)) df.set(term, (df.get(term) ?? 0) + 1)
-    }
-  }
-  const avg = passages.reduce((sum, passage) => sum + passage.length, 0) / Math.max(passages.length, 1)
-  const built = { passages, df, avg }
-  indexes.set(sections, built)
-  return built
-}
-
-function termScore(tf: number, df: number, docs: number, length: number, avg: number): number {
-  const idf = Math.log(1 + (docs - df + 0.5) / (df + 0.5))
-  const k1 = 1.2
-  const b = 0.55
-  return idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * length / Math.max(avg, 1)))
-}
-
 /** 用 Call 名、ashx 入口或中文主题找最相关的几段。问句不必和原文一致。 */
 export function searchApiSections(sections: ApiDocSection[], query: string, limit = 4): string {
-  const tokens = termsOf(query)
-  if (tokens.length === 0) return '请给出 Call 名、ashx 入口或中文主题。'
-  const index = indexOf(sections)
-  const docs = index.passages.length
-  const best = new Map<string, { section: ApiDocSection; score: number }>()
-  for (const passage of index.passages) {
-    let score = 0
-    for (const token of tokens) {
-      const df = index.df.get(token) ?? 0
-      if (df === 0) continue
-      const tf = passage.tf.get(token) ?? 0
-      if (tf > 0) score += termScore(tf, df, docs, passage.length, index.avg)
-      if (passage.heading.has(token)) score += termScore(1, df, docs, 1, 1) * 2.4
-      if (passage.file.has(token)) score += termScore(1, df, docs, 1, 1) * 1.6
-    }
-    if (score <= 0) continue
-    const key = `${passage.section.file}\n${passage.section.heading}`
-    const previous = best.get(key)
-    if (!previous || score > previous.score) best.set(key, { section: passage.section, score })
-  }
-  const ranked = [...best.values()].sort((a, b) => b.score - a.score).slice(0, limit)
-  if (ranked.length === 0) {
-    const names = [...new Set(sections.map(section => section.file))].sort().join('、')
-    return `文档里没有对上「${query.trim().slice(0, 80)}」。现有文档：${names}`
-  }
-  const body = ranked.map(item => `【${item.section.file}】${item.section.heading}\n${item.section.body.slice(0, 700).trim()}`).join('\n\n')
-  return `以下是接口文档片段，只用于对照字段和调用方式，不是这次已经发出的请求。\n\n${body}`
+  const state = runHybridRag(sections, query, limit)
+  if (state.tokens.length === 0 && state.dense.length === 0) return '请给出 Call 名、ashx 入口或中文主题。'
+  return renderRagHits(sections, query, state.hits)
 }
 
 export function searchApiDocs(query: string): string {

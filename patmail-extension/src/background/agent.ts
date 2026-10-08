@@ -27,6 +27,7 @@ import type { PatentFile } from '../api/file-search-types'
 import type { SelectedPatentFile } from '../mail/types'
 import { createWorkflowInCatalog, setWorkflowFieldInCatalog } from '../agent/actions'
 import { searchApiDocs } from '../agent/api-docs'
+import { prepareApiDocs } from '../agent/rag-store'
 import { loadWorkflowCatalog, saveWorkflowCatalog } from '../workflow/catalog-store'
 import { SKILLS, skillById } from '../workflow/skills'
 
@@ -216,7 +217,10 @@ function toolContext(host: WorkspaceHost, memory: AgentMemoryState, signal: Abor
       }))
     },
     skills: () => SKILLS.map(skill => ({ title: skill.title, blurb: skill.blurb, detail: skill.detail })),
-    lookupApi: query => searchApiDocs(query),
+    lookupApi: async query => {
+      await prepareApiDocs()
+      return searchApiDocs(query)
+    },
     async createWorkflow(input) {
       const catalog = await loadWorkflowCatalog()
       const made = createWorkflowInCatalog(catalog, input.name, input.summary, input.skills)
