@@ -17,6 +17,8 @@ export interface PatentFile {
   applicationNo?: string
   applicationType?: string
   customerName?: string
+  /** 查询列 ctrl_proc_name，页面称作处理事项。 */
+  ctrlProc?: string
   uploadTime?: string
   officialPostDate?: string
 }

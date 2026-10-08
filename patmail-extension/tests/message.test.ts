@@ -81,6 +81,27 @@ describe('message validation', () => {
     expect(isMessage(message)).toBe(true)
   })
 
+  it('keeps a long file-type id list that the original site submits', () => {
+    const filetype = Array.from({ length: 396 }, () => 'a52c7405-5303-47a6-8ab9-b7823cbe7df6').join(',')
+    expect(filetype.length).toBeGreaterThan(4000)
+    const query = {
+      resolvedFields: {
+        customer_name_vague: '广汽丰田',
+        filetype,
+        file_status: 'UN',
+        update_s: '2025-10-01',
+        fileclass: 'general'
+      },
+      pageIndex: 1,
+      pageSize: 50
+    }
+    expect(isMessage({ type: 'SEARCH_FILES', payload: { query } })).toBe(true)
+    const message = { type: 'WORKSPACE', payload: { action: 'forward', message: { type: 'SEARCH_FILES', payload: { query } } } }
+    prepareForwardedSearch(message)
+    const kept = (message.payload.message as { payload: { query: { resolvedFields: { filetype: string } } } }).payload.query.resolvedFields.filetype
+    expect(kept).toBe(filetype)
+  })
+
   it('validates normalized API responses without accepting raw server records', () => {
     expect(isMessage({ type: 'SESSION_RESULT', payload: { ok: true, data: {
       status: 'authenticated', checkedAt: '2026-09-24T00:00:00.000Z'

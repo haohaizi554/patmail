@@ -1,4 +1,4 @@
-import { isFileSearchBusinessField, type FileSearchQuery } from '../api/file-search-params'
+import { fileSearchValueLimit, isFileSearchBusinessField, type FileSearchQuery } from '../api/file-search-params'
 import { isForbiddenFieldName } from '../query/field-registry'
 import { PCT_CUSTOMER_VOLUME_TYPE_NAME, PCT_OUR_VOLUME_TYPE_NAME, resolvePctRuntime, type PctRuntimeConfig } from '../workflow/pct-config'
 import type { CustomerQueryProfile, FileMailStyle, LimitMailStyle, QuerySurfaceId, WorkflowId } from './types'
@@ -130,7 +130,7 @@ export function querySnapshot(fields: Record<string, string>): Record<string, st
   for (const [key, value] of Object.entries(fields)) {
     if (!BOUND_KEY.test(key) || isForbiddenFieldName(key)) continue
     const text = value.trim()
-    if (!text || text.length > 4000) continue
+    if (!text || text.length > fileSearchValueLimit(key)) continue
     output[key] = text
     if (Object.keys(output).length >= 160) break
   }
@@ -141,7 +141,7 @@ export function isBoundQuery(value: unknown): value is Record<string, string> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const entries = Object.entries(value as Record<string, unknown>)
   if (entries.length > 160) return false
-  return entries.every(([key, raw]) => BOUND_KEY.test(key) && !isForbiddenFieldName(key) && typeof raw === 'string' && raw.length <= 4000)
+  return entries.every(([key, raw]) => BOUND_KEY.test(key) && !isForbiddenFieldName(key) && typeof raw === 'string' && raw.length <= fileSearchValueLimit(key))
 }
 
 export function snapshotFromFileQuery(query: Pick<FileSearchQuery, 'resolvedFields' | 'caseVolume' | 'applicationNo' | 'customerName' | 'fileName' | 'fileDescriptionId'>): Record<string, string> {

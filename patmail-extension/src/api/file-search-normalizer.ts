@@ -15,6 +15,7 @@ const OPTIONAL_FIELDS = {
   app_no: 'applicationNo',
   apply_type: 'applicationType',
   customer_name: 'customerName',
+  ctrl_proc_name: 'ctrlProc',
   upload_time: 'uploadTime',
   post_date: 'officialPostDate'
 } as const

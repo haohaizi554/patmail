@@ -71,6 +71,14 @@ export function isFileSearchBusinessField(name: string): boolean {
   return BUSINESS_FIELDS.has(name)
 }
 
+const FIELD_VALUE_MAX = 4000
+/** 官方来文一次勾选几百项时，编号会拼成一万多字。原网站这次提交了 396 个。 */
+const FILETYPE_VALUE_MAX = 100_000
+
+export function fileSearchValueLimit(key: string): number {
+  return key === 'filetype' ? FILETYPE_VALUE_MAX : FIELD_VALUE_MAX
+}
+
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function validInternalIds(value: string): boolean {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { hasExplicitFileSearchFilter, isFileSearchBusinessField, FILE_SEARCH_REQUEST_FIELDS, FILE_SEARCH_SYSTEM_FIELDS, type FileSearchQuery } from '../api/file-search-params'
+import { fileSearchValueLimit, hasExplicitFileSearchFilter, isFileSearchBusinessField, FILE_SEARCH_REQUEST_FIELDS, FILE_SEARCH_SYSTEM_FIELDS, type FileSearchQuery } from '../api/file-search-params'
 import type { NormalizedDictionary } from '../api/dictionaries'
 import type { HistoryQueryOption } from '../api/query-history'
 import type { CustomerQueryProfile } from '../customer/types'
@@ -1007,7 +1007,7 @@ function applySeed(): void {
       }
       continue
     }
-    if (!text || text.length > 4000) continue
+    if (!text || text.length > fileSearchValueLimit(key)) continue
     nextActive[key] = true
     next[key] = text
   }

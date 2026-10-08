@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { inject, nextTick, onBeforeUnmount, ref, watch, computed } from 'vue'
 import type { FileSearchQuery } from '../../api/file-search-params'
-import { assessQueryScope, isFileSearchBusinessField } from '../../api/file-search-params'
+import { assessQueryScope, fileSearchValueLimit, isFileSearchBusinessField } from '../../api/file-search-params'
 import { coerceFileSearchQuery } from '../../api/message-guards'
-import type { FileSearchResult } from '../../api/file-search-types'
+import type { FileSearchResult, PatentFile } from '../../api/file-search-types'
 import { selectPage, toSelectedFile, toggleSelected, type SelectedPatentFile } from '../../mail'
 import QueryTemplateSection from '../../floating/QueryTemplateSection.vue'
 import ThemeSelect from '../../shell/components/ThemeSelect.vue'
@@ -34,11 +34,28 @@ const pageSizeOptions = [
   { value: 50, label: '50' },
   { value: 100, label: '100' }
 ]
+const resultColumns = [
+  { key: 'fileName', label: '附件名称' },
+  { key: 'fileStatus', label: '处理状态' },
+  { key: 'caseVolume', label: '我方文号' },
+  { key: 'customerVolume', label: '客户文号' },
+  { key: 'caseName', label: '案件名称' },
+  { key: 'officialPostDate', label: '官方发文日' },
+  { key: 'fileDescription', label: '文件描述' },
+  { key: 'ctrlProc', label: '处理事项' },
+  { key: 'applicationType', label: '申请类型' },
+  { key: 'fileType', label: '文件类型' },
+  { key: 'uploadTime', label: '上传时间' }
+] as const
 const querySessionId = ref('')
 const sourceNotice = ref('')
 const searchState = ref<'idle' | 'loading' | 'success' | 'empty' | 'error'>('idle')
 const searchMessage = ref('')
 const result = ref<FileSearchResult | null>(null)
+const pageAllSelected = computed(() => {
+  const items = result.value?.items ?? []
+  return items.length > 0 && items.every(file => Boolean(selected.value[file.fileId]))
+})
 const resultsSection = ref<HTMLElement | null>(null)
 const lastQuery = ref<FileSearchQuery | null>(null)
 let generation = 0
@@ -54,7 +71,7 @@ function messageForError(code: string, message: string): string {
 function fieldsFor(query: FileSearchQuery): Record<string, string> {
   const fields: Record<string, string> = {}
   for (const [key, value] of Object.entries(query.resolvedFields ?? {})) {
-    if (!isFileSearchBusinessField(key) || typeof value !== 'string' || value.length > 4000) continue
+    if (!isFileSearchBusinessField(key) || typeof value !== 'string' || value.length > fileSearchValueLimit(key)) continue
     fields[key] = value
   }
   if (query.caseVolume?.trim()) fields.case_volume = query.caseVolume.trim()
@@ -134,6 +151,19 @@ async function executeSearch(query: FileSearchQuery, run: 'start' | 'continue' =
   }
 }
 
+function rowNo(index: number): number {
+  const page = result.value?.pageIndex ?? 1
+  const size = result.value?.pageSize ?? pageSize.value
+  return (page - 1) * size + index + 1
+}
+function cellText(file: PatentFile, key: typeof resultColumns[number]['key']): string {
+  return file[key]?.trim() ?? ''
+}
+function togglePage(event: Event): void {
+  const items = result.value?.items ?? []
+  const on = (event.target as HTMLInputElement).checked
+  selected.value = selectPage(selected.value, items.map(file => toSelectedFile(file, selected.value[file.fileId]?.customerProfileId, querySessionId.value)), on)
+}
 function refresh(): void {
   if (lastQuery.value) void executeSearch({ ...lastQuery.value }, 'continue')
 }
@@ -164,7 +194,7 @@ watch(() => props.seedToken, () => {
   const fields: Record<string, string> = {}
   for (const [key, value] of Object.entries(props.seed)) {
     const text = value.trim()
-    if (!text || text.length > 4000) continue
+    if (!text || text.length > fileSearchValueLimit(key)) continue
     if (key === 'is_close') {
       if (text === '1' || text === '否') fields.is_close = '1'
       continue
@@ -221,21 +251,28 @@ onBeforeUnmount(() => {
           <button type="button" class="text-button" @click="emit('review')">查看已选</button>
           <button type="button" class="text-button" :disabled="Object.keys(selected).length === 0" @click="emit('plan')">生成发文计划</button>
         </div>
-        <article v-for="file in result.items" :key="file.fileId" class="file-card">
-          <label v-if="selectable" class="check-line">
-            <input type="checkbox" :checked="Boolean(selected[file.fileId])" @change="selected = toggleSelected(selected, toSelectedFile(file, selected[file.fileId]?.customerProfileId, querySessionId))" />
-            {{ file.fileName }}
-          </label>
-          <strong v-else>{{ file.fileName }}</strong>
-          <dl>
-            <div><dt>文件描述</dt><dd>{{ file.fileDescription || '暂无' }}</dd></div>
-            <div><dt>我方文号</dt><dd>{{ file.caseVolume || '暂无' }}</dd></div>
-            <div><dt>申请号</dt><dd>{{ file.applicationNo || '暂无' }}</dd></div>
-            <div><dt>客户名称</dt><dd>{{ file.customerName || '暂无' }}</dd></div>
-            <div><dt>官方发文日</dt><dd>{{ file.officialPostDate || '暂无' }}</dd></div>
-            <div><dt>文件状态</dt><dd>{{ file.fileStatus || '暂无' }}</dd></div>
-          </dl>
-        </article>
+        <div class="table-scroll">
+          <table class="grid">
+            <thead>
+              <tr>
+                <th v-if="selectable" class="check">
+                  <input type="checkbox" aria-label="当前页全选" :checked="pageAllSelected" @change="togglePage" />
+                </th>
+                <th class="seq">序号</th>
+                <th v-for="column in resultColumns" :key="column.key">{{ column.label }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(file, index) in result.items" :key="file.fileId" :class="{ 'is-selected': Boolean(selected[file.fileId]) }">
+                <td v-if="selectable" class="check">
+                  <input type="checkbox" :aria-label="file.fileName" :checked="Boolean(selected[file.fileId])" @change="selected = toggleSelected(selected, toSelectedFile(file, selected[file.fileId]?.customerProfileId, querySessionId))" />
+                </td>
+                <td class="seq">{{ rowNo(index) }}</td>
+                <td v-for="column in resultColumns" :key="column.key">{{ cellText(file, column.key) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <nav class="pagination" aria-label="文件分页">
           <button type="button" :disabled="result.pageIndex <= 1" @click="page(-1)">上一页</button>
           <span>第 {{ result.pageIndex }} / {{ result.totalPages }} 页</span>

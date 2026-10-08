@@ -75,6 +75,21 @@
   background: linear-gradient(180deg, #ff78ae, #ff4f93); color: #fff;
   font: 600 12px/1 "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; cursor: pointer;
 }
+.file-results .table-scroll { overflow-x: auto; margin-top: 8px; }
+.file-results table.grid { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 12px; }
+.file-results table.grid th,
+.file-results table.grid td {
+  height: 34px; padding: 0 8px; border-bottom: 1px solid #f3e6ee;
+  white-space: nowrap; text-align: left; color: #65536d; background: #fff;
+}
+.file-results table.grid th { background: #fff7fb; color: #9a4d78; font-weight: 650; }
+.file-results table.grid th.check,
+.file-results table.grid td.check,
+.file-results table.grid th.seq,
+.file-results table.grid td.seq { width: 42px; text-align: center; padding: 0 4px; }
+.file-results table.grid tr.is-selected td { background: #fff4f8; }
+.file-results table.grid tbody tr:hover td { background: #fffafd; }
+.file-results table.grid tr.is-selected:hover td { background: #fff4f8; }
 .query-conditions > .section-heading { justify-content: flex-start; flex-wrap: wrap; }
 .query-conditions > .section-heading > .inline-actions { margin-left: auto; }
 .template-save-row { display: flex; align-items: center; gap: 8px; min-width: 0; }

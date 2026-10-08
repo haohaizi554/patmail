@@ -1,6 +1,6 @@
 import { isQueryGuid } from '../query/query-validator'
 import { isRecord } from '../shared/guards'
-import { isFileSearchBusinessField, type FileSearchQuery } from './file-search-params'
+import { fileSearchValueLimit, isFileSearchBusinessField, type FileSearchQuery } from './file-search-params'
 import type { DictionarySnapshot } from './dictionaries'
 import type { HistoryQueryDetail, HistoryQueryOption } from './query-history'
 import type { FileSearchResult, PatentFile } from './file-search-types'
@@ -28,7 +28,7 @@ function optionalString(value: unknown): boolean {
 function isResolvedFields(value: unknown): value is Record<string, string> {
   if (!isRecord(value) || Object.keys(value).length > 120) return false
   return Object.keys(value).every(key => isFileSearchBusinessField(key) &&
-    typeof value[key] === 'string' && value[key].length <= 4000)
+    typeof value[key] === 'string' && value[key].length <= fileSearchValueLimit(key))
 }
 
 export function isFileSearchQuery(value: unknown): value is FileSearchQuery {
@@ -53,7 +53,7 @@ export function coerceFileSearchQuery(value: unknown): FileSearchQuery | null {
   const resolved: Record<string, string> = {}
   const source = isRecord(value.resolvedFields) ? value.resolvedFields : {}
   const entries = Object.entries(source).filter((entry): entry is [string, string] =>
-    isFileSearchBusinessField(entry[0]) && typeof entry[1] === 'string' && entry[1].length <= 4000)
+    isFileSearchBusinessField(entry[0]) && typeof entry[1] === 'string' && entry[1].length <= fileSearchValueLimit(entry[0]))
   const ranked = [...entries.filter(([, text]) => text.trim()), ...entries.filter(([, text]) => !text.trim())]
   for (const [key, text] of ranked) {
     if (Object.keys(resolved).length >= 120) break
@@ -111,7 +111,7 @@ function isSessionSummary(value: unknown): value is SessionSummary {
 const OPTIONAL_FILE_KEYS = [
   'fileNo', 'fileDescription', 'fileStatus', 'fileType', 'caseId', 'caseName',
   'caseVolume', 'customerVolume', 'applicationNo', 'applicationType', 'customerName',
-  'uploadTime', 'officialPostDate'
+  'ctrlProc', 'uploadTime', 'officialPostDate'
 ] as const
 
 function isPatentFile(value: unknown): value is PatentFile {
