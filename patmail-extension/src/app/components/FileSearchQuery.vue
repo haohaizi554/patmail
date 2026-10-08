@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { FileSearchQuery } from '../../api/file-search-params'
-import { assessQueryScope } from '../../api/file-search-params'
+import { assessQueryScope, isFileSearchBusinessField } from '../../api/file-search-params'
+import { coerceFileSearchQuery } from '../../api/message-guards'
 import type { FileSearchResult } from '../../api/file-search-types'
 import { selectPage, toSelectedFile, toggleSelected, type SelectedPatentFile } from '../../mail'
 import QueryTemplateSection from '../../floating/QueryTemplateSection.vue'
@@ -28,6 +29,11 @@ const emit = defineEmits<{
 
 const bridge = inject<MessageBridge>('bridge')
 const pageSize = ref(20)
+const pageSizeOptions = [
+  { value: 20, label: '20' },
+  { value: 50, label: '50' },
+  { value: 100, label: '100' }
+]
 const querySessionId = ref('')
 const sourceNotice = ref('')
 const searchState = ref<'idle' | 'loading' | 'success' | 'empty' | 'error'>('idle')
@@ -46,12 +52,25 @@ function messageForError(code: string, message: string): string {
 }
 
 function fieldsFor(query: FileSearchQuery): Record<string, string> {
-  const fields = { ...(query.resolvedFields ?? {}) }
+  const fields: Record<string, string> = {}
+  for (const [key, value] of Object.entries(query.resolvedFields ?? {})) {
+    if (!isFileSearchBusinessField(key) || typeof value !== 'string' || value.length > 4000) continue
+    fields[key] = value
+  }
   if (query.caseVolume?.trim()) fields.case_volume = query.caseVolume.trim()
   if (fields.is_close !== undefined) {
     fields.is_close = fields.is_close.trim() === '1' || fields.is_close.trim() === '否' ? '1' : ''
   }
   return fields
+}
+
+function reloadExtension(): void {
+  const runtime = (globalThis as { chrome?: { runtime?: { reload?: () => void } } }).chrome?.runtime
+  if (typeof runtime?.reload === 'function') {
+    runtime.reload()
+    return
+  }
+  searchMessage.value = '当前页面不能直接重载扩展。请到扩展管理页重新加载 PatMail。'
 }
 
 async function showResults(): Promise<void> {
@@ -76,7 +95,9 @@ async function executeSearch(query: FileSearchQuery, run: 'start' | 'continue' =
     return
   }
   const current = ++generation
-  const next = { ...query, resolvedFields: fields }
+  const next = coerceFileSearchQuery({ ...query, resolvedFields: fields, pageIndex: query.pageIndex || 1, pageSize: query.pageSize || pageSize.value }) ?? {
+    resolvedFields: fields, pageIndex: 1, pageSize: pageSize.value
+  }
   lastQuery.value = next
   emit('searched', next)
   searchState.value = 'loading'
@@ -178,17 +199,18 @@ onBeforeUnmount(() => {
     <section ref="resultsSection" class="card file-results" aria-label="查询结果">
       <div class="section-heading">
         <strong>查询结果</strong>
+        <label class="page-size">每页数量
+          <ThemeSelect v-model="pageSize" :disabled="!canSearch || searchState === 'loading'" :options="pageSizeOptions" @change="changePageSize" />
+        </label>
         <button type="button" class="text-button" :disabled="!canSearch || !lastQuery || searchState === 'loading'" @click="refresh">刷新</button>
       </div>
-      <div v-if="lastQuery" class="result-toolbar">
-        <span v-if="result">共 {{ result.total }} 个文件</span>
-        <label>每页数量
-          <ThemeSelect v-model="pageSize" :disabled="!canSearch || searchState === 'loading'" :options="[{ value: 20, label: '20' }, { value: 50, label: '50' }, { value: 100, label: '100' }]" @change="changePageSize" />
-        </label>
+      <div v-if="result" class="result-toolbar">
+        <span>共 {{ result.total }} 个文件</span>
       </div>
       <p v-if="searchState === 'idle'" class="hint">输入条件后查询文件。</p>
       <p v-else-if="searchState === 'loading'" class="hint" role="status">正在查询…</p>
       <p v-else-if="searchState === 'error'" class="error" role="alert">{{ searchMessage }}</p>
+      <button v-if="searchState === 'error' && searchMessage.includes('没有接住')" type="button" class="solid tiny" @click="reloadExtension">重新加载扩展</button>
       <p v-else-if="searchState === 'empty'" class="hint" role="status">没有符合条件的文件。结案仍会查到；若把「是否包含结案」选成了「否」，结案文件不会出现。</p>
       <template v-else-if="result">
         <p v-if="sourceNotice" class="hint" role="status">{{ sourceNotice }}</p>

@@ -987,7 +987,9 @@ function search(): void {
   if (!canSubmit.value) return
   const fields = { ...resolved.value.fields }
   if (fields.is_close !== undefined) fields.is_close = fields.is_close.trim() === '1' || fields.is_close.trim() === '否' ? '1' : ''
-  emit('search', { resolvedFields: fields, pageIndex: 1, pageSize: props.pageSize })
+  const size = Number(props.pageSize)
+  const pageSize = Number.isSafeInteger(size) && size >= 1 && size <= 100 ? size : 20
+  emit('search', { resolvedFields: fields, pageIndex: 1, pageSize })
 }
 
 function applySeed(): void {

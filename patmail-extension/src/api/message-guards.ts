@@ -41,6 +41,52 @@ export function isFileSearchQuery(value: unknown): value is FileSearchQuery {
       .every(key => optionalString(value[key]))
 }
 
+function pageNumber(value: unknown, fallback: number, max: number): number {
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : fallback
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > max) return fallback
+  return parsed
+}
+
+/** 丢掉未登记字段、超长值和非法页码，避免一条坏字段让整次查询被后台拒绝。 */
+export function coerceFileSearchQuery(value: unknown): FileSearchQuery | null {
+  if (!isRecord(value)) return null
+  const resolved: Record<string, string> = {}
+  const source = isRecord(value.resolvedFields) ? value.resolvedFields : {}
+  const entries = Object.entries(source).filter((entry): entry is [string, string] =>
+    isFileSearchBusinessField(entry[0]) && typeof entry[1] === 'string' && entry[1].length <= 4000)
+  const ranked = [...entries.filter(([, text]) => text.trim()), ...entries.filter(([, text]) => !text.trim())]
+  for (const [key, text] of ranked) {
+    if (Object.keys(resolved).length >= 120) break
+    resolved[key] = text
+  }
+  const query: FileSearchQuery = {
+    resolvedFields: resolved,
+    pageIndex: pageNumber(value.pageIndex, 1, 1_000_000),
+    pageSize: pageNumber(value.pageSize, 20, 100)
+  }
+  for (const key of ['caseVolume', 'applicationNo', 'customerName', 'fileName', 'fileDescriptionId'] as const) {
+    const raw = value[key]
+    if (typeof raw === 'string' && raw.length <= 4000) query[key] = raw
+  }
+  return query
+}
+
+const CONTINUATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** 转发到后台之前先收成校验能通过的查询。校验本身仍然拒绝脏消息。 */
+export function prepareForwardedSearch(message: unknown): void {
+  if (!isRecord(message) || message.type !== 'WORKSPACE' || !isRecord(message.payload)) return
+  if (message.payload.action !== 'forward' || !isRecord(message.payload.message)) return
+  const inner = message.payload.message
+  if (inner.type !== 'SEARCH_FILES' || !isRecord(inner.payload)) return
+  const query = coerceFileSearchQuery(inner.payload.query)
+  if (!query) return
+  const continuation = inner.payload.continuation
+  const keep = isRecord(continuation) && Object.keys(continuation).length === 1 &&
+    typeof continuation.querySessionId === 'string' && CONTINUATION_ID.test(continuation.querySessionId)
+  inner.payload = keep ? { query, continuation } : { query }
+}
+
 function isApiError(value: unknown): value is ApiError {
   return isRecord(value) && typeof value.code === 'string' && ERROR_CODES.has(value.code) &&
     typeof value.message === 'string' &&

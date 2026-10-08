@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { prepareForwardedSearch } from '../src/api/message-guards'
 import { isContentRequest, isMessage } from '../src/shared/message'
 
 describe('message validation', () => {
@@ -56,6 +57,28 @@ describe('message validation', () => {
       caseVolume: 'A-123', pageIndex: 1, pageSize: 20, rawUrl: 'https://evil.test/'
     } } })).toBe(false)
     expect(isContentRequest({ type: 'API_REQUEST', payload: { url: 'https://evil.test/' } })).toBe(false)
+  })
+
+  it('drops unregistered file-search fields so one bad key does not reject the forward', () => {
+    const message = {
+      type: 'WORKSPACE',
+      payload: {
+        action: 'forward',
+        message: {
+          type: 'SEARCH_FILES',
+          payload: {
+            query: {
+              resolvedFields: { customer_name_vague: '广汽丰田', filetemp: '中石神官文', nope: 'x' },
+              pageIndex: '1',
+              pageSize: '20'
+            }
+          }
+        }
+      }
+    }
+    expect(isMessage(message)).toBe(false)
+    prepareForwardedSearch(message)
+    expect(isMessage(message)).toBe(true)
   })
 
   it('validates normalized API responses without accepting raw server records', () => {

@@ -7,6 +7,7 @@ import { scopeExtensionPageMessage } from './scope'
 import { EasyConnectionController, sameConnectionSnapshot, type ConnectionSnapshot } from '../shared/connection'
 import { handleWorkspaceMessage, openWorkspaceTab, recheckBoundSession, resumeEasySession, type WorkspaceHost } from './workspace'
 import { isRecord } from '../shared/guards'
+import { prepareForwardedSearch } from '../api/message-guards'
 import { isMessage, MessageType, type AppMessage, type BackgroundResponse } from '../shared/message'
 import { prepareApiDocs } from '../agent/rag-store'
 import { hydrateWriteSwitch, watchWriteSwitch } from '../settings/write-switch'
@@ -142,6 +143,7 @@ const READS = new Set<string>([
 /** 页面和后台用长连接。查询过程中还会调用 EASY 页面，不能占用一次性消息口。 */
 async function dispatchExtensionMessage(message: unknown, sender: chrome.runtime.MessageSender): Promise<BackgroundResponse> {
   await connectionReady
+  prepareForwardedSearch(message)
   if (!isMessage(message)) {
     const type = message && typeof message === 'object' && 'type' in message ? String((message as { type?: unknown }).type) : '未知'
     const inner = message && typeof message === 'object' && 'payload' in message
