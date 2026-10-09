@@ -27,7 +27,11 @@ const STYLE = `
 `
 
 type HintHost = Document | ShadowRoot
-type HintEl = HTMLElement & { __hintCleanup?: () => void }
+type HintEl = HTMLElement & { __hintCleanup?: () => void; __hintText?: string }
+
+function remember(el: HintEl, value: unknown): void {
+  el.__hintText = typeof value === 'string' ? value.trim() : ''
+}
 
 function hostOf(el: HTMLElement): HintHost {
   const root = el.getRootNode()
@@ -86,9 +90,9 @@ function showBubble(el: HTMLElement, text: string): void {
 
 export const hintDirective = {
   mounted(el: HintEl, binding: { value: unknown }) {
-    const text = (): string => (typeof binding.value === 'string' ? binding.value.trim() : '')
+    remember(el, binding.value)
     const show = (): void => {
-      const tip = text()
+      const tip = el.__hintText ?? ''
       if (tip) showBubble(el, tip)
     }
     const hide = (): void => hideBubble(hostOf(el))
@@ -103,6 +107,9 @@ export const hintDirective = {
       el.removeEventListener('focusout', hide)
       hide()
     }
+  },
+  updated(el: HintEl, binding: { value: unknown }) {
+    remember(el, binding.value)
   },
   unmounted(el: HintEl) {
     el.__hintCleanup?.()

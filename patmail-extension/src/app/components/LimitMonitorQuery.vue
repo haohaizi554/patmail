@@ -11,6 +11,7 @@ import { splitCaseVolumes } from '../../customer/volume-list'
 import { isQueryGuid } from '../../query/query-validator'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useMailConcurrency } from '../../settings/use-mail-concurrency'
+import { isWriteSwitchOpen, isWriteSwitchReady } from '../../settings/write-switch'
 import { useWriteSwitch } from '../../settings/use-write-switch'
 
 const props = defineProps<{
@@ -21,9 +22,10 @@ const props = defineProps<{
   procQueries?: Array<{ id: string; volumes: string }>
   seedToken?: number
   caseVolume?: string
-  sheetRows?: Array<{ ourVolume: string; mailTypeId?: string; customerName?: string; contactName?: string; iprName?: string; leadName?: string; mailTo?: string; mailCc?: string }>
+  sheetRows?: Array<{ ourVolume: string; procLabel?: string; mailTypeId?: string; customerName?: string; contactName?: string; iprName?: string; leadName?: string; mailTo?: string; mailCc?: string; iprCarried?: true; contactCarried?: true; leadCarried?: true; iprArbitrated?: true }>
   recipientMode?: 'ipr' | 'lead'
   inventorCustomers?: string[]
+  flowByKey?: Record<string, string>
 }>()
 
 const { open: writesOpen, ready: writesReady } = useWriteSwitch()
@@ -54,6 +56,34 @@ const pagedRows = computed(() => {
   if (!sheetMerged.value) return rows.value
   const start = (pageIndex.value - 1) * mergedPageSize
   return rows.value.slice(start, start + mergedPageSize)
+})
+
+function sheetVolumeKey(value: string): string {
+  return value.replace(/\s/g, '').toUpperCase()
+}
+
+const plainProcIds = computed(() => {
+  const marked = new Set<string>()
+  for (const row of props.sheetRows ?? []) {
+    if (!row.iprArbitrated && !row.iprCarried && !row.contactCarried && !row.leadCarried) continue
+    marked.add(`${sheetVolumeKey(row.ourVolume)}\n${(row.procLabel ?? '').trim()}`)
+  }
+  const ids: string[] = []
+  for (const row of rows.value) {
+    const key = `${sheetVolumeKey(row.caseVolume)}\n${row.ctrlProc.trim()}`
+    if (!marked.has(key) && isQueryGuid(row.procId)) ids.push(row.procId)
+  }
+  return ids
+})
+
+const flowByProc = computed(() => {
+  const source = props.flowByKey ?? {}
+  const out: Record<string, string> = {}
+  for (const row of rows.value) {
+    const text = source[`${sheetVolumeKey(row.caseVolume)}\n${row.ctrlProc.trim()}`]
+    if (text) out[row.procId] = text
+  }
+  return out
 })
 
 type SearchInput = Omit<LimitMonitorQuery, 'pageIndex' | 'pageSize'> & { reset?: boolean; templateId?: string; page?: number }
@@ -295,12 +325,15 @@ function goPage(page: number): void {
   void search({ ...lastQuery.value, page })
 }
 
+function rowCanConfirm(procId: string): boolean {
+  if (flowByProc.value[procId] === '已提交审核') return false
+  const gate = gates.value[procId]
+  if (gate === 'pending') return false
+  return true
+}
+
 function onConfirm(ids: string[]): void {
-  const open = new Set(rows.value.filter(row => {
-    const gate = gates.value[row.procId]
-    return gate === 'open' || gate === 'done'
-  }).map(row => row.procId))
-  const procIds = ids.filter(item => isQueryGuid(item) && open.has(item))
+  const procIds = ids.filter(item => isQueryGuid(item) && rowCanConfirm(item))
   if (!procIds.length && ids.length) {
     message.value = checkingGates.value ? '还在核对发文审核状态，先不能确认。' : '已提交审核的不能勾选。'
     return
@@ -313,11 +346,11 @@ function onConfirm(ids: string[]): void {
 }
 
 async function onSubmitAsk(): Promise<void> {
-  if (!writesReady.value) {
+  if (!isWriteSwitchReady()) {
     message.value = '正在读取系统设置里的写开关。'
     return
   }
-  if (!writesOpen.value) {
+  if (!isWriteSwitchOpen()) {
     message.value = '写开关在系统设置里关着，没有提交到 EASY。'
     return
   }
@@ -425,6 +458,7 @@ async function searchProcGroups(groups: Array<{ id: string; volumes: string }>):
   pageIndex.value = 1
   const merged = new Map<string, LimitMonitorRow>()
   let failed = 0
+  let clipped = 0
   let lastError = ''
   publish()
   try {
@@ -435,7 +469,8 @@ async function searchProcGroups(groups: Array<{ id: string; volumes: string }>):
       for (let chunkIndex = 0; chunkIndex < lists.length; chunkIndex += 1) {
         if (token !== procSearchToken) return
         const volume = lists[chunkIndex] ?? ''
-        message.value = `正在查第 ${groupIndex + 1}/${groups.length} 种处理事项，文号第 ${chunkIndex + 1}/${lists.length} 段…`
+        const sheetCount = props.sheetRows?.length ?? 0
+        message.value = `正在查第 ${groupIndex + 1}/${groups.length} 种处理事项，文号第 ${chunkIndex + 1}/${lists.length} 段。已经对上 ${rows.value.length} 件${sheetCount ? `，表格一共 ${sheetCount} 行` : ''}。`
         publish()
         const fields: Record<string, string> = { ctrl_proc: group.id, case_volume: volume }
         const query = { type: 'all' as const, caseVolume: volume, ctrlProcId: group.id, fields, pageIndex: 1, pageSize: 100 }
@@ -444,7 +479,9 @@ async function searchProcGroups(groups: Array<{ id: string; volumes: string }>):
           try {
             const first = await requestPage(query)
             const pageItems = [...first.items]
-            const pages = Math.min(2, Math.ceil(first.total / 100))
+            const wanted = Math.max(1, Math.ceil(first.total / 100))
+            const pages = Math.min(8, wanted)
+            if (wanted > pages) clipped += 1
             for (let page = 2; page <= pages; page += 1) {
               if (token !== procSearchToken) return
               const next = await requestPage({ ...query, pageIndex: page })
@@ -476,9 +513,13 @@ async function searchProcGroups(groups: Array<{ id: string; volumes: string }>):
     if (token !== procSearchToken) return
     checkingGates.value = false
     lastQuery.value = null
+    const sheetCount = props.sheetRows?.length ?? 0
     const missedNote = failed ? `${failed} 段没查成。` : ''
+    const clipNote = clipped ? `${clipped} 段只取了前 800 件。` : ''
     message.value = rows.value.length
-      ? `分开查完，共 ${rows.value.length} 件。${missedNote}${rows.value.length > 80 ? '审核状态看下面的表格。' : ''}`
+      ? (sheetCount
+          ? `上面 ${rows.value.length} 件是这些文号在期限监控里还没办完的处理事项，没有按官方期限筛。下面表格一共 ${sheetCount} 行。${missedNote}${clipNote}`
+          : `期限里还没结束的一共 ${rows.value.length} 件。${missedNote}${clipNote}`)
       : (lastError || '这个条件下没有期限记录。')
     publish()
     if (rows.value.length && rows.value.length <= 80) void markSendGates(rows.value)
@@ -526,6 +567,8 @@ watch(() => props.seedToken, () => {
     :selected="selected"
     :rows="sheetMerged ? rows : pagedRows"
     :cache-pages="sheetMerged"
+    :plain-proc-ids="plainProcIds"
+    :flow-by-proc="flowByProc"
     :gates="gates"
     :checking="checkingGates"
     :total="sheetMerged ? rows.length : total"

@@ -387,10 +387,23 @@ function sheetReview(row: PctTaskRow): { found: string; review: string } {
   return { found: '', review: '' }
 }
 
-async function lookupCases(token: number): Promise<void> {
+const flowByKey = computed(() => {
+  const out: Record<string, string> = {}
+  for (const row of rows.value) {
+    const review = sheetStatus(row).review
+    if (!review || review === '—' || review === '…') continue
+    out[icKey(row.ourVolume, row.procLabel)] = review
+  }
+  return out
+})
+
+async function lookupCases(token: number, only?: Array<{ caseVolume: string; procLabel: string }>): Promise<void> {
+  const again = Boolean(only)
   icPhase.value = 'run'
-  for (const key of Object.keys(icByKey)) delete icByKey[key]
-  icNote.value = '正在用案件查询核对文号和流程状态…'
+  if (!again) {
+    for (const key of Object.keys(icByKey)) delete icByKey[key]
+  }
+  icNote.value = again ? '正在把查不到的重新入队…' : '正在用案件查询核对文号和流程状态…'
   if (!bridge || connection.value.sessionStatus !== 'authenticated') {
     icPhase.value = 'fail'
     icNote.value = '还没连上 EASY，库里有没有还没查。'
@@ -398,13 +411,15 @@ async function lookupCases(token: number): Promise<void> {
   }
   const page = bridge
   const seen = new Set<string>()
-  const asked = rows.value.flatMap(row => {
-    const caseVolume = row.ourVolume.trim()
+  const source = only ?? rows.value.map(row => ({ caseVolume: row.ourVolume, procLabel: row.procLabel }))
+  const asked = source.flatMap(row => {
+    const caseVolume = row.caseVolume.trim()
     const procLabel = row.procLabel.trim()
     if (!caseVolume || !procLabel) return []
     const key = icKey(caseVolume, procLabel)
     if (seen.has(key)) return []
     seen.add(key)
+    if (again) delete icByKey[key]
     return [{ caseVolume, procLabel, tries: 0 }]
   })
   const total = asked.length
@@ -413,7 +428,8 @@ async function lookupCases(token: number): Promise<void> {
   const pending: Record<string, Hit> = {}
   let flushTimer = 0
   let stopped = ''
-  const lanes = 5
+  // 一批 16 行走同一条 LookupIcFlow，里面 8 路同时查。一行一条消息时，每行都先做一次登录检查，单位时间条数会掉下去。
+  const batchSize = 16
 
   function flush(): void {
     if (flushTimer) {
@@ -442,11 +458,19 @@ async function lookupCases(token: number): Promise<void> {
     else stage(key, { found: item.found, gate: item.gate })
   }
 
+  function requeue(job: { caseVolume: string; procLabel: string; tries: number }): void {
+    if (job.tries < 1) asked.push({ ...job, tries: job.tries + 1 })
+    else stage(icKey(job.caseVolume, job.procLabel), { found: false, gate: '', unread: true })
+  }
+
   async function worker(): Promise<void> {
     while (token === sheetQueryToken && !stopped) {
-      const job = asked.shift()
-      if (!job) return
-      const response = await page.request({ type: MessageType.LookupIcFlow, payload: { rows: [{ caseVolume: job.caseVolume, procLabel: job.procLabel }] } })
+      const jobs = asked.splice(0, batchSize)
+      if (!jobs.length) return
+      const response = await page.request({
+        type: MessageType.LookupIcFlow,
+        payload: { rows: jobs.map(job => ({ caseVolume: job.caseVolume, procLabel: job.procLabel })) }
+      })
       if (token !== sheetQueryToken) return
       if (response.type !== MessageType.LookupIcFlowResult || !response.payload.ok) {
         const message = response.type === MessageType.LookupIcFlowResult && !response.payload.ok
@@ -458,24 +482,27 @@ async function lookupCases(token: number): Promise<void> {
           stopped = message
           return
         }
-        if (job.tries < 1) {
-          asked.push({ ...job, tries: job.tries + 1 })
+        jobs.forEach(requeue)
+        continue
+      }
+      const returned = new Set<string>()
+      for (const item of response.payload.data.items) {
+        const key = icKey(item.caseVolume, item.procLabel)
+        returned.add(key)
+        const tries = jobs.find(job => icKey(job.caseVolume, job.procLabel) === key)?.tries ?? 0
+        if (item.unread && tries < 1) {
+          asked.push({ caseVolume: item.caseVolume, procLabel: item.procLabel, tries: tries + 1 })
           continue
         }
-        stage(icKey(job.caseVolume, job.procLabel), { found: false, gate: '', unread: true })
-        continue
+        store(item)
       }
-      const item = response.payload.data.items[0]
-      if (!item) continue
-      if (item.unread && job.tries < 1) {
-        asked.push({ caseVolume: item.caseVolume, procLabel: item.procLabel, tries: job.tries + 1 })
-        continue
+      for (const job of jobs) {
+        if (!returned.has(icKey(job.caseVolume, job.procLabel))) requeue(job)
       }
-      store(item)
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(lanes, Math.max(asked.length, 1)) }, () => worker()))
+  await worker()
   if (flushTimer) window.clearTimeout(flushTimer)
   if (token !== sheetQueryToken) return
   flush()
@@ -488,7 +515,25 @@ async function lookupCases(token: number): Promise<void> {
   const found = Object.values(next).filter(item => item.found).length
   const unreadCount = Object.values(next).filter(item => item.unread).length
   const missed = unreadCount ? `${unreadCount} 件没查成，其余已经对过。` : ''
-  icNote.value = `案件查询对上 ${found} 件。${missed}结束的事项也会留在结果里。`
+  icNote.value = again
+    ? `查不到的 ${total} 行又对过，这次对上 ${found} 件。${missed}`
+    : `案件查询对上 ${found} 件。${missed}结束的事项也会留在结果里。`
+}
+
+function requeryMissed(): void {
+  if (icPhase.value === 'run') return
+  const jobs: Array<{ caseVolume: string; procLabel: string }> = []
+  const seen = new Set<string>()
+  for (const row of rows.value) {
+    const found = sheetStatus(row).found
+    if (found !== '库里没有' && found !== '没查成') continue
+    const key = icKey(row.ourVolume, row.procLabel)
+    if (seen.has(key)) continue
+    seen.add(key)
+    jobs.push({ caseVolume: row.ourVolume.trim(), procLabel: row.procLabel.trim() })
+  }
+  if (!jobs.length) return
+  void lookupCases(++sheetQueryToken, jobs)
 }
 
 function onLimitResult(payload: { items: LimitMonitorRow[]; gates: Record<string, 'open' | 'pending' | 'done'>; checking: boolean; message: string }): void {
@@ -505,7 +550,8 @@ function onLimitResult(payload: { items: LimitMonitorRow[]; gates: Record<string
       if (!seen.has(key)) delete limitByKey[key]
     }
   }
-  if (payload.message) limitNote.value = payload.message
+  if (!payload.items.length && payload.message) limitNote.value = payload.message
+  else if (!payload.checking && payload.items.length) limitNote.value = ''
   if (payload.checking) {
     limitPhase.value = 'run'
     return
@@ -867,12 +913,37 @@ const missedCount = computed(() => rows.value.filter(row => {
   const found = sheetStatus(row).found
   return found === '库里没有' || found === '没查成'
 }).length)
+const missingCount = computed(() => rows.value.filter(row => sheetStatus(row).found === '库里没有').length)
+const liveTask = computed(() => {
+  if (!rows.value.length) return null
+  const names = [...new Set(rows.value.map(row => row.customerName.trim()).filter(Boolean))]
+  const customer = names.length === 1 ? names[0] : names.length ? `表格里 ${names.length} 个客户` : '表格里没有客户名'
+  const labels = [...new Set(rows.value.map(row => row.mailTypeLabel.trim()).filter(Boolean))]
+  const detail = labels.map(label => `${label} ${rows.value.filter(row => row.mailTypeLabel.trim() === label).length} 件`).join('，')
+  return {
+    customer,
+    detail: `${rows.value.length} 行。发文类型：${detail || '还没对上'}。已确认勾选 ${confirmedProcIds.value.length} 件。`
+  }
+})
+const emit = defineEmits<{ liveTask: [value: { customer: string; detail: string } | null] }>()
+watch(liveTask, value => emit('liveTask', value), { immediate: true })
 
-function exportMissed(): void {
-  const sheets = missedSourceSheets(rows.value, row => sheetStatus(row).found, runtime.value.columns)
+function exportByVerdict(keep: (found: string) => boolean, filename: (count: number) => string): void {
+  const sheets = missedSourceSheets(rows.value, row => {
+    const found = sheetStatus(row).found
+    return keep(found) ? found : ''
+  }, runtime.value.columns)
   if (!sheets.length) return
   const count = sheets.reduce((sum, sheet) => sum + sheet.rows.length - 1, 0)
-  downloadXlsxSheets(sheets, `查不到的文号-${count}行.xlsx`)
+  downloadXlsxSheets(sheets, filename(count))
+}
+
+function exportMissed(): void {
+  exportByVerdict(found => found === '库里没有' || found === '没查成', count => `查不到的文号-${count}行.xlsx`)
+}
+
+function exportMissing(): void {
+  exportByVerdict(found => found === '库里没有', count => `库里没有-${count}行.xlsx`)
 }
 
 async function askGaps(): Promise<void> {
@@ -917,11 +988,10 @@ function definitionHint(item: WorkflowDefinition | null): string {
       <p v-for="note in styleNotes" :key="note" class="hint">这张表按同一客户、同一收件人和抄送合成一封。{{ note }}</p>
       <p v-if="sheetName" class="hint">{{ sheetName }}{{ sheetNotice ? `。${sheetNotice}` : '' }}</p>
       <button v-if="gapWaves.length" type="button" class="ghost" :disabled="askingGap" @click="askGaps">交给助手仲裁空着的 IPR{{ gapWaves.length > 1 ? `（分 ${gapWaves.length} 批）` : '' }}</button>
-      <button v-if="missedCount" type="button" class="ghost" @click="exportMissed">导出查不到的 {{ missedCount }} 行</button>
       <p v-if="mailTypes.length === 0" class="hint">发文类型还没读到。确认已经连上后，重新打开这一页。</p>
       <p v-if="unmatched.length" class="hint">这 {{ unmatched.length }} 行没有对上发文类型，请点选。</p>
       <p v-if="offCount" class="hint">有 {{ offCount }} 行的处理事项不是「{{ runtime.procLabel }}」。</p>
-      <p class="hint">上面是期限监控，只列出还没结束的事项。表格里的文号另外走案件查询，结束的事项也能对上。</p>
+      <p class="hint">上面按我方文号和处理事项去期限监控里查还没办完的，不看出官方期限有没有过。流程状态跟着下面的核对一起填。</p>
       <LimitMonitorQuery
         :bridge="bridge"
         :user-id="connection.operatorId"
@@ -933,6 +1003,7 @@ function definitionHint(item: WorkflowDefinition | null): string {
         :sheet-rows="rows"
         :recipient-mode="recipientMode"
         :inventor-customers="inventorCustomers"
+        :flow-by-key="flowByKey"
         @result="onLimitResult"
         @confirm="onSheetConfirm"
         @refresh-status="onRefreshStatus"
@@ -941,7 +1012,7 @@ function definitionHint(item: WorkflowDefinition | null): string {
       <p v-else-if="icNote" class="hint">{{ icNote }}</p>
       <p v-if="limitNote" class="hint">{{ limitNote }}</p>
       <div v-if="rows.length" class="toolbar">
-        <span>共 {{ rows.length }} 行</span>
+        <span class="sheet-count">表格共 {{ rows.length }} 行</span>
         <div v-if="sheetPages > 1" class="pagination">
           <button class="ghost tiny" type="button" :disabled="sheetPageSafe <= 1" @click="setSheetPage(sheetPageSafe - 1)">上一页</button>
           <span>{{ sheetPageSafe }} / {{ sheetPages }}</span>
@@ -974,9 +1045,13 @@ function definitionHint(item: WorkflowDefinition | null): string {
       <section v-if="cards.length" class="card inset">
         <h2>{{ outcome }}</h2>
         <p v-if="outcomeGroups.length" class="hint">{{ outcomeGroups.join('，') }}。</p>
-        <p class="hint">上面已经按表格查过。库里没有和没查成的可以按源表导出。重新查询会再查一次，并补上客户联系人里唯一的邮箱。</p>
-        <button v-if="missedCount" type="button" class="ghost" @click="exportMissed">导出查不到的 {{ missedCount }} 行</button>
-        <button type="button" class="solid" :disabled="saving" @click="createAndSend">{{ saving ? '正在准备查询…' : '重新查询' }}</button>
+        <div class="outcome-actions">
+          <button v-if="missingCount" type="button" class="ghost tiny" @click="exportMissing">导出库里没有 {{ missingCount }}</button>
+          <button v-if="missedCount" type="button" class="ghost tiny" @click="exportMissed">导出查不到 {{ missedCount }}</button>
+          <button v-if="missedCount" type="button" class="ghost tiny" :disabled="icPhase === 'run'" @click="requeryMissed">查不到的重新入队</button>
+          <button type="button" class="solid tiny" :disabled="saving || icPhase === 'run'" @click="createAndSend">{{ saving ? '正在准备查询…' : '重新查询' }}</button>
+        </div>
+        <p class="hint">导出按源表。重新入队只再查库里没有和没查成的。重新查询会整表再查，并补上客户联系人里唯一的邮箱。</p>
         <div v-if="progress.length" class="send-progress" role="status">
           <div class="send-bar" aria-hidden="true"><span :style="{ width: progressPercent + '%' }"></span></div>
           <ol>

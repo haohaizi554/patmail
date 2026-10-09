@@ -204,6 +204,7 @@ function buildPreview(): void {
 }
 
 const pctPlans = computed(() => customers.value.filter(item => item.pctTask && item.pctTask.rows.length > 0))
+const liveTask = ref<{ customer: string; detail: string } | null>(null)
 
 const senderOptions = computed(() => {
   const items = mailsets.value.map(item => ({ value: item.id, label: item.label }))
@@ -298,7 +299,7 @@ onMounted(() => { if (ready.value) void call({ action: 'load' }) })
       <button type="button" :class="entry === 'diy' ? 'solid' : 'ghost'" @click="entry = 'diy'">自己拼一封</button>
       <button type="button" :class="entry === 'workflow' ? 'solid' : 'ghost'" @click="entry = 'workflow'">按工作流发文</button>
     </div>
-    <WorkflowMailEntry v-if="entry === 'workflow'" :customers="customers" :rules="rules" :operator-id="connection.operatorId" :mail-types="mailTypes" :senders="mailsets" :signature-name="signatureName" :signature-text="signatureText" :catalog="catalog" />
+    <WorkflowMailEntry v-if="entry === 'workflow'" :customers="customers" :rules="rules" :operator-id="connection.operatorId" :mail-types="mailTypes" :senders="mailsets" :signature-name="signatureName" :signature-text="signatureText" :catalog="catalog" @live-task="liveTask = $event" />
     <section v-else class="card">
       <div class="card-head"><h2>自己拼一封</h2></div>
       <p class="hint">创建任务是把客户、文件、发文类型和已保存规则自己拼起来。这一步只生成预览，还不会提交到 EASY。</p>
@@ -352,9 +353,22 @@ onMounted(() => { if (ready.value) void call({ action: 'load' }) })
       </section>
     </section>
 
-    <section v-if="pctPlans.length" class="card">
+    <section v-if="entry === 'workflow' && liveTask" class="card">
       <h2>PCT 提醒任务</h2>
-      <p class="hint">这些任务来自表格。发文类型按每行的客户文号和我方文号决定。确认勾选后，上面的「提交到 EASY」会按勾选创建发文并交给当前登录人。</p>
+      <p class="hint">这是刚才导入的表格。换一张表，或者改了某一行的发文类型，这里会跟着变。</p>
+      <table class="grid">
+        <thead><tr><th>客户</th><th>任务</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>{{ liveTask.customer }}</td>
+            <td>{{ liveTask.detail }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+    <section v-else-if="entry !== 'workflow' && pctPlans.length" class="card">
+      <h2>PCT 提醒任务</h2>
+      <p class="hint">这些是客户里保存过的表格。发文类型按每行的客户文号和我方文号决定。</p>
       <table class="grid">
         <thead><tr><th>客户</th><th>任务</th></tr></thead>
         <tbody>

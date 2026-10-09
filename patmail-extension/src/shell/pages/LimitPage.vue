@@ -22,7 +22,9 @@ const props = defineProps({
   writesOpen: { type: Boolean, default: true },
   writesReady: { type: Boolean, default: true },
   pageWhileLoading: Boolean,
-  cachePages: Boolean
+  cachePages: Boolean,
+  plainProcIds: { type: Array, default: () => [] },
+  flowByProc: { type: Object, default: () => ({}) }
 })
 const emit = defineEmits(['search', 'page', 'select', 'confirm', 'submit'])
 const ui = inject('ui', null)
@@ -68,6 +70,7 @@ const submitTitle = computed(() => {
 })
 function canPick(row) {
   if (props.checking) return false
+  if (props.flowByProc[row.procId] === '已提交审核') return false
   return props.gates[row.procId] !== 'pending'
 }
 const pageIds = computed(() => shown.value.filter(canPick).map(row => row.procId).filter(Boolean))
@@ -88,6 +91,19 @@ function togglePage() {
   emit('select', next)
 }
 
+function pickableIds(allow) {
+  const source = props.cachePages ? props.rows : shown.value
+  return source.filter(row => canPick(row) && row.procId && (!allow || allow.has(row.procId))).map(row => row.procId)
+}
+
+function selectEvery() {
+  emit('select', [...new Set(pickableIds())])
+}
+
+function selectPlain() {
+  emit('select', [...new Set(pickableIds(new Set(props.plainProcIds)))])
+}
+
 function confirmSelection() {
   const source = props.live ? props.rows : demoRows.value
   const onPage = new Set(source.map(row => row.procId))
@@ -106,6 +122,8 @@ function goPage(page) {
 }
 
 function flowStatus(row) {
+  const synced = props.flowByProc[row.procId]
+  if (synced) return synced
   const gate = props.gates[row.procId]
   if (gate === 'pending') return '已提交审核'
   if (gate === 'done' || gate === 'open') return '还没提交审核'
@@ -164,16 +182,18 @@ function reset() {
     </div>
   </section>
   <section class="card" style="margin-top: 14px">
-    <div class="toolbar">
-      <span>共 {{ totalText }} 条</span>
+    <div class="toolbar limit-bar">
+      <span class="count">期限共 {{ totalText }} 条</span>
       <button v-if="selectable" class="ghost tiny" type="button" :disabled="!pageIds.length" @click="togglePage">{{ pageAll ? '取消全选' : '全选本页' }}</button>
+      <button v-if="selectable && cachePages" class="ghost tiny" type="button" :disabled="checking || !rows.length" @click="selectEvery">全选所有</button>
+      <button v-if="selectable && cachePages" class="ghost tiny" type="button" :disabled="checking || !plainProcIds.length" @click="selectPlain">全选所有（非补非仲）</button>
       <button v-if="selectable" class="ghost tiny" type="button" :disabled="!selected.length" @click="confirmSelection">确认勾选</button>
       <div v-if="live && totalPages > 1" class="pagination">
         <button class="ghost tiny" type="button" :disabled="pageIndex <= 1 || (loading && !pageWhileLoading)" @click="goPage(pageIndex - 1)">上一页</button>
         <span>{{ pageIndex }} / {{ totalPages }}</span>
         <button class="ghost tiny" type="button" :disabled="pageIndex >= totalPages || (loading && !pageWhileLoading)" @click="goPage(pageIndex + 1)">下一页</button>
       </div>
-      <button class="ghost" type="button" v-hint="submitTitle" @click="askSubmit">提交到 EASY</button>
+      <button class="ghost tiny" type="button" v-hint="submitTitle" @click="askSubmit">提交到 EASY</button>
     </div>
     <p v-if="checking" class="hint">正在核对发文审核状态。核对完之前不能勾选。</p>
     <p v-if="message" class="hint">{{ message }}</p>
@@ -191,10 +211,10 @@ function reset() {
           <tr v-if="!rowsFor(n).length">
             <td :colspan="selectable ? 10 : 9">{{ loading ? '正在读取期限列表…' : (message ? '查询没有完成，上面有原因。' : '没有可显示的期限记录') }}</td>
           </tr>
-          <tr v-for="row in rowsFor(n)" :key="row.procId" v-memo="[row, gates[row.procId], checking, selected.includes(row.procId)]" :class="{ 'is-pending': gates[row.procId] === 'pending' || checking }">
+          <tr v-for="row in rowsFor(n)" :key="row.procId" v-memo="[row, gates[row.procId], flowByProc[row.procId], checking, selected.includes(row.procId)]" :class="{ 'is-pending': gates[row.procId] === 'pending' || flowByProc[row.procId] === '已提交审核' || checking }">
             <td v-if="selectable">
               <input type="checkbox" :checked="selected.includes(row.procId)" :disabled="!canPick(row)" @change="toggleRow(row.procId)" />
-              <span v-if="gates[row.procId] === 'pending'">待审核</span>
+              <span v-if="gates[row.procId] === 'pending' || flowByProc[row.procId] === '已提交审核'">待审核</span>
             </td>
             <td>{{ row.caseVolume }}</td>
             <td>{{ row.caseName }}</td>
@@ -212,10 +232,10 @@ function reset() {
         <tr v-if="!shown.length">
           <td :colspan="selectable ? 10 : 9">{{ loading ? '正在读取期限列表…' : (message ? '查询没有完成，上面有原因。' : '没有可显示的期限记录') }}</td>
         </tr>
-        <tr v-for="row in shown" :key="row.procId" v-memo="[row, gates[row.procId], checking, selected.includes(row.procId)]" :class="{ 'is-pending': gates[row.procId] === 'pending' || checking }">
+        <tr v-for="row in shown" :key="row.procId" v-memo="[row, gates[row.procId], flowByProc[row.procId], checking, selected.includes(row.procId)]" :class="{ 'is-pending': gates[row.procId] === 'pending' || flowByProc[row.procId] === '已提交审核' || checking }">
           <td v-if="selectable">
             <input type="checkbox" :checked="selected.includes(row.procId)" :disabled="!canPick(row)" @change="toggleRow(row.procId)" />
-            <span v-if="gates[row.procId] === 'pending'">待审核</span>
+            <span v-if="gates[row.procId] === 'pending' || flowByProc[row.procId] === '已提交审核'">待审核</span>
           </td>
           <td>{{ row.caseVolume }}</td>
           <td>{{ row.caseName }}</td>

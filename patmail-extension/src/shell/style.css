@@ -315,12 +315,22 @@ img { max-width: 100%; }
 .page-check { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-weight: 400; }
 .page-check input { width: 16px; height: 16px; margin: 0; }
 .card.inset { margin-top: 12px; box-shadow: none; }
+.outcome-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+.outcome-actions .ghost,
+.outcome-actions .solid { white-space: nowrap; height: 30px; font-size: 12px; }
 .form-grid label { font-size: 13px; font-weight: 700; }
 .form-grid input, .form-grid select { display: block; width: 100%; margin-top: 6px; }
 .date-pair { display: flex; align-items: center; gap: 6px; }
 .form-actions { display: flex; justify-content: flex-end; align-items: flex-end; gap: 8px; }
 .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
 .toolbar span { margin-left: auto; color: var(--sub); font-size: 13px; }
+.limit-bar > span,
+.limit-bar .pagination span,
+.toolbar .sheet-count { margin-left: 0; }
+.limit-bar .ghost { white-space: nowrap; height: 30px; font-size: 12px; }
+.limit-bar .pagination,
+.toolbar .pagination { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+.toolbar .pagination span { margin-left: 0; }
 .file { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 6px; background: #ff5d73; color: #fff; font-size: 10px; font-style: normal; margin-right: 6px; font-weight: 800; }
 .file.docx { background: #3b82f6; } .file.xlsx { background: #12b981; } .file.pptx { background: #f59e0b; }
 .file.big { width: 54px; height: 64px; font-size: 14px; margin: 0 auto 6px; }

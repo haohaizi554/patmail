@@ -21,8 +21,8 @@ async function pool<T>(items: T[], size: number, worker: (item: T) => Promise<vo
 
 /** 查状态一次放开的件数。鹏城专案和 PCT 提醒走同一条。 */
 export const IC_LOOKUP_WIDTH = 100
-/** 同一站点实际同时能发出去的连接。一次塞 100 个会在队列里等到超时，被记成没查成。 */
-const IC_LOOKUP_SOCKETS = 8
+/** 这个站点的浏览器大约同时只放 6 条连接。再多的会在队列里把 60 秒耗掉，被记成没查成。 */
+const IC_LOOKUP_SOCKETS = 6
 
 /** 用案件查询按我方文号找案子，再按处理事项名称读发文流程。结束的事项不会因为不在期限监控里就被当成没有。 */
 export async function lookupIcFlow(
@@ -33,69 +33,74 @@ export async function lookupIcFlow(
   const cases = new Map<string, string>()
   const missing = new Set<string>()
   const unread = new Set<string>()
-  let failure: ApiResult<never> | null = null
-
-  async function search(list: string[]): Promise<void> {
-    await pool(list, IC_LOOKUP_SOCKETS, async volume => {
-      if (failure) return
-      const key = volumeKey(volume)
-      const params = buildIcSearchParams(volume)
-      if (!params.ok) {
-        unread.add(key)
-        return
-      }
-      const response = await post('icSearch', params.data)
-      if (!response.ok) {
-        if (/登录/.test(response.error.message)) failure = response
-        else unread.add(key)
-        return
-      }
-      if (!isRecord(response.data) || (response.data.TableRows != null && !Array.isArray(response.data.TableRows))) {
-        unread.add(key)
-        return
-      }
-      const hit = icCasesFromBody(response.data).find(item => volumeKey(item.caseVolume) === key)
-      if (hit) {
-        unread.delete(key)
-        missing.delete(key)
-        cases.set(key, hit.caseId)
-      } else missing.add(key)
-    })
-  }
-
-  await search(volumes)
-  if (failure) return failure
-  const retryVolumes = volumes.filter(volume => unread.has(volumeKey(volume)))
-  if (retryVolumes.length) {
-    for (const volume of retryVolumes) unread.delete(volumeKey(volume))
-    await search(retryVolumes)
-  }
-  if (failure) return failure
-
   const bodies = new Map<string, unknown>()
   const flowFailed = new Set<string>()
-  async function readFlow(ids: string[]): Promise<void> {
-    await pool(ids, IC_LOOKUP_SOCKETS, async caseId => {
-      if (failure) return
-      const response = await post('caseBusFlow', caseBusFlowParams(caseId))
-      if (!response.ok) {
-        if (/登录/.test(response.error.message)) failure = response
-        else flowFailed.add(caseId)
-        return
+  const flowJobs = new Map<string, Promise<void>>()
+  let failure: ApiResult<never> | null = null
+
+  async function searchOnce(volume: string): Promise<'found' | 'miss' | 'unread' | 'login'> {
+    const key = volumeKey(volume)
+    const params = buildIcSearchParams(volume)
+    if (!params.ok) return 'unread'
+    const response = await post('icSearch', params.data)
+    if (!response.ok) {
+      if (/登录/.test(response.error.message)) {
+        failure = response
+        return 'login'
       }
-      flowFailed.delete(caseId)
-      bodies.set(caseId, response.data)
-    })
+      return 'unread'
+    }
+    if (!isRecord(response.data) || (response.data.TableRows != null && !Array.isArray(response.data.TableRows))) return 'unread'
+    const hit = icCasesFromBody(response.data).find(item => volumeKey(item.caseVolume) === key)
+    if (!hit) return 'miss'
+    cases.set(key, hit.caseId)
+    return 'found'
   }
 
-  const caseIds = [...new Set(cases.values())]
-  await readFlow(caseIds)
-  if (failure) return failure
-  const retryFlows = caseIds.filter(caseId => flowFailed.has(caseId))
-  if (retryFlows.length) {
-    for (const caseId of retryFlows) flowFailed.delete(caseId)
-    await readFlow(retryFlows)
+  async function readFlow(caseId: string): Promise<void> {
+    const running = flowJobs.get(caseId)
+    if (running) return running
+    const job = (async () => {
+      for (let attempt = 0; attempt < 2 && !failure && !bodies.has(caseId); attempt += 1) {
+        const response = await post('caseBusFlow', caseBusFlowParams(caseId))
+        if (response.ok) {
+          flowFailed.delete(caseId)
+          bodies.set(caseId, response.data)
+          return
+        }
+        if (/登录/.test(response.error.message)) {
+          failure = response
+          return
+        }
+        flowFailed.add(caseId)
+      }
+    })()
+    flowJobs.set(caseId, job)
+    return job
   }
+
+  await pool(volumes, IC_LOOKUP_SOCKETS, async volume => {
+    if (failure) return
+    const key = volumeKey(volume)
+    let searched = await searchOnce(volume)
+    if (searched === 'login' || failure) return
+    if (searched === 'unread') searched = await searchOnce(volume)
+    if (searched === 'login' || failure) return
+    if (searched === 'unread') {
+      unread.add(key)
+      return
+    }
+    if (searched !== 'found') {
+      missing.add(key)
+      return
+    }
+    const caseId = cases.get(key)
+    if (!caseId) {
+      missing.add(key)
+      return
+    }
+    await readFlow(caseId)
+  })
   if (failure) return failure
 
   const items = rows.map(row => {

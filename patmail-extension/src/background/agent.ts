@@ -625,7 +625,7 @@ export async function handleAgentChat(payload: { action?: unknown; message?: unk
   const message = typeof payload.message === 'string' ? payload.message.trim() : ''
   if (action === 'probe') {
     try {
-      const outcome = await chatCompletion(config, {
+      const outcome = await chatCompletion({ ...config, thinking: false }, {
         messages: [
           { role: 'system', content: '你是 PatMail 的 AI 助手。用一两句简体中文介绍自己。' },
           { role: 'user', content: message }
