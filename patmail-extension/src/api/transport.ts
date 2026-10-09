@@ -130,7 +130,7 @@ export class EasyTransport {
   /** 文件查询和期限监控在这套原网站上经常超过 15 秒。测试传入的短超时仍然生效。 */
   private waitMs(operation: EasyOperation): number {
     if (this.timeoutMs < 15_000) return this.timeoutMs
-    if (operation === 'fileSearch' || operation === 'limitMonitor' || operation === 'limitMailCustomer' || operation === 'mailProcess' || operation === 'processAP' || operation === 'processEF' || operation === 'agencySearchCase' || operation === 'icSearch' || operation === 'customerList') return 60_000
+    if (operation === 'fileSearch' || operation === 'limitMonitor' || operation === 'limitMailCustomer' || operation === 'mailProcess' || operation === 'processAP' || operation === 'processEF' || operation === 'agencySearchCase' || operation === 'icSearch' || operation === 'caseBusFlow' || operation === 'customerList') return 60_000
     return this.timeoutMs
   }
 

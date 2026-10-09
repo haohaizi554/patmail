@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import LimitPage from '../../shell/pages/LimitPage.vue'
 import LimitQuerySection from '../../floating/LimitQuerySection.vue'
 import type { LimitMonitorResult, LimitMonitorRow } from '../../api/limit-monitor-types'
@@ -18,6 +18,7 @@ const props = defineProps<{
   userId: string
   connected: boolean
   seed?: Record<string, string> | null
+  procQueries?: Array<{ id: string; volumes: string }>
   seedToken?: number
   caseVolume?: string
   sheetRows?: Array<{ ourVolume: string; mailTypeId?: string; customerName?: string; contactName?: string; iprName?: string; leadName?: string; mailTo?: string; mailCc?: string }>
@@ -48,6 +49,12 @@ const confirmedIds = ref<string[]>([])
 const sheetMerged = ref(false)
 const lastQuery = ref<Omit<LimitMonitorQuery, 'pageIndex' | 'pageSize'> | null>(null)
 const templateId = ref('')
+const mergedPageSize = 100
+const pagedRows = computed(() => {
+  if (!sheetMerged.value) return rows.value
+  const start = (pageIndex.value - 1) * mergedPageSize
+  return rows.value.slice(start, start + mergedPageSize)
+})
 
 type SearchInput = Omit<LimitMonitorQuery, 'pageIndex' | 'pageSize'> & { reset?: boolean; templateId?: string; page?: number }
 
@@ -278,7 +285,13 @@ async function search(input: SearchInput): Promise<void> {
 }
 
 function goPage(page: number): void {
-  if (!lastQuery.value || loading.value || sheetMerged.value) return
+  if (sheetMerged.value) {
+    const pages = Math.max(1, Math.ceil(rows.value.length / mergedPageSize))
+    if (page < 1 || page > pages) return
+    pageIndex.value = page
+    return
+  }
+  if (!lastQuery.value || loading.value) return
   void search({ ...lastQuery.value, page })
 }
 
@@ -377,7 +390,115 @@ async function onSubmitAsk(): Promise<void> {
   }
 }
 
+function volumeChunks(text: string): string[] {
+  const volumes = splitCaseVolumes(text)
+  const chunks: string[] = []
+  let current: string[] = []
+  let length = 0
+  for (const volume of volumes) {
+    const next = length + volume.length + (current.length ? 1 : 0)
+    if (current.length >= 40 || (current.length && next > 1800)) {
+      chunks.push(current.join(';'))
+      current = [volume]
+      length = volume.length
+    } else {
+      current.push(volume)
+      length = next
+    }
+  }
+  if (current.length) chunks.push(current.join(';'))
+  return chunks
+}
+
+let procSearchToken = 0
+
+async function searchProcGroups(groups: Array<{ id: string; volumes: string }>): Promise<void> {
+  const token = ++procSearchToken
+  loading.value = true
+  sheetMerged.value = true
+  selected.value = []
+  confirmedIds.value = []
+  emit('confirm', [])
+  rows.value = []
+  gates.value = {}
+  total.value = 0
+  pageIndex.value = 1
+  const merged = new Map<string, LimitMonitorRow>()
+  let failed = 0
+  let lastError = ''
+  publish()
+  try {
+    for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
+      const group = groups[groupIndex]
+      if (!group || token !== procSearchToken) return
+      const lists = volumeChunks(group.volumes)
+      for (let chunkIndex = 0; chunkIndex < lists.length; chunkIndex += 1) {
+        if (token !== procSearchToken) return
+        const volume = lists[chunkIndex] ?? ''
+        message.value = `正在查第 ${groupIndex + 1}/${groups.length} 种处理事项，文号第 ${chunkIndex + 1}/${lists.length} 段…`
+        publish()
+        const fields: Record<string, string> = { ctrl_proc: group.id, case_volume: volume }
+        const query = { type: 'all' as const, caseVolume: volume, ctrlProcId: group.id, fields, pageIndex: 1, pageSize: 100 }
+        let items: LimitMonitorRow[] | null = null
+        for (let attempt = 0; attempt < 2 && !items; attempt += 1) {
+          try {
+            const first = await requestPage(query)
+            const pageItems = [...first.items]
+            const pages = Math.min(2, Math.ceil(first.total / 100))
+            for (let page = 2; page <= pages; page += 1) {
+              if (token !== procSearchToken) return
+              const next = await requestPage({ ...query, pageIndex: page })
+              pageItems.push(...next.items)
+            }
+            items = pageItems
+          } catch (error) {
+            const text = typeof error === 'string' ? error : '期限查询失败，请重试。'
+            if (/登录/.test(text)) throw text
+            lastError = text
+            if (attempt === 1) {
+              failed += 1
+              items = []
+            }
+          }
+        }
+        if (token !== procSearchToken) return
+        const fresh: LimitMonitorRow[] = []
+        for (const row of items ?? []) {
+          if (merged.has(row.procId)) continue
+          merged.set(row.procId, row)
+          fresh.push(row)
+        }
+        if (fresh.length) rows.value.push(...fresh)
+        total.value = rows.value.length
+        publish()
+      }
+    }
+    if (token !== procSearchToken) return
+    checkingGates.value = false
+    lastQuery.value = null
+    const missedNote = failed ? `${failed} 段没查成。` : ''
+    message.value = rows.value.length
+      ? `分开查完，共 ${rows.value.length} 件。${missedNote}${rows.value.length > 80 ? '审核状态看下面的表格。' : ''}`
+      : (lastError || '这个条件下没有期限记录。')
+    publish()
+    if (rows.value.length && rows.value.length <= 80) void markSendGates(rows.value)
+  } catch (error) {
+    if (token !== procSearchToken) return
+    message.value = typeof error === 'string' ? error : '期限查询失败，请重试。'
+  } finally {
+    if (token === procSearchToken) {
+      loading.value = false
+      publish()
+    }
+  }
+}
+
 watch(() => props.seedToken, () => {
+  const groups = (props.procQueries ?? []).filter(item => isQueryGuid(item.id) && splitCaseVolumes(item.volumes).length > 0)
+  if (groups.length) {
+    void searchProcGroups(groups)
+    return
+  }
   const seed = props.seed
   if (!seed || !props.seedToken) return
   const volume = props.caseVolume || seed.case_volume || ''
@@ -393,7 +514,7 @@ watch(() => props.seedToken, () => {
     ...(ctrl ? { ctrlProcId: ctrl } : {}),
     fields
   })
-}, { immediate: true })
+}, { immediate: true, flush: 'post' })
 </script>
 
 <template>
@@ -403,7 +524,8 @@ watch(() => props.seedToken, () => {
     hide-form
     selectable
     :selected="selected"
-    :rows="rows"
+    :rows="sheetMerged ? rows : pagedRows"
+    :cache-pages="sheetMerged"
     :gates="gates"
     :checking="checkingGates"
     :total="sheetMerged ? rows.length : total"
@@ -411,7 +533,8 @@ watch(() => props.seedToken, () => {
     :message="message"
     :connected="connected"
     :page-index="pageIndex"
-    :page-size="sheetMerged ? Math.max(rows.length, 1) : pageSize"
+    :page-size="sheetMerged ? mergedPageSize : pageSize"
+    :page-while-loading="sheetMerged"
     :writes-open="writesOpen"
     :writes-ready="writesReady"
     @page="goPage"

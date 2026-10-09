@@ -171,6 +171,9 @@ const bridge: MessageBridge = {
       case MessageType.LookupIcFlow:
         return { type: MessageType.LookupIcFlowResult,
           payload: await easyRuntime.lookupIcFlow(message.payload.rows) }
+      case MessageType.ReadCaseFields:
+        return { type: MessageType.ReadCaseFieldsResult,
+          payload: { text: await easyRuntime.readCaseFields(message.payload.caseVolume) } }
       case MessageType.ReadCustomerDemands:
         return { type: MessageType.CustomerDemandResult,
           payload: await easyRuntime.readCustomerDemands(message.payload.customerId, signal) }

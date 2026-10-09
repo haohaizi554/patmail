@@ -5,7 +5,8 @@ import { sendToBackground } from '../../utils/runtime'
 export function createFullPageBridge(): MessageBridge {
   return {
     async request(message): Promise<ContentResponse> {
-      const contactExport = message.type === MessageType.ExportCaseContacts || message.type === MessageType.LookupIcFlow
+      const lookupFlow = message.type === MessageType.LookupIcFlow
+      const contactExport = message.type === MessageType.ExportCaseContacts
       const slow = contactExport || message.type === MessageType.SearchFiles || message.type === MessageType.SearchLimitMonitor
         || message.type === MessageType.ListMailProcesses || message.type === MessageType.ListFlowReviewers
         || message.type === MessageType.ReadCaseDemands
@@ -15,7 +16,7 @@ export function createFullPageBridge(): MessageBridge {
         || message.type === MessageType.ReadMailContacts
         || message.type === MessageType.DiagnoseExistingMail
         || message.type === MessageType.LoadDictionary || message.type === MessageType.ScanFileSearchForm
-      const response = await sendToBackground({ type: MessageType.Workspace, payload: { action: 'forward', message } }, contactExport ? 180_000 : slow ? 70_000 : 30_000)
+      const response = await sendToBackground({ type: MessageType.Workspace, payload: { action: 'forward', message } }, lookupFlow ? 300_000 : contactExport ? 180_000 : slow ? 70_000 : 30_000)
       if (response?.type === MessageType.Error) return response
       const forwarded = response?.type === MessageType.WorkspaceResult ? response.payload.forwarded : null
       if (forwarded && forwarded.type === MessageType.Error) return forwarded

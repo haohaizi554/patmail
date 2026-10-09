@@ -31,6 +31,7 @@ import type { WorkflowView } from '../workflow/types'
 import type { PlanInput } from '../workflow/planner'
 import { loadCaseDemandText, type CaseDemandAsset } from '../mail/easy/case-demand'
 import { loadPctSendGate, type IcFlowAsk, type IcFlowHit, type PctSendGate } from '../customer/pct-flow-status'
+import { loadCaseFields } from '../customer/case-arbitration'
 import { lookupIcFlow } from '../customer/ic-flow-lookup'
 import { loadCustomerDemands, loadCustomerDirectory, type CustomerDemandAsset, type CustomerDirectoryAsset } from '../customer/customer-page'
 import { listParams, readMailInfo } from '../mail/easy/contracts'
@@ -432,6 +433,14 @@ export class EasyRuntime {
       const result = await loadCaseDemandText(caseId, (params, next) => this.transport.post('caseDemand', params, next), signal)
       if (!result.ok && result.error.code === 'SESSION_EXPIRED') this.session.expire()
       return result
+    })()
+  }
+
+  /** 按我方文号读仲裁用的固定栏。不解释该选谁，也不创建发文。 */
+  readCaseFields(caseVolume: string): Promise<string> {
+    return (async (): Promise<string> => {
+      if (!(await this.confirmAccountRead())) return '请先在 EASY 原网站登录并检测登录状态。'
+      return loadCaseFields(caseVolume, (operation, params) => this.transport.post(operation, params))
     })()
   }
 

@@ -71,6 +71,8 @@ export const MessageType = {
   CaseBusFlowResult: 'CASE_BUS_FLOW_RESULT',
   LookupIcFlow: 'LOOKUP_IC_FLOW',
   LookupIcFlowResult: 'LOOKUP_IC_FLOW_RESULT',
+  ReadCaseFields: 'READ_CASE_FIELDS',
+  ReadCaseFieldsResult: 'READ_CASE_FIELDS_RESULT',
   ReadCustomerDemands: 'READ_CUSTOMER_DEMANDS',
   CustomerDemandResult: 'CUSTOMER_DEMAND_RESULT',
   ReadCustomerDirectory: 'READ_CUSTOMER_DIRECTORY',
@@ -156,6 +158,7 @@ export type ContentRequest =
   | Response<'READ_CASE_DEMANDS', { caseId: string }>
   | Response<'READ_CASE_BUS_FLOW', { caseId: string; procId: string }>
   | Response<'LOOKUP_IC_FLOW', { rows: Array<{ caseVolume: string; procLabel: string }> }>
+  | Response<'READ_CASE_FIELDS', { caseVolume: string }>
   | Response<'READ_CUSTOMER_DEMANDS', { customerId: string }>
   | Response<'READ_CUSTOMER_DIRECTORY', { customerId: string }>
   | Response<'READ_MAIL_CONTACTS', { mailId: string; customerId: string }>
@@ -324,7 +327,8 @@ export type ContentResponse =
   | Response<'LIST_FLOW_REVIEWERS_RESULT', ApiResult<AccountReviewerList>>
   | Response<'CASE_DEMAND_RESULT', ApiResult<CaseDemandAsset>>
   | Response<'CASE_BUS_FLOW_RESULT', ApiResult<{ gate: 'open' | 'pending' | 'done' }>>
-  | Response<'LOOKUP_IC_FLOW_RESULT', ApiResult<{ items: Array<{ caseVolume: string; procLabel: string; found: boolean; gate: '' | 'open' | 'pending' | 'done' }> }>>
+  | Response<'LOOKUP_IC_FLOW_RESULT', ApiResult<{ items: Array<{ caseVolume: string; procLabel: string; found: boolean; gate: '' | 'open' | 'pending' | 'done'; unread?: true; statusUnread?: true }> }>>
+  | Response<'READ_CASE_FIELDS_RESULT', { text: string }>
   | Response<'CUSTOMER_DEMAND_RESULT', ApiResult<CustomerDemandAsset>>
   | Response<'CUSTOMER_DIRECTORY_RESULT', ApiResult<CustomerDirectoryAsset>>
   | Response<'MAIL_CONTACT_RESULT', ApiResult<MailContactAsset>>
@@ -385,9 +389,15 @@ function isIcFlowResult(value: unknown): value is ApiResult<{ items: Array<{ cas
   if (!isRecord(value)) return false
   if (value.ok === false) return isRecord(value.error) && typeof value.error.code === 'string' && typeof value.error.message === 'string'
   if (value.ok !== true || !isRecord(value.data) || !Array.isArray(value.data.items) || value.data.items.length > 300 || Object.keys(value.data).length !== 1) return false
-  return value.data.items.every(item => isRecord(item) && typeof item.caseVolume === 'string' && item.caseVolume.length <= 80 &&
-    typeof item.procLabel === 'string' && item.procLabel.length <= 80 && typeof item.found === 'boolean' &&
-    (item.gate === '' || item.gate === 'open' || item.gate === 'pending' || item.gate === 'done') && Object.keys(item).length === 4)
+  return value.data.items.every(item => {
+    if (!isRecord(item) || typeof item.caseVolume !== 'string' || item.caseVolume.length > 80) return false
+    if (typeof item.procLabel !== 'string' || item.procLabel.length > 80 || typeof item.found !== 'boolean') return false
+    if (item.gate !== '' && item.gate !== 'open' && item.gate !== 'pending' && item.gate !== 'done') return false
+    const keys = Object.keys(item)
+    if (item.unread === true) return item.found === false && item.statusUnread === undefined && keys.length === 5
+    if (item.statusUnread === true) return item.found === true && item.unread === undefined && item.gate === '' && keys.length === 5
+    return item.unread === undefined && item.statusUnread === undefined && keys.length === 4
+  })
 }
 
 function isCaseDemandResult(value: unknown): value is ApiResult<CaseDemandAsset> {
@@ -584,8 +594,11 @@ export function isMessage(value: unknown): value is AppMessage {
     case MessageType.ReadCaseBusFlow:
       return isRecord(value.payload) && isQueryGuid(String(value.payload.caseId)) && isQueryGuid(String(value.payload.procId)) && Object.keys(value.payload).length === 2
     case MessageType.LookupIcFlow:
-      return isRecord(value.payload) && Array.isArray(value.payload.rows) && value.payload.rows.length > 0 && value.payload.rows.length <= 40 &&
+      return isRecord(value.payload) && Array.isArray(value.payload.rows) && value.payload.rows.length > 0 && value.payload.rows.length <= 100 &&
         value.payload.rows.every(isIcFlowAsk) && Object.keys(value.payload).length === 1
+    case MessageType.ReadCaseFields:
+      return isRecord(value.payload) && typeof value.payload.caseVolume === 'string' && value.payload.caseVolume.trim().length > 0 &&
+        value.payload.caseVolume.length <= 80 && Object.keys(value.payload).length === 1
     case MessageType.ReadCustomerDemands:
     case MessageType.ReadCustomerDirectory:
       return isRecord(value.payload) && isQueryGuid(String(value.payload.customerId)) && Object.keys(value.payload).length === 1
@@ -703,6 +716,8 @@ export function isMessage(value: unknown): value is AppMessage {
       return isCaseBusFlowResult(value.payload)
     case MessageType.LookupIcFlowResult:
       return isIcFlowResult(value.payload)
+    case MessageType.ReadCaseFieldsResult:
+      return isRecord(value.payload) && typeof value.payload.text === 'string' && value.payload.text.length <= 8000 && Object.keys(value.payload).length === 1
     case MessageType.CustomerDemandResult:
       return isCustomerPageResult(value.payload, isCustomerDemandAsset)
     case MessageType.CustomerDirectoryResult:
@@ -829,11 +844,12 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.RefreshWorkflow || value.type === MessageType.PreviewWorkflow ||
     value.type === MessageType.RestoreWorkflow || value.type === MessageType.DiagnoseExistingMail ||
     value.type === MessageType.RunReadonlyAcceptance ||
-    value.type === MessageType.CallEasy
+    value.type === MessageType.CallEasy ||
+    value.type === MessageType.ReadCaseFields
   )
 }
 
-const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'CANCEL_LIMIT_MONITOR', 'SEARCH_LIMIT_MONITOR', 'LOOKUP_IC_FLOW', 'EXPORT_CASE_CONTACTS', 'LIST_MAIL_PROCESSES', 'OPEN_EASY_FORM', 'LIST_FLOW_REVIEWERS', 'READ_CASE_DEMANDS', 'READ_CASE_BUS_FLOW', 'READ_CUSTOMER_DEMANDS', 'READ_CUSTOMER_DIRECTORY', 'READ_MAIL_CONTACTS', 'READ_MAIL_ADDRESSES', 'GET_PAGE_INFO', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE', 'CALL_EASY'])
+const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'CANCEL_LIMIT_MONITOR', 'SEARCH_LIMIT_MONITOR', 'LOOKUP_IC_FLOW', 'EXPORT_CASE_CONTACTS', 'LIST_MAIL_PROCESSES', 'OPEN_EASY_FORM', 'LIST_FLOW_REVIEWERS', 'READ_CASE_DEMANDS', 'READ_CASE_BUS_FLOW', 'READ_CUSTOMER_DEMANDS', 'READ_CUSTOMER_DIRECTORY', 'READ_MAIL_CONTACTS', 'READ_MAIL_ADDRESSES', 'GET_PAGE_INFO', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE', 'CALL_EASY', 'READ_CASE_FIELDS'])
 const WRITE_FORWARD = new Set(['CREATE_EASY_MAIL', 'SAVE_EASY_MAIL', 'SAVE_HISTORY_QUERY', 'DELETE_HISTORY_QUERY', 'SUBMIT_LIMIT_MAIL', 'SUBMIT_FILE_MANAGE'])
 
 /** 不允许转发时给出原因。写开关关掉时，创建、保存和查询模板写回都停在这里。 */

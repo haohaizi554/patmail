@@ -172,7 +172,7 @@ const SCHEMAS: ToolSchema[] = [
     type: 'function',
     function: {
       name: 'call_easy',
-      description: '用当前登录会话按顺序调用不会改数据的原站接口。固定组合用 recipe 加 case_id：biology、case-info、case-flow、case-demand。单步给 handler 和 call。要组合时给 steps，后面字段用 @{1.路径} 取第 1 步响应里的值，例如 @{1.TableRows.0.case_id}。先用 lookup_api 核对入口和参数。会改数据的 Call 不会发出。',
+      description: '用当前登录会话按顺序调用不会改数据的原站接口。固定组合用 recipe 加 case_id：biology、case-info、case-flow、case-demand。单步给 handler 和 call。要组合时给 steps，后面字段用 @{1.路径} 取第 1 步响应里的值，例如 @{1.TableRows.0.case_id}。先用 lookup_api 核对入口和参数。会改数据的 Call 不会发出。仲裁收件人不要用这个，用 review_case_fields。',
       parameters: {
         type: 'object',
         properties: {
@@ -488,6 +488,19 @@ const SCHEMAS: ToolSchema[] = [
         additionalProperties: false
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'review_case_fields',
+      description: '按我方文号读取已经封装好的案件字段：要求表、发明人、案件页上固定的几栏。只填 caseVolume。不会创建发文，也不能改接口。返回的栏就是可以仲裁的范围。',
+      parameters: {
+        type: 'object',
+        properties: { caseVolume: { type: 'string', description: '我方文号，一次一个' } },
+        required: ['caseVolume'],
+        additionalProperties: false
+      }
+    }
   }
 ]
 
@@ -495,7 +508,7 @@ const SCHEMAS: ToolSchema[] = [
 const HOT_TOOLS = new Set([
   'connection_status', 'search_cases', 'search_deadlines', 'list_customers',
   'lookup_api', 'call_easy', 'ask_user', 'plan_work', 'remember', 'recall', 'create_task', 'draft_mail', 'submit_easy',
-  'list_skills', 'describe_workflows'
+  'list_skills', 'describe_workflows', 'review_case_fields'
 ])
 
 const COLD_TOOLS: ReadonlyArray<readonly [string, RegExp]> = [
@@ -883,6 +896,18 @@ export async function executeAgentTool(name: string, rawArguments: string, ctx: 
     if (name === 'call_easy') {
       const text = await callEasy(ctx, args)
       return done(text, memory, text.startsWith('已用当前登录会话调用'))
+    }
+    if (name === 'review_case_fields') {
+      const caseVolume = textArg(args, 'caseVolume')
+      if (!caseVolume) return done('要填写我方文号。', memory, false)
+      stopIfNeeded(ctx)
+      const forwarded = await ctx.forward({ type: MessageType.ReadCaseFields, payload: { caseVolume } })
+      if (!isMessage(forwarded) || forwarded.type !== MessageType.ReadCaseFieldsResult) {
+        const error = forwardedError(forwarded)
+        return done(error || '案件字段没有返回。', memory, false)
+      }
+      const text = forwarded.payload.text
+      return done(text, memory, text.startsWith('案件字段：'))
     }
     if (name === 'recall') {
       const found = searchFacts(memory, textArg(args, 'query', 80))

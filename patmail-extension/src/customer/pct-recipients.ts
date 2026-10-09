@@ -22,11 +22,23 @@ export function usesInventorSheet(customerName: string, specials: ReadonlySet<st
   return specials.has(normalizeCustomerName(customerName))
 }
 
-/** 补上的称呼在页面上带这个备注。发给原网站和联系人匹配仍用原名。 */
+/** 补上的称呼在页面上带（补），仲裁出来的带（仲）。发给原网站和联系人匹配仍用原名。 */
 export function carriedMark(name: string, carried: boolean | undefined): string {
   const text = name.trim()
   if (!text) return ''
   return carried ? `${text}（补）` : text
+}
+
+export function arbitratedMark(name: string, arbitrated: boolean | undefined): string {
+  const text = name.trim()
+  if (!text) return ''
+  return arbitrated ? `${text}（仲）` : carriedMark(text, false)
+}
+
+function addressName(name: string, arbitrated: boolean | undefined): string {
+  const text = name.trim()
+  if (arbitrated && (text === '不用发' || text === '发明人')) return ''
+  return text
 }
 
 /** 表格上这一行要写进这一封的称呼。默认收件人是 IPR，抄送留空，等发文页的商务。鹏城专案收件人是技术负责人，抄送先记下 IPR。 */
@@ -35,9 +47,9 @@ export function sheetRecipientNames(
   specials: ReadonlySet<string> = new Set(),
   mode: PctRecipientMode = 'ipr'
 ): { to: string; cc: string } {
-  if (mode === 'lead') return { to: sheetDisplayName(row.leadName ?? ''), cc: row.iprName.trim() }
-  if (usesInventorSheet(row.customerName, specials)) return { to: row.contactName, cc: row.iprName }
-  return { to: row.iprName, cc: '' }
+  if (mode === 'lead') return { to: sheetDisplayName(row.leadName ?? ''), cc: addressName(row.iprName, row.iprArbitrated) }
+  if (usesInventorSheet(row.customerName, specials)) return { to: row.contactName, cc: addressName(row.iprName, row.iprArbitrated) }
+  return { to: addressName(row.iprName, row.iprArbitrated), cc: '' }
 }
 
 export interface PctRecipientPlan {

@@ -55,6 +55,7 @@ export function requiredTools(userText: string): string[] {
   if (/查询记录|历史查询|记录页/.test(userText)) tools.push('list_history')
   if (/客户资料|这位客户|客户配置/.test(userText)) tools.push('read_customer')
   if (asksToSubmit(userText) || /提交到 EASY|执行这个任务|执行任务/.test(userText)) tools.push('submit_easy')
+  if (/仲裁收件人/.test(userText)) tools.push('review_case_fields')
   return tools
 }
 
@@ -70,7 +71,7 @@ const KNOWN_TOOLS = new Set([
   'lookup_api', 'call_easy', 'describe_workflows', 'remember', 'create_workflow', 'set_workflow_field',
   'create_task', 'read_customer', 'preview_workflow', 'draft_mail', 'list_tasks', 'list_history',
   'list_reviewers', 'list_processes', 'list_acceptance', 'readonly_acceptance', 'diagnose_mail',
-  'export_contacts', 'ask_user', 'plan_work', 'submit_easy'
+  'export_contacts', 'ask_user', 'plan_work', 'submit_easy', 'review_case_fields'
 ])
 
 export function toolSucceeded(name: string, text: string): boolean {
@@ -82,6 +83,7 @@ export function toolSucceeded(name: string, text: string): boolean {
   if (name === 'search_cases' && text.startsWith('文件查询共')) return true
   if (name === 'search_deadlines' && text.startsWith('期限监控共')) return true
   if (name === 'call_easy' && text.startsWith('已用当前登录会话调用')) return true
+  if (name === 'review_case_fields' && text.startsWith('案件字段：')) return true
   if (name === 'remember' && (text.startsWith('已记住') || text.startsWith('这句话已经在长期记忆'))) return true
   if ((name === 'create_workflow' || name === 'set_workflow_field') && text.startsWith('已')) return true
   if (name === 'create_task' && (text.includes('没有提交到 EASY') || text.startsWith('已记下') || text.startsWith('已建'))) return true
@@ -125,7 +127,7 @@ export function previousTrace(traces: readonly ToolTrace[], name: string, args: 
 }
 
 /** 会改本轮缓存或会写数据的工具独占。查案件、查期限和查接口可以跟别的只读查询同一波。 */
-const EXCLUSIVE_TOOLS = new Set(['remember', 'create_workflow', 'set_workflow_field', 'create_task', 'draft_mail', 'submit_easy', 'call_easy', 'ask_user', 'plan_work'])
+const EXCLUSIVE_TOOLS = new Set(['remember', 'create_workflow', 'set_workflow_field', 'create_task', 'draft_mail', 'submit_easy', 'call_easy', 'ask_user', 'plan_work', 'review_case_fields'])
 
 export function groupToolCalls(names: readonly string[]): number[][] {
   const groups: number[][] = []

@@ -287,6 +287,15 @@ function pickedType(nodes: Array<{ id: string; name: string }>, id: string): Pct
 }
 
 /** 下拉里名称与完整全名一致才算对上。只包含其中几个词的不算。同名多于一项时不猜。 */
+export function matchMailTypeByName(nodes: Array<{ id: string; name: string }>, name: string): PctMailTypeNode | null {
+  const exact = byExactName(nodes, name)
+  if (exact) return exact
+  const text = name.trim()
+  if (!text) return null
+  const prefixed = nodes.filter(node => node.id.trim() && node.name.trim().startsWith(text))
+  return prefixed.length === 1 ? { id: prefixed[0].id, name: prefixed[0].name.trim() } : null
+}
+
 function byExactName(nodes: Array<{ id: string; name: string }>, name: string): PctMailTypeNode | null {
   const text = name.trim()
   if (!text) return null

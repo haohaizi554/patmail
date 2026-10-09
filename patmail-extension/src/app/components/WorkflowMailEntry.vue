@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, ref, watch } from 'vue'
+import { computed, inject, reactive, ref, watch } from 'vue'
 import MailTypeTreeSelect from '../../shell/components/MailTypeTreeSelect.vue'
 import ThemeSelect from '../../shell/components/ThemeSelect.vue'
 import EmptyGuide from './EmptyGuide.vue'
@@ -7,12 +7,14 @@ import LimitMonitorQuery from './LimitMonitorQuery.vue'
 import type { MailSender } from '../../customer/mailset'
 import { PCT_RESUME_KEY, PENDING_CUSTOMER_KEY } from '../../customer/mail-flow'
 import { fillSheetEmails } from '../../customer/customer-page'
-import { applyPctMailTypes, buildPctTask, clonePctTask, matchSheetCtrlProcs, pctRowsFromTable, readWorkflowTask, summarizePctTask, volumesOf, writeWorkflowTask } from '../../customer/pct-sheet'
+import { IC_LOOKUP_WIDTH } from '../../customer/ic-flow-lookup'
+import { iprArbitrationWaves, isPctWorkbookSheet, missedSourceSheets, pctRowsFromWorkbook } from '../../customer/pct-workbook'
+import { applyPctMailTypes, buildPctTask, clonePctTask, matchSheetCtrlProcs, readWorkflowTask, summarizePctTask, volumesOf, writeWorkflowTask } from '../../customer/pct-sheet'
 import type { CustomerQueryProfile, PctTaskRow } from '../../customer/types'
 import { groupWorkflowRows } from '../../customer/workflow-mail'
-import { carriedMark, sheetDisplayName, sheetRecipientNames, usesInventorSheet } from '../../customer/pct-recipients'
+import { arbitratedMark, carriedMark, sheetDisplayName, sheetRecipientNames, usesInventorSheet } from '../../customer/pct-recipients'
 import { inventorCustomerNames, isRunnableWorkflow, recipientModeOf } from '../../workflow/catalog'
-import { readXlsxRows } from '../../customer/xlsx-table'
+import { downloadXlsxSheets, readXlsxSheets } from '../../customer/xlsx-table'
 import { assembleMail, fillFromRules } from '../../mail'
 import type { AssembledMail } from '../../mail/assemble'
 import type { MailRuleBundle, SelectedPatentFile } from '../../mail/types'
@@ -52,22 +54,28 @@ const cards = ref<Array<{ count: number; to: string; cc: string; sender: string;
 const progress = ref<Array<{ label: string; detail: string; state: 'wait' | 'run' | 'done' | 'stop' }>>([])
 const queryOpen = ref(false)
 const querySeed = ref<Record<string, string> | null>(null)
+const queryProcs = ref<Array<{ id: string; volumes: string }>>([])
 const queryToken = ref(0)
 const queryCaseVolume = ref('')
-const limitItems = ref<LimitMonitorRow[]>([])
-const limitGates = ref<Record<string, 'open' | 'pending' | 'done'>>({})
-const limitChecking = ref(false)
 const limitPhase = ref<'idle' | 'run' | 'done' | 'fail'>('idle')
 const limitNote = ref('')
 const icPhase = ref<'idle' | 'run' | 'done' | 'fail'>('idle')
 const icNote = ref('')
-const icByKey = ref<Record<string, { found: boolean; gate: '' | 'open' | 'pending' | 'done' }>>({})
+type IcHit = { found: boolean; gate: '' | 'open' | 'pending' | 'done'; unread?: true; statusUnread?: true }
+const icByKey = reactive<Record<string, IcHit>>({})
+const limitByKey = reactive<Record<string, string>>({})
+const gapWaves = ref<string[]>([])
+const sheetPage = ref(1)
+const askingGap = ref(false)
 const abnormalKeys = ref(new Set<string>())
 const confirmedProcIds = ref<string[]>([])
 let sheetQueryToken = 0
+let sheetImportToken = 0
+const SHEET_PAGE_SIZE = 100
 
 const definition = computed(() => props.catalog.workflows.find(item => item.id === workflowId.value) ?? null)
 const specials = computed(() => inventorCustomerNames(definition.value))
+const inventorCustomers = computed(() => [...specials.value])
 const recipientMode = computed(() => recipientModeOf(definition.value))
 const runnable = computed(() => isRunnableWorkflow(definition.value))
 const runtime = computed(() => pctRuntimeFrom(runnable.value ? definition.value : null))
@@ -114,20 +122,44 @@ const offCount = computed(() => rows.value.filter(row => row.procLabel && row.pr
 const pendingRows = computed(() => rows.value.filter(row => sheetStatus(row).review === '还没提交审核'))
 const outcome = computed(() => {
   if (!rows.value.length) return ''
-  const pending = pendingRows.value
-  const letters = pending.length ? groupWorkflowRows('1', pending, specials.value, recipientMode.value).length : 0
-  const submitted = rows.value.filter(row => sheetStatus(row).review === '已提交审核').length
-  const done = rows.value.filter(row => sheetStatus(row).review === '已经审核通过').length
-  const unknown = rows.value.length - pending.length - submitted - done
-  const head = pending.length ? `还有 ${pending.length} 行待处理，会分成 ${letters} 封。` : '没有待处理的行。'
+  let pending = 0
+  let submitted = 0
+  let done = 0
+  let missing = 0
+  let unread = 0
+  let noProc = 0
+  let statusMiss = 0
+  let checking = 0
+  let abnormal = 0
+  for (const row of rows.value) {
+    const status = sheetStatus(row)
+    if (status.review === '异常') abnormal += 1
+    else if (status.found === '库里没有') missing += 1
+    else if (status.found === '没查成') unread += 1
+    else if (status.found === '正在查' || status.review === '…') checking += 1
+    else if (status.review === '还没提交审核') pending += 1
+    else if (status.review === '已提交审核') submitted += 1
+    else if (status.review === '已经审核通过') done += 1
+    else if (status.review === '没有这项处理事项') noProc += 1
+    else if (status.review === '状态没读到') statusMiss += 1
+    else if (icPhase.value === 'run') checking += 1
+    else missing += 1
+  }
+  const letters = pending && icPhase.value !== 'run' ? groupWorkflowRows('1', rows.value.filter(row => sheetStatus(row).review === '还没提交审核'), specials.value, recipientMode.value).length : 0
   return [
-    head,
+    pending ? (letters ? `还有 ${pending} 行待处理，会分成 ${letters} 封。` : `还有 ${pending} 行待处理。`) : '没有待处理的行。',
     submitted ? `已提交审核 ${submitted} 行。` : '',
     done ? `已经审核通过 ${done} 行。` : '',
-    unknown ? `${unknown} 行状态还没核对完。` : ''
+    missing ? `库里没有 ${missing} 行。` : '',
+    unread ? `没查成 ${unread} 行。` : '',
+    noProc ? `没有这项处理事项 ${noProc} 行。` : '',
+    statusMiss ? `状态没读到 ${statusMiss} 行。` : '',
+    abnormal ? `异常 ${abnormal} 行。` : '',
+    checking ? `还有 ${checking} 行正在核对。` : ''
   ].filter(Boolean).join('')
 })
 const outcomeGroups = computed(() => {
+  if (icPhase.value === 'run') return []
   const groups = groupWorkflowRows('1', pendingRows.value, specials.value, recipientMode.value)
   if (groups.length < 2 || groups.length > 6) return []
   return groups.map(group => {
@@ -139,6 +171,26 @@ const outcomeGroups = computed(() => {
 })
 
 const unmatched = computed(() => rows.value.filter(row => !row.mailTypeId))
+const sheetPages = computed(() => Math.max(1, Math.ceil(rows.value.length / SHEET_PAGE_SIZE)))
+const sheetPageSafe = computed(() => Math.min(sheetPage.value, sheetPages.value))
+const sheetSeen = ref<number[]>([1])
+watch(sheetPageSafe, (page) => {
+  if (!sheetSeen.value.includes(page)) sheetSeen.value = [...sheetSeen.value, page]
+})
+
+function rowsOnSheetPage(page: number): PctTaskRow[] {
+  const start = (page - 1) * SHEET_PAGE_SIZE
+  return rows.value.slice(start, start + SHEET_PAGE_SIZE)
+}
+
+function resetSheetPages(): void {
+  sheetPage.value = 1
+  sheetSeen.value = [1]
+}
+
+function setSheetPage(page: number): void {
+  sheetPage.value = Math.min(Math.max(1, page), sheetPages.value)
+}
 
 watch(workflowId, () => {
   rows.value = []
@@ -177,18 +229,29 @@ async function onSheet(event: Event): Promise<void> {
   if (!file) return
   sheetName.value = file.name
   if (!file.name.toLowerCase().endsWith('.xlsx')) {
-    rows.value = []
-    sheetNotice.value = '请传入表格文件。'
+  rows.value = []
+  gapWaves.value = []
+  sheetNotice.value = '请传入表格文件。'
     return
   }
+  const generation = ++sheetImportToken
+  sheetNotice.value = '正在读取表格…'
   try {
-    const parsed = pctRowsFromTable(await readXlsxRows(await file.arrayBuffer()), props.mailTypes, runtime.value)
+    await new Promise(resolve => window.setTimeout(resolve, 0))
+    if (generation !== sheetImportToken) return
+    const parsed = pctRowsFromWorkbook(await readXlsxSheets(await file.arrayBuffer(), isPctWorkbookSheet), props.mailTypes, runtime.value)
+    if (generation !== sheetImportToken) return
     rows.value = applyPctMailTypes(parsed.rows, props.mailTypes, runtime.value)
+    resetSheetPages()
+    gapWaves.value = iprArbitrationWaves(rows.value)
     sheetNotice.value = parsed.notice
+    await new Promise(resolve => window.setTimeout(resolve, 0))
+    if (generation !== sheetImportToken) return
     buildPreview()
     void startSheetQuery()
   } catch (error) {
     rows.value = []
+    gapWaves.value = []
     sheetNotice.value = error instanceof Error ? error.message : '表格没有读出来。'
   }
 }
@@ -215,6 +278,7 @@ function shownTo(row: PctTaskRow): string {
   if (written) return written
   if (recipientMode.value === 'lead') return carriedMark(sheetDisplayName(row.leadName ?? ''), row.leadCarried) || '表格里没有'
   const inventor = usesInventorSheet(row.customerName, specials.value)
+  if (!inventor && row.iprArbitrated && row.iprName.trim()) return arbitratedMark(row.iprName, true)
   const marked = carriedMark(inventor ? row.contactName : row.iprName, inventor ? row.contactCarried : row.iprCarried)
   return marked || '表格里没有'
 }
@@ -223,10 +287,11 @@ function shownCc(row: PctTaskRow): string {
   const written = row.mailCc?.trim()
   if (written) return written
   if (recipientMode.value === 'lead') {
-    const ipr = carriedMark(row.iprName, row.iprCarried)
+    const ipr = row.iprArbitrated ? arbitratedMark(row.iprName, true) : carriedMark(row.iprName, row.iprCarried)
     return ipr ? `${ipr}、商务` : '商务'
   }
   if (!usesInventorSheet(row.customerName, specials.value)) return '商务'
+  if (row.iprArbitrated && row.iprName.trim()) return arbitratedMark(row.iprName, true)
   return carriedMark(row.iprName, row.iprCarried) || '表格里没有'
 }
 
@@ -236,19 +301,23 @@ function carriedContactNote(row: PctTaskRow): string {
   return marked ? `第一客户联系人 ${marked}` : ''
 }
 
+function clearHits(): void {
+  for (const key of Object.keys(icByKey)) delete icByKey[key]
+  for (const key of Object.keys(limitByKey)) delete limitByKey[key]
+}
+
 function resetLimit(): void {
   sheetQueryToken += 1
+  resetSheetPages()
   queryOpen.value = false
   querySeed.value = null
+  queryProcs.value = []
   queryCaseVolume.value = ''
-  limitItems.value = []
-  limitGates.value = {}
-  limitChecking.value = false
   limitPhase.value = 'idle'
   limitNote.value = ''
   icPhase.value = 'idle'
   icNote.value = ''
-  icByKey.value = {}
+  clearHits()
 }
 
 function volumeKey(value: string): string {
@@ -276,15 +345,12 @@ function icKey(volume: string, procLabel: string): string {
 }
 
 function limitReview(row: PctTaskRow): string {
-  const volume = volumeKey(row.ourVolume)
-  const label = row.procLabel.trim()
-  const hits = limitItems.value.filter(item => volumeKey(item.caseVolume) === volume && item.ctrlProc.trim() === label)
-  if (!hits.length) return ''
-  const gates = hits.map(item => limitGates.value[item.procId]).filter((gate): gate is 'open' | 'pending' | 'done' => Boolean(gate))
-  if (!gates.length) return limitChecking.value ? '…' : ''
-  if (gates.includes('pending')) return '已提交审核'
-  if (gates.includes('open') || gates.includes('done')) return '还没提交审核'
-  return ''
+  return limitByKey[icKey(row.ourVolume, row.procLabel)] ?? ''
+}
+
+function sheetMemo(row: PctTaskRow): string {
+  const status = sheetStatus(row)
+  return `${status.found}\n${status.review}`
 }
 
 function sheetStatus(row: PctTaskRow): { found: string; review: string } {
@@ -295,8 +361,10 @@ function sheetStatus(row: PctTaskRow): { found: string; review: string } {
 
 function sheetReview(row: PctTaskRow): { found: string; review: string } {
   const fromLimit = limitReview(row)
-  const hit = icByKey.value[icKey(row.ourVolume, row.procLabel)]
+  const hit = icByKey[icKey(row.ourVolume, row.procLabel)]
   if (hit) {
+    if (hit.unread) return { found: '没查成', review: '—' }
+    if (hit.statusUnread) return { found: '有', review: '状态没读到' }
     if (!hit.found) {
       if (fromLimit && fromLimit !== '…') return { found: '有', review: fromLimit }
       return { found: '库里没有', review: '—' }
@@ -321,44 +389,122 @@ function sheetReview(row: PctTaskRow): { found: string; review: string } {
 
 async function lookupCases(token: number): Promise<void> {
   icPhase.value = 'run'
-  icByKey.value = {}
+  for (const key of Object.keys(icByKey)) delete icByKey[key]
   icNote.value = '正在用案件查询核对文号和流程状态…'
   if (!bridge || connection.value.sessionStatus !== 'authenticated') {
     icPhase.value = 'fail'
     icNote.value = '还没连上 EASY，库里有没有还没查。'
     return
   }
-  const asked = rows.value
-    .filter(row => row.ourVolume.trim() && row.procLabel.trim())
-    .map(row => ({ caseVolume: row.ourVolume.trim(), procLabel: row.procLabel.trim() }))
-  const next: Record<string, { found: boolean; gate: '' | 'open' | 'pending' | 'done' }> = {}
-  for (let index = 0; index < asked.length; index += 20) {
-    if (token !== sheetQueryToken) return
-    const slice = asked.slice(index, index + 20)
-    icNote.value = `正在用案件查询核对 ${Math.min(index + slice.length, asked.length)}/${asked.length}…`
-    const response = await bridge.request({ type: MessageType.LookupIcFlow, payload: { rows: slice } })
-    if (token !== sheetQueryToken) return
-    if (response.type !== MessageType.LookupIcFlowResult || !response.payload.ok) {
-      icPhase.value = 'fail'
-      icNote.value = response.type === MessageType.LookupIcFlowResult && !response.payload.ok
-        ? response.payload.error.message
-        : response.type === MessageType.Error
-          ? response.payload.message
-          : '案件查询没有完成。'
-      return
+  const page = bridge
+  const seen = new Set<string>()
+  const asked = rows.value.flatMap(row => {
+    const caseVolume = row.ourVolume.trim()
+    const procLabel = row.procLabel.trim()
+    if (!caseVolume || !procLabel) return []
+    const key = icKey(caseVolume, procLabel)
+    if (seen.has(key)) return []
+    seen.add(key)
+    return [{ caseVolume, procLabel, tries: 0 }]
+  })
+  const total = asked.length
+  type Hit = { found: boolean; gate: '' | 'open' | 'pending' | 'done'; unread?: true; statusUnread?: true }
+  const next: Record<string, Hit> = {}
+  const pending: Record<string, Hit> = {}
+  let flushTimer = 0
+  let stopped = ''
+  const lanes = 5
+
+  function flush(): void {
+    if (flushTimer) {
+      window.clearTimeout(flushTimer)
+      flushTimer = 0
     }
-    for (const item of response.payload.data.items) next[icKey(item.caseVolume, item.procLabel)] = { found: item.found, gate: item.gate }
-    icByKey.value = { ...next }
+    if (token !== sheetQueryToken || !Object.keys(pending).length) return
+    Object.assign(next, pending)
+    for (const key of Object.keys(pending)) {
+      icByKey[key] = pending[key]
+      delete pending[key]
+    }
+    icNote.value = `正在核对 ${Object.keys(next).length}/${total}…`
+  }
+
+  function stage(key: string, hit: Hit): void {
+    pending[key] = hit
+    if (Object.keys(pending).length >= 24) flush()
+    else if (!flushTimer) flushTimer = window.setTimeout(flush, 500)
+  }
+
+  function store(item: { caseVolume: string; procLabel: string; found: boolean; gate: '' | 'open' | 'pending' | 'done'; unread?: true; statusUnread?: true }): void {
+    const key = icKey(item.caseVolume, item.procLabel)
+    if (item.unread) stage(key, { found: false, gate: '', unread: true })
+    else if (item.statusUnread) stage(key, { found: true, gate: '', statusUnread: true })
+    else stage(key, { found: item.found, gate: item.gate })
+  }
+
+  async function worker(): Promise<void> {
+    while (token === sheetQueryToken && !stopped) {
+      const job = asked.shift()
+      if (!job) return
+      const response = await page.request({ type: MessageType.LookupIcFlow, payload: { rows: [{ caseVolume: job.caseVolume, procLabel: job.procLabel }] } })
+      if (token !== sheetQueryToken) return
+      if (response.type !== MessageType.LookupIcFlowResult || !response.payload.ok) {
+        const message = response.type === MessageType.LookupIcFlowResult && !response.payload.ok
+          ? response.payload.error.message
+          : response.type === MessageType.Error
+            ? response.payload.message
+            : '案件查询没有完成。'
+        if (/登录/.test(message)) {
+          stopped = message
+          return
+        }
+        if (job.tries < 1) {
+          asked.push({ ...job, tries: job.tries + 1 })
+          continue
+        }
+        stage(icKey(job.caseVolume, job.procLabel), { found: false, gate: '', unread: true })
+        continue
+      }
+      const item = response.payload.data.items[0]
+      if (!item) continue
+      if (item.unread && job.tries < 1) {
+        asked.push({ caseVolume: item.caseVolume, procLabel: item.procLabel, tries: job.tries + 1 })
+        continue
+      }
+      store(item)
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(lanes, Math.max(asked.length, 1)) }, () => worker()))
+  if (flushTimer) window.clearTimeout(flushTimer)
+  if (token !== sheetQueryToken) return
+  flush()
+  if (stopped) {
+    icPhase.value = 'fail'
+    icNote.value = stopped
+    return
   }
   icPhase.value = 'done'
   const found = Object.values(next).filter(item => item.found).length
-  icNote.value = `案件查询对上 ${found} 件。结束的事项也会留在结果里。`
+  const unreadCount = Object.values(next).filter(item => item.unread).length
+  const missed = unreadCount ? `${unreadCount} 件没查成，其余已经对过。` : ''
+  icNote.value = `案件查询对上 ${found} 件。${missed}结束的事项也会留在结果里。`
 }
 
 function onLimitResult(payload: { items: LimitMonitorRow[]; gates: Record<string, 'open' | 'pending' | 'done'>; checking: boolean; message: string }): void {
-  limitItems.value = payload.items
-  limitGates.value = payload.gates
-  limitChecking.value = payload.checking
+  const seen = new Set<string>()
+  for (const item of payload.items) {
+    const key = icKey(item.caseVolume, item.ctrlProc)
+    seen.add(key)
+    const gate = payload.gates[item.procId]
+    const review = gate === 'pending' ? '已提交审核' : gate === 'open' || gate === 'done' ? '还没提交审核' : payload.checking ? '…' : ''
+    if (limitByKey[key] !== review) limitByKey[key] = review
+  }
+  if (!payload.checking) {
+    for (const key of Object.keys(limitByKey)) {
+      if (!seen.has(key)) delete limitByKey[key]
+    }
+  }
   if (payload.message) limitNote.value = payload.message
   if (payload.checking) {
     limitPhase.value = 'run'
@@ -466,38 +612,39 @@ const progressPercent = computed(() => {
 async function startSheetQuery(): Promise<void> {
   const token = ++sheetQueryToken
   limitPhase.value = 'run'
-  limitItems.value = []
-  limitGates.value = {}
-  limitChecking.value = true
+  for (const key of Object.keys(limitByKey)) delete limitByKey[key]
   limitNote.value = '正在查期限监控…'
   if (!rows.value.length) return
-  void lookupCases(token)
   if (!bridge || connection.value.sessionStatus !== 'authenticated') {
     limitPhase.value = 'fail'
-    limitChecking.value = false
     limitNote.value = '还没连上 EASY，库里有没有还没查。'
+    void lookupCases(token)
     return
   }
   const resolved = await ctrlForSheet()
   if (token !== sheetQueryToken) return
-  if (!isQueryGuid(resolved.id)) {
+  const ids = resolved.id.split(',').map(item => item.trim()).filter(item => isQueryGuid(item))
+  if (!ids.length) {
     limitPhase.value = 'fail'
-    limitChecking.value = false
     limitNote.value = resolved.message || '处理事项还没对上，查不了。'
+    void lookupCases(token)
     return
   }
-  const caseVolume = joinCaseVolumes(volumesOf(rows.value))
-  const fields: Record<string, string> = { ctrl_proc: resolved.id }
-  if (caseVolume.length <= 4000) fields.case_volume = caseVolume
-  queryCaseVolume.value = caseVolume
-  querySeed.value = fields
+  queryProcs.value = ids.map((id, index) => ({
+    id,
+    volumes: joinCaseVolumes(rows.value.filter(row => row.procLabel.trim() === (resolved.names[index] ?? '')).map(row => row.ourVolume.trim()).filter(Boolean))
+  }))
+  queryCaseVolume.value = ''
+  querySeed.value = { ctrl_proc: ids[0] ?? '' }
+  if (ids.length > 1) limitNote.value = `表格里有 ${ids.length} 种处理事项，期限监控按事项分开查。`
   queryToken.value += 1
   queryOpen.value = true
+  void lookupCases(token)
 }
 
-async function ctrlForSheet(): Promise<{ id: string; message: string }> {
+async function ctrlForSheet(): Promise<{ id: string; names: string[]; message: string }> {
   if (!bridge || connection.value.sessionStatus !== 'authenticated') {
-    return { id: '', message: '还没确认当前登录的人，任务没有记下。' }
+    return { id: '', names: [], message: '还没确认当前登录的人，任务没有记下。' }
   }
   const response = await bridge.request({ type: MessageType.LoadDictionary, payload: { kind: 'picker', force: false } })
   if (response.type !== MessageType.DictionaryResult || !response.payload.ok || response.payload.data.kind !== 'picker') {
@@ -506,7 +653,7 @@ async function ctrlForSheet(): Promise<{ id: string; message: string }> {
       : response.type === MessageType.DictionaryResult && !response.payload.ok
         ? response.payload.error.message
         : '处理事项列表没有从原网站读到。'
-    return { id: '', message }
+    return { id: '', names: [], message }
   }
   const options = (response.payload.data.dictionaries.limitCtrlProc?.options ?? []).map(item => ({
     id: item.value,
@@ -514,8 +661,8 @@ async function ctrlForSheet(): Promise<{ id: string; message: string }> {
     ...(item.parentValue ? { parentId: item.parentValue } : {})
   }))
   const matched = matchSheetCtrlProcs(rows.value.map(row => row.procLabel), options)
-  if (!matched.ok) return { id: '', message: matched.message }
-  return { id: matched.ids, message: '' }
+  if (!matched.ok) return { id: '', names: [], message: matched.message }
+  return { id: matched.ids, names: matched.names, message: '' }
 }
 
 async function fillEmails(): Promise<string> {
@@ -687,7 +834,7 @@ async function onRefreshStatus(payload: { targets: Array<{ caseVolume: string; p
     logProgress(`正在用案件查询回传 ${unique.length} 件。`)
     const response = await bridge.request({
       type: MessageType.LookupIcFlow,
-      payload: { rows: unique.slice(0, 40).map(item => ({ caseVolume: item.caseVolume.trim(), procLabel: item.procLabel.trim() })) }
+      payload: { rows: unique.slice(0, IC_LOOKUP_WIDTH).map(item => ({ caseVolume: item.caseVolume.trim(), procLabel: item.procLabel.trim() })) }
     })
     if (response.type !== MessageType.LookupIcFlowResult || !response.payload.ok) {
       const message = response.type === MessageType.LookupIcFlowResult && !response.payload.ok
@@ -698,9 +845,12 @@ async function onRefreshStatus(payload: { targets: Array<{ caseVolume: string; p
       logProgress(message)
       return
     }
-    const next = { ...icByKey.value }
-    for (const item of response.payload.data.items) next[icKey(item.caseVolume, item.procLabel)] = { found: item.found, gate: item.gate }
-    icByKey.value = next
+    for (const item of response.payload.data.items) {
+      const key = icKey(item.caseVolume, item.procLabel)
+      if (item.unread) icByKey[key] = { found: false, gate: '', unread: true }
+      else if (item.statusUnread) icByKey[key] = { found: true, gate: '', statusUnread: true }
+      else icByKey[key] = { found: item.found, gate: item.gate }
+    }
     if (icPhase.value === 'idle') icPhase.value = 'done'
     for (const item of unique) {
       const row = rows.value.find(entry => volumeKey(entry.ourVolume) === volumeKey(item.caseVolume) && entry.procLabel.trim() === item.procLabel.trim())
@@ -713,6 +863,26 @@ async function onRefreshStatus(payload: { targets: Array<{ caseVolume: string; p
   }
 }
 
+const missedCount = computed(() => rows.value.filter(row => {
+  const found = sheetStatus(row).found
+  return found === '库里没有' || found === '没查成'
+}).length)
+
+function exportMissed(): void {
+  const sheets = missedSourceSheets(rows.value, row => sheetStatus(row).found, runtime.value.columns)
+  if (!sheets.length) return
+  const count = sheets.reduce((sum, sheet) => sum + sheet.rows.length - 1, 0)
+  downloadXlsxSheets(sheets, `查不到的文号-${count}行.xlsx`)
+}
+
+async function askGaps(): Promise<void> {
+  const waves = gapWaves.value.filter(item => item.trim())
+  if (!waves.length || askingGap.value) return
+  askingGap.value = true
+  window.dispatchEvent(new CustomEvent('patmail-arbitrate', { detail: waves }))
+  askingGap.value = false
+}
+
 function definitionHint(item: WorkflowDefinition | null): string {
   if (!item || isRunnableWorkflow(item) || item.id === FILE_MANAGE_ID) return ''
   return '这条还缺读取表格、对收件人和提交审核要用的步骤，现在还不能按它生成预览。'
@@ -723,7 +893,7 @@ function definitionHint(item: WorkflowDefinition | null): string {
   <section class="card">
     <div class="card-head"><h2>按工作流发文</h2></div>
     <p v-if="workflowId === FILE_MANAGE_ID" class="hint">选择已经绑好文件管理的客户。按这位客户保存的查询条件和发文方式查出文件。文件描述按发文映射对上发文类型。收件人是案件联系人，抄送是默认发件人和商务，审核人是默认审核人，标题用标题模板，正文用发文页邮件签名下拉里的格式。所属部门包含研发本部时，在文件描述右侧写入全部发明人，顿号分隔。</p>
-    <p v-else class="hint">传入表格。同一客户里，收件人和抄送都相同的合成一封。PCT提醒发给 IPR、抄送商务。PCT鹏城专案发给技术负责人（去掉括号里的拼音），抄送 IPR 和商务。邮箱那一列不读。</p>
+    <p v-else class="hint">一次读「提醒申请PCT」和「PCT进国家」两张表。进国家有我方文号就用我方案号，没有再用贵方。外观用涉外外观那一种。同一客户里连续空着的 IPR 沿用上一行。完全空着的，按处理细节摘一句，也可以交给助手去案件要求里仲裁。邮箱那一列不读。</p>
     <div class="form-grid">
       <div v-if="workflowOptions.length === 0" class="span-all">
         <EmptyGuide text="还没有工作流。去工作流里看 PCT提醒。" action="去工作流" hash="/workflow" />
@@ -746,6 +916,8 @@ function definitionHint(item: WorkflowDefinition | null): string {
       </div>
       <p v-for="note in styleNotes" :key="note" class="hint">这张表按同一客户、同一收件人和抄送合成一封。{{ note }}</p>
       <p v-if="sheetName" class="hint">{{ sheetName }}{{ sheetNotice ? `。${sheetNotice}` : '' }}</p>
+      <button v-if="gapWaves.length" type="button" class="ghost" :disabled="askingGap" @click="askGaps">交给助手仲裁空着的 IPR{{ gapWaves.length > 1 ? `（分 ${gapWaves.length} 批）` : '' }}</button>
+      <button v-if="missedCount" type="button" class="ghost" @click="exportMissed">导出查不到的 {{ missedCount }} 行</button>
       <p v-if="mailTypes.length === 0" class="hint">发文类型还没读到。确认已经连上后，重新打开这一页。</p>
       <p v-if="unmatched.length" class="hint">这 {{ unmatched.length }} 行没有对上发文类型，请点选。</p>
       <p v-if="offCount" class="hint">有 {{ offCount }} 行的处理事项不是「{{ runtime.procLabel }}」。</p>
@@ -755,11 +927,12 @@ function definitionHint(item: WorkflowDefinition | null): string {
         :user-id="connection.operatorId"
         :connected="connection.sessionStatus === 'authenticated'"
         :seed="querySeed"
+        :proc-queries="queryProcs"
         :seed-token="queryToken"
         :case-volume="queryCaseVolume"
         :sheet-rows="rows"
         :recipient-mode="recipientMode"
-        :inventor-customers="[...specials]"
+        :inventor-customers="inventorCustomers"
         @result="onLimitResult"
         @confirm="onSheetConfirm"
         @refresh-status="onRefreshStatus"
@@ -767,10 +940,18 @@ function definitionHint(item: WorkflowDefinition | null): string {
       <p v-if="icPhase === 'fail'" class="error" role="alert">{{ icNote || '案件查询没有完成。' }} 已经出现在上面的行，先用上面的流程状态。</p>
       <p v-else-if="icNote" class="hint">{{ icNote }}</p>
       <p v-if="limitNote" class="hint">{{ limitNote }}</p>
-      <table v-if="rows.length" class="grid">
+      <div v-if="rows.length" class="toolbar">
+        <span>共 {{ rows.length }} 行</span>
+        <div v-if="sheetPages > 1" class="pagination">
+          <button class="ghost tiny" type="button" :disabled="sheetPageSafe <= 1" @click="setSheetPage(sheetPageSafe - 1)">上一页</button>
+          <span>{{ sheetPageSafe }} / {{ sheetPages }}</span>
+          <button class="ghost tiny" type="button" :disabled="sheetPageSafe >= sheetPages" @click="setSheetPage(sheetPageSafe + 1)">下一页</button>
+        </div>
+      </div>
+      <table v-for="n in sheetSeen" v-show="n === sheetPageSafe && rows.length" :key="n" class="grid">
         <thead><tr><th>我方文号</th><th>客户</th><th>客户文号</th><th>处理事项</th><th>发文类型</th><th>收件人</th><th>抄送</th><th>查询结果</th><th>审核状态</th></tr></thead>
         <tbody>
-          <tr v-for="row in rows" :key="row.ourVolume">
+          <tr v-for="row in rowsOnSheetPage(n)" :key="row.ourVolume + '\n' + row.procLabel" v-memo="[row, sheetMemo(row)]">
             <td>{{ row.ourVolume }}</td>
             <td>{{ row.customerName || '表格里没有' }}</td>
             <td>{{ row.customerVolume || '无' }}</td>
@@ -793,7 +974,8 @@ function definitionHint(item: WorkflowDefinition | null): string {
       <section v-if="cards.length" class="card inset">
         <h2>{{ outcome }}</h2>
         <p v-if="outcomeGroups.length" class="hint">{{ outcomeGroups.join('，') }}。</p>
-        <p class="hint">上面已经按表格查过。这里再查一次，并补上客户联系人里唯一的邮箱。</p>
+        <p class="hint">上面已经按表格查过。库里没有和没查成的可以按源表导出。重新查询会再查一次，并补上客户联系人里唯一的邮箱。</p>
+        <button v-if="missedCount" type="button" class="ghost" @click="exportMissed">导出查不到的 {{ missedCount }} 行</button>
         <button type="button" class="solid" :disabled="saving" @click="createAndSend">{{ saving ? '正在准备查询…' : '重新查询' }}</button>
         <div v-if="progress.length" class="send-progress" role="status">
           <div class="send-bar" aria-hidden="true"><span :style="{ width: progressPercent + '%' }"></span></div>

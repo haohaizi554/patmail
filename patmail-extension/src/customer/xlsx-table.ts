@@ -62,7 +62,7 @@ async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await new Response(stream).arrayBuffer())
 }
 
-async function readZip(buffer: ArrayBuffer): Promise<Map<string, string>> {
+async function readZip(buffer: ArrayBuffer, include?: (name: string) => boolean): Promise<Map<string, string>> {
   const view = new DataView(buffer)
   const bytes = new Uint8Array(buffer)
   let end = -1
@@ -86,7 +86,8 @@ async function readZip(buffer: ArrayBuffer): Promise<Map<string, string>> {
     const commentLength = view.getUint16(offset + 32, true)
     const localOffset = view.getUint32(offset + 42, true)
     const name = new TextDecoder().decode(bytes.subarray(offset + 46, offset + 46 + nameLength))
-    if (localOffset + 30 <= bytes.length && view.getUint32(localOffset, true) === 0x04034b50) {
+    const wanted = !include || include(name)
+    if (wanted && localOffset + 30 <= bytes.length && view.getUint32(localOffset, true) === 0x04034b50) {
       const localNameLength = view.getUint16(localOffset + 26, true)
       const localExtraLength = view.getUint16(localOffset + 28, true)
       const start = localOffset + 30 + localNameLength + localExtraLength
@@ -102,20 +103,31 @@ async function readZip(buffer: ArrayBuffer): Promise<Map<string, string>> {
   return text
 }
 
-function firstSheetPath(files: Map<string, string>): string | null {
+export interface XlsxSheet {
+  name: string
+  rows: string[][]
+}
+
+function sheetEntries(files: Map<string, string>): Array<{ name: string; path: string }> {
   const workbook = files.get('xl/workbook.xml') ?? ''
   const rels = files.get('xl/_rels/workbook.xml.rels') ?? ''
-  const relationId = workbook.match(/<sheet\b[^>]*\br:id="([^"]+)"/)?.[1]
-  if (relationId) {
-    for (const match of rels.matchAll(/<Relationship\b([^>]*)\/>/g)) {
-      const id = match[1].match(/\bId="([^"]+)"/)?.[1]
-      const target = match[1].match(/\bTarget="([^"]+)"/)?.[1]
-      if (id !== relationId || !target) continue
-      const path = target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`
-      if (files.has(path)) return path
-    }
+  const targets = new Map<string, string>()
+  for (const match of rels.matchAll(/<Relationship\b([^>]*)\/>/g)) {
+    const id = match[1].match(/\bId="([^"]+)"/)?.[1]
+    const target = match[1].match(/\bTarget="([^"]+)"/)?.[1]
+    if (!id || !target) continue
+    const path = target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`
+    targets.set(id, path)
   }
-  return files.has('xl/worksheets/sheet1.xml') ? 'xl/worksheets/sheet1.xml' : null
+  const listed: Array<{ name: string; path: string }> = []
+  for (const match of workbook.matchAll(/<sheet\b([^>]*)\/>/g)) {
+    const name = match[1].match(/\bname="([^"]*)"/)?.[1] ?? ''
+    const id = match[1].match(/\br:id="([^"]+)"/)?.[1]
+    const path = id ? targets.get(id) : undefined
+    if (path) listed.push({ name: decodeXml(name), path })
+  }
+  if (listed.length) return listed
+  return files.has('xl/worksheets/sheet1.xml') ? [{ name: 'Sheet1', path: 'xl/worksheets/sheet1.xml' }] : []
 }
 
 function crc32(data: Uint8Array): number {
@@ -207,16 +219,24 @@ function zipFile(name: string, text: string): { name: string; data: Uint8Array }
   return { name, data: new TextEncoder().encode(text) }
 }
 
-/** 一张表。单元格都是文本，表头就是第一行。 */
-export function xlsxBytes(rows: string[][], sheetName = 'Sheet1'): ArrayBuffer {
-  const name = xmlText(sheetName.replace(/[\\/?*[\]:]/g, ' ').trim().slice(0, 31) || 'Sheet1')
-  const bytes = storedZip([
+/** 多张表。单元格都是文本，表头就是每一张的第一行。 */
+export function xlsxBookBytes(sheets: Array<{ name: string; rows: string[][] }>): ArrayBuffer {
+  const used = sheets.filter(sheet => sheet.rows.length).slice(0, 8)
+  const list = used.length ? used : [{ name: 'Sheet1', rows: [] as string[][] }]
+  const names = list.map((sheet, index) => {
+    const text = sheet.name.replace(/[\\/?*[\]:]/g, ' ').trim().slice(0, 31) || `Sheet${index + 1}`
+    return xmlText(text)
+  })
+  const overrides = list.map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')
+  const sheetTags = list.map((_, index) => `<sheet name="${names[index]}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join('')
+  const rels = list.map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join('')
+  const files = [
     zipFile('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
       `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
       `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
       `<Default Extension="xml" ContentType="application/xml"/>` +
       `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>` +
-      `<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>` +
+      overrides +
       `</Types>`),
     zipFile('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
       `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
@@ -224,20 +244,24 @@ export function xlsxBytes(rows: string[][], sheetName = 'Sheet1'): ArrayBuffer {
       `</Relationships>`),
     zipFile('xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
       `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
-      `<sheets><sheet name="${name}" sheetId="1" r:id="rId1"/></sheets></workbook>`),
+      `<sheets>${sheetTags}</sheets></workbook>`),
     zipFile('xl/_rels/workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
-      `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>` +
-      `</Relationships>`),
-    zipFile('xl/worksheets/sheet1.xml', sheetXml(rows))
-  ])
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`),
+    ...list.map((sheet, index) => zipFile(`xl/worksheets/sheet${index + 1}.xml`, sheetXml(sheet.rows)))
+  ]
+  const bytes = storedZip(files)
   const copy = new ArrayBuffer(bytes.byteLength)
   new Uint8Array(copy).set(bytes)
   return copy
 }
 
-export function downloadXlsxRows(rows: string[][], filename: string, sheetName = 'Sheet1'): void {
-  const blob = new Blob([xlsxBytes(rows, sheetName)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+/** 一张表。单元格都是文本，表头就是第一行。 */
+export function xlsxBytes(rows: string[][], sheetName = 'Sheet1'): ArrayBuffer {
+  return xlsxBookBytes([{ name: sheetName, rows }])
+}
+
+export function downloadXlsxSheets(sheets: Array<{ name: string; rows: string[][] }>, filename: string): void {
+  const blob = new Blob([xlsxBookBytes(sheets)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
@@ -246,10 +270,25 @@ export function downloadXlsxRows(rows: string[][], filename: string, sheetName =
   URL.revokeObjectURL(url)
 }
 
+export function downloadXlsxRows(rows: string[][], filename: string, sheetName = 'Sheet1'): void {
+  downloadXlsxSheets([{ name: sheetName, rows }], filename)
+}
+
+export async function readXlsxSheets(buffer: ArrayBuffer, pick?: (name: string) => boolean): Promise<XlsxSheet[]> {
+  const index = await readZip(buffer, name => name === 'xl/workbook.xml' || name === 'xl/_rels/workbook.xml.rels')
+  const listed = sheetEntries(index)
+  if (!listed.length) throw new Error('表格里没有工作表。')
+  const chosen = pick ? listed.filter(item => pick(item.name)) : listed
+  const use = chosen.length ? chosen : listed.slice(0, 1)
+  const wanted = new Set(['xl/workbook.xml', 'xl/_rels/workbook.xml.rels', 'xl/sharedStrings.xml', ...use.map(item => item.path)])
+  const files = await readZip(buffer, name => wanted.has(name))
+  const shared = sharedStringsFromXml(files.get('xl/sharedStrings.xml') ?? '')
+  return use.map(item => ({ name: item.name, rows: rowsFromSheetXml(files.get(item.path) ?? '', shared) }))
+}
+
 export async function readXlsxRows(buffer: ArrayBuffer): Promise<string[][]> {
-  const files = await readZip(buffer)
-  const sheetPath = firstSheetPath(files)
-  const sheet = sheetPath ? files.get(sheetPath) : undefined
-  if (!sheet) throw new Error('表格里没有工作表。')
-  return rowsFromSheetXml(sheet, sharedStringsFromXml(files.get('xl/sharedStrings.xml') ?? ''))
+  const sheets = await readXlsxSheets(buffer)
+  const rows = sheets[0]?.rows
+  if (!rows) throw new Error('表格里没有工作表。')
+  return rows
 }

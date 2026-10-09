@@ -399,7 +399,7 @@ function failed(procId: string, message: string, mailId = ''): LimitMailSubmitRe
 
 /** 表格里用来对联系人的名字。拼音括号和补行标记都不参与匹配。 */
 function lookupName(raw: string | undefined): string {
-  return sheetDisplayName(raw ?? '').replace(/（补）\s*$/, '').trim()
+  return sheetDisplayName(raw ?? '').replace(/（补）\s*$/, '').replace(/（仲）\s*$/, '').trim()
 }
 
 function mailInfoParams(mailId: string): URLSearchParams {

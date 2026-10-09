@@ -9,7 +9,7 @@ Content-Type：`application/x-www-form-urlencoded; charset=UTF-8`
 
 业务动作由参数 `Call` 分发。公共约定见 [00-通用约定.md](00-通用约定.md)。
 
-按「入口 + Call」去重后，本索引共 **350** 个接口。其中 **210** 个来自 2026-10-05 13:17–13:35 的第一段抓包（[14](14-案件信息-基础与详情.md)–[30](30-外联配置.md)），**68** 个来自同日 14:37–14:55 的第二段抓包（[31](31-基础信息补充.md)–[40](40-报表.md)），另外 **72** 个只写在 [01](01-案件信息.md)–[13](13-案件查询.md)。同名但入口不同的分开计算，例如两个 `GetCaseInfo`。`GetPublishConfig` 有三个入口：`Common.ashx`、`BaseInfo.ashx` 与 `Bill.ashx`。
+按「入口 + Call」去重后，本索引共 **350** 个接口。同名但入口不同的分开计算，例如两个 `GetCaseInfo`。`GetPublishConfig` 有三个入口：`Common.ashx`、`BaseInfo.ashx` 与 `Bill.ashx`。
 
 表里的「骨架」链到 14–40 的响应字段，「01」到「13」链到页面怎么读这些字段。两边都有的 Call，字段骨架看抓包文档，页面含义看专题文档。
 

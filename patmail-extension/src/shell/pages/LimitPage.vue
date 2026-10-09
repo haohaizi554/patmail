@@ -1,5 +1,5 @@
 <script setup>
-import { computed, inject, ref } from 'vue'
+import { computed, inject, ref, watch } from 'vue'
 import PageHead from '../components/PageHead.vue'
 import { bg } from '../assets'
 import { limitRows as samples } from '../data'
@@ -20,7 +20,9 @@ const props = defineProps({
   checking: Boolean,
   embedded: Boolean,
   writesOpen: { type: Boolean, default: true },
-  writesReady: { type: Boolean, default: true }
+  writesReady: { type: Boolean, default: true },
+  pageWhileLoading: Boolean,
+  cachePages: Boolean
 })
 const emit = defineEmits(['search', 'page', 'select', 'confirm', 'submit'])
 const ui = inject('ui', null)
@@ -38,7 +40,25 @@ const types = [
   ['priority', '优先权'],
   ['fee', '费用']
 ]
-const shown = computed(() => props.live ? props.rows : demoRows.value)
+const seenPages = ref([1])
+function rowsFor(page) {
+  const size = props.pageSize || 100
+  const start = ((page || 1) - 1) * size
+  return props.rows.slice(start, start + size)
+}
+watch(() => props.pageIndex, (page) => {
+  if (!props.cachePages || !page || seenPages.value.includes(page)) return
+  seenPages.value = [...seenPages.value, page]
+})
+watch(() => props.rows.length, (length, previous) => {
+  if (!props.cachePages || !previous || length) return
+  seenPages.value = [props.pageIndex || 1]
+})
+const shown = computed(() => {
+  if (!props.live) return demoRows.value
+  if (!props.cachePages) return props.rows
+  return rowsFor(props.pageIndex)
+})
 const totalText = computed(() => props.live ? props.total : shown.value.length)
 const totalPages = computed(() => Math.max(1, Math.ceil(totalText.value / props.pageSize)))
 const submitTitle = computed(() => {
@@ -70,8 +90,9 @@ function togglePage() {
 
 function confirmSelection() {
   const source = props.live ? props.rows : demoRows.value
+  const onPage = new Set(source.map(row => row.procId))
   const allowed = new Set(source.filter(canPick).map(row => row.procId))
-  emit('confirm', props.selected.filter(id => allowed.has(id)))
+  emit('confirm', props.selected.filter(id => !onPage.has(id) || allowed.has(id)))
 }
 
 function askSubmit() {
@@ -79,7 +100,8 @@ function askSubmit() {
 }
 
 function goPage(page) {
-  if (page < 1 || page > totalPages.value || props.loading) return
+  if (page < 1 || page > totalPages.value) return
+  if (props.loading && !props.pageWhileLoading) return
   emit('page', page)
 }
 
@@ -147,9 +169,9 @@ function reset() {
       <button v-if="selectable" class="ghost tiny" type="button" :disabled="!pageIds.length" @click="togglePage">{{ pageAll ? '取消全选' : '全选本页' }}</button>
       <button v-if="selectable" class="ghost tiny" type="button" :disabled="!selected.length" @click="confirmSelection">确认勾选</button>
       <div v-if="live && totalPages > 1" class="pagination">
-        <button class="ghost tiny" type="button" :disabled="pageIndex <= 1 || loading" @click="goPage(pageIndex - 1)">上一页</button>
+        <button class="ghost tiny" type="button" :disabled="pageIndex <= 1 || (loading && !pageWhileLoading)" @click="goPage(pageIndex - 1)">上一页</button>
         <span>{{ pageIndex }} / {{ totalPages }}</span>
-        <button class="ghost tiny" type="button" :disabled="pageIndex >= totalPages || loading" @click="goPage(pageIndex + 1)">下一页</button>
+        <button class="ghost tiny" type="button" :disabled="pageIndex >= totalPages || (loading && !pageWhileLoading)" @click="goPage(pageIndex + 1)">下一页</button>
       </div>
       <button class="ghost" type="button" v-hint="submitTitle" @click="askSubmit">提交到 EASY</button>
     </div>
@@ -164,11 +186,33 @@ function reset() {
           <th>官方期限</th><th>客户期限</th><th>内部期限</th><th>流程状态</th>
         </tr>
       </thead>
-      <tbody>
+      <template v-if="cachePages">
+        <tbody v-for="n in seenPages" :key="n" v-show="n === pageIndex">
+          <tr v-if="!rowsFor(n).length">
+            <td :colspan="selectable ? 10 : 9">{{ loading ? '正在读取期限列表…' : (message ? '查询没有完成，上面有原因。' : '没有可显示的期限记录') }}</td>
+          </tr>
+          <tr v-for="row in rowsFor(n)" :key="row.procId" v-memo="[row, gates[row.procId], checking, selected.includes(row.procId)]" :class="{ 'is-pending': gates[row.procId] === 'pending' || checking }">
+            <td v-if="selectable">
+              <input type="checkbox" :checked="selected.includes(row.procId)" :disabled="!canPick(row)" @change="toggleRow(row.procId)" />
+              <span v-if="gates[row.procId] === 'pending'">待审核</span>
+            </td>
+            <td>{{ row.caseVolume }}</td>
+            <td>{{ row.caseName }}</td>
+            <td>{{ row.ctrlProc }}</td>
+            <td>{{ row.customerName }}</td>
+            <td>{{ row.appNo }}</td>
+            <td>{{ row.legalDueDate }}</td>
+            <td>{{ row.cusDueDate }}</td>
+            <td>{{ row.intDueDate }}</td>
+            <td :class="statusShade(flowStatus(row))">{{ flowStatus(row) }}</td>
+          </tr>
+        </tbody>
+      </template>
+      <tbody v-else>
         <tr v-if="!shown.length">
           <td :colspan="selectable ? 10 : 9">{{ loading ? '正在读取期限列表…' : (message ? '查询没有完成，上面有原因。' : '没有可显示的期限记录') }}</td>
         </tr>
-        <tr v-for="row in shown" :key="row.procId" :class="{ 'is-pending': gates[row.procId] === 'pending' || checking }">
+        <tr v-for="row in shown" :key="row.procId" v-memo="[row, gates[row.procId], checking, selected.includes(row.procId)]" :class="{ 'is-pending': gates[row.procId] === 'pending' || checking }">
           <td v-if="selectable">
             <input type="checkbox" :checked="selected.includes(row.procId)" :disabled="!canPick(row)" @change="toggleRow(row.procId)" />
             <span v-if="gates[row.procId] === 'pending'">待审核</span>

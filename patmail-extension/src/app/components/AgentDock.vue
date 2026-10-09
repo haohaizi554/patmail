@@ -13,7 +13,7 @@ import { sendToBackground } from '../../utils/runtime'
 
 interface Bubble { role: 'user' | 'assistant'; content: string }
 interface SessionCard { id: string; title: string; updatedAt: string; active: boolean }
-interface Job { kind: 'turn' | 'facts' | 'compact' | 'reset'; display: string; message: string; label: string }
+interface Job { kind: 'turn' | 'facts' | 'compact' | 'reset'; display: string; message: string; label: string; arbitration?: true }
 type AgentRequest = Extract<BackgroundRequest, { type: typeof MessageType.AgentChat }>
 type AskOk = { ok: true; reply: string; history: Bubble[]; sessions: SessionCard[]; activeId: string }
 type AskResult = AskOk | { ok: false; message: string }
@@ -35,6 +35,7 @@ const renameDraft = ref('')
 const aside = ref<string[]>([])
 const QUEUE_HEAD = 3
 const queue = ref<Job[]>([])
+const arbitrationLeft = ref<string[]>([])
 const queueOpen = ref(false)
 const queueHead = computed(() => queue.value.slice(0, QUEUE_HEAD))
 const queueRest = computed(() => queue.value.slice(QUEUE_HEAD))
@@ -365,12 +366,30 @@ function removeSession(id: string): Promise<void> {
 
 async function reset(): Promise<void> {
   queue.value = []
+  arbitrationLeft.value = []
   queueOpen.value = false
   if (busy.value) {
     pendingReset = true
     return
   }
   await runJob({ kind: 'reset', display: '', message: '', label: '正在清空' })
+}
+
+function arbitrationJob(message: string, left: number): Job {
+  return {
+    kind: 'turn',
+    arbitration: true,
+    display: left ? `仲裁没有 IPR 的收件人，后面还有 ${left} 批` : '仲裁没有 IPR 的收件人',
+    message,
+    label: '正在仲裁收件人'
+  }
+}
+
+function takeArbitration(): Job | null {
+  const message = arbitrationLeft.value[0]
+  if (!message) return null
+  arbitrationLeft.value = arbitrationLeft.value.slice(1)
+  return arbitrationJob(message, arbitrationLeft.value.length)
 }
 
 async function finishJob(): Promise<void> {
@@ -382,24 +401,31 @@ async function finishJob(): Promise<void> {
   if (pendingReset) {
     pendingReset = false
     queue.value = []
+    arbitrationLeft.value = []
     queueOpen.value = false
     await runJob({ kind: 'reset', display: '', message: '', label: '正在清空' })
     return
   }
   const next = queue.value[0]
-  if (!next) {
+  if (next) {
+    queue.value = queue.value.slice(1)
+    if (queue.value.length <= QUEUE_HEAD) queueOpen.value = false
+    await runJob(next)
+    return
+  }
+  const wave = takeArbitration()
+  if (!wave) {
     queueOpen.value = false
     await scrollDown()
     return
   }
-  queue.value = queue.value.slice(1)
-  if (queue.value.length <= QUEUE_HEAD) queueOpen.value = false
-  await runJob(next)
+  await runJob(wave)
 }
 
 function halt(): void {
   if (!busy.value) return
   stopped = true
+  arbitrationLeft.value = []
   pendingAsk.value = null
   askText.value = ''
   askPicked.value = []
@@ -476,11 +502,13 @@ async function runJob(job: Job): Promise<void> {
     }
     const result = await ask({ type: MessageType.AgentChat, payload: { action: 'turn', message: job.message } })
     if (stopped) {
+      arbitrationLeft.value = []
       note.value = '已停下。'
       retryJob.value = job
       return
     }
     if (!result.ok) {
+      if (job.arbitration) arbitrationLeft.value = []
       note.value = result.message
       retryJob.value = job
     } else {
@@ -822,7 +850,25 @@ function onRuntimeMessage(message: unknown, _sender: unknown, sendResponse: (res
   return undefined
 }
 
+function onArbitrate(event: Event): void {
+  const detail = event instanceof CustomEvent ? event.detail : null
+  const incoming = Array.isArray(detail)
+    ? detail.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map(item => item.trim())
+    : typeof detail === 'string' && detail.trim() ? [detail.trim()] : []
+  if (!incoming.length) return
+  open.value = true
+  const [first, ...rest] = incoming
+  if (!first) return
+  if (busy.value) {
+    arbitrationLeft.value = incoming
+    return
+  }
+  arbitrationLeft.value = rest
+  void runJob(arbitrationJob(first, rest.length))
+}
+
 holdAgentPort()
+window.addEventListener('patmail-arbitrate', onArbitrate)
 if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
   chrome.runtime.onMessage.addListener(onRuntimeMessage)
 }
@@ -830,6 +876,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
 window.addEventListener('keydown', onEscape)
 window.addEventListener('resize', onViewport)
 onUnmounted(() => {
+  window.removeEventListener('patmail-arbitrate', onArbitrate)
   window.removeEventListener('keydown', onEscape)
   window.removeEventListener('resize', onViewport)
   if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) chrome.storage.onChanged.removeListener(onStoredAgent)

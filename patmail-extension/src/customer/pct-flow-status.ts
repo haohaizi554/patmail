@@ -86,6 +86,10 @@ export interface IcFlowHit {
   procLabel: string
   found: boolean
   gate: '' | PctSendGate
+  /** 这一件请求没有读成。不是库里没有。 */
+  unread?: true
+  /** 案子查到了，发文流程这一下没有读成。 */
+  statusUnread?: true
 }
 
 export function caseBusFlowParams(caseId: string): URLSearchParams {

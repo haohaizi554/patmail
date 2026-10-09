@@ -52,8 +52,11 @@ function isPctRow(value: unknown): value is PctTaskRow {
   if (!shortText(row.contactName, 80) || !shortText(row.iprName, 80) || !shortText(row.procLabel, 80)) return false
   if (row.contactCarried !== undefined && row.contactCarried !== true) return false
   if (row.iprCarried !== undefined && row.iprCarried !== true) return false
+  if (row.iprArbitrated !== undefined && row.iprArbitrated !== true) return false
   if (row.leadName !== undefined && !shortText(row.leadName, 80)) return false
   if (row.leadCarried !== undefined && row.leadCarried !== true) return false
+  if (row.letterKind !== undefined && row.letterKind !== 'remind' && row.letterKind !== 'national' && row.letterKind !== 'design') return false
+  if (row.iprNote !== undefined && !shortText(row.iprNote, 200)) return false
   if (!shortText(row.mailTypeLabel, 80) || !row.mailTypeLabel.trim()) return false
   if (row.mailTypeId !== undefined && (typeof row.mailTypeId !== 'string' || !isQueryGuid(row.mailTypeId))) return false
   if (row.mailTypeRadioIndex !== undefined && row.mailTypeRadioIndex !== 1 && row.mailTypeRadioIndex !== 3) return false
