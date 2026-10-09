@@ -71,6 +71,7 @@ const abnormalKeys = ref(new Set<string>())
 const confirmedProcIds = ref<string[]>([])
 let sheetQueryToken = 0
 let sheetImportToken = 0
+let liveAsked: Array<{ caseVolume: string; procLabel: string; tries: number }> | null = null
 const SHEET_PAGE_SIZE = 100
 
 const definition = computed(() => props.catalog.workflows.find(item => item.id === workflowId.value) ?? null)
@@ -403,7 +404,7 @@ async function lookupCases(token: number, only?: Array<{ caseVolume: string; pro
   if (!again) {
     for (const key of Object.keys(icByKey)) delete icByKey[key]
   }
-  icNote.value = again ? '正在把查不到的重新入队…' : '正在用案件查询核对文号和流程状态…'
+  icNote.value = again ? '正在把没查成的重新入队…' : '正在用案件查询核对文号和流程状态…'
   if (!bridge || connection.value.sessionStatus !== 'authenticated') {
     icPhase.value = 'fail'
     icNote.value = '还没连上 EASY，库里有没有还没查。'
@@ -412,16 +413,18 @@ async function lookupCases(token: number, only?: Array<{ caseVolume: string; pro
   const page = bridge
   const seen = new Set<string>()
   const source = only ?? rows.value.map(row => ({ caseVolume: row.ourVolume, procLabel: row.procLabel }))
-  const asked = source.flatMap(row => {
+  const asked: Array<{ caseVolume: string; procLabel: string; tries: number }> = []
+  liveAsked = asked
+  for (const row of source) {
     const caseVolume = row.caseVolume.trim()
     const procLabel = row.procLabel.trim()
-    if (!caseVolume || !procLabel) return []
+    if (!caseVolume || !procLabel) continue
     const key = icKey(caseVolume, procLabel)
-    if (seen.has(key)) return []
+    if (seen.has(key)) continue
     seen.add(key)
     if (again) delete icByKey[key]
-    return [{ caseVolume, procLabel, tries: 0 }]
-  })
+    asked.push({ caseVolume, procLabel, tries: 0 })
+  }
   const total = asked.length
   type Hit = { found: boolean; gate: '' | 'open' | 'pending' | 'done'; unread?: true; statusUnread?: true }
   const next: Record<string, Hit> = {}
@@ -502,7 +505,11 @@ async function lookupCases(token: number, only?: Array<{ caseVolume: string; pro
     }
   }
 
-  await worker()
+  try {
+    await worker()
+  } finally {
+    if (liveAsked === asked) liveAsked = null
+  }
   if (flushTimer) window.clearTimeout(flushTimer)
   if (token !== sheetQueryToken) return
   flush()
@@ -516,23 +523,43 @@ async function lookupCases(token: number, only?: Array<{ caseVolume: string; pro
   const unreadCount = Object.values(next).filter(item => item.unread).length
   const missed = unreadCount ? `${unreadCount} 件没查成，其余已经对过。` : ''
   icNote.value = again
-    ? `查不到的 ${total} 行又对过，这次对上 ${found} 件。${missed}`
+    ? `没查成的 ${total} 行又对过，这次对上 ${found} 件。${missed}`
     : `案件查询对上 ${found} 件。${missed}结束的事项也会留在结果里。`
 }
 
-function requeryMissed(): void {
-  if (icPhase.value === 'run') return
+function unreadJobs(): Array<{ caseVolume: string; procLabel: string }> {
   const jobs: Array<{ caseVolume: string; procLabel: string }> = []
   const seen = new Set<string>()
   for (const row of rows.value) {
-    const found = sheetStatus(row).found
-    if (found !== '库里没有' && found !== '没查成') continue
-    const key = icKey(row.ourVolume, row.procLabel)
-    if (seen.has(key)) continue
+    if (sheetStatus(row).found !== '没查成') continue
+    const caseVolume = row.ourVolume.trim()
+    const procLabel = row.procLabel.trim()
+    const key = icKey(caseVolume, procLabel)
+    if (!caseVolume || !procLabel || seen.has(key)) continue
     seen.add(key)
-    jobs.push({ caseVolume: row.ourVolume.trim(), procLabel: row.procLabel.trim() })
+    jobs.push({ caseVolume, procLabel })
   }
+  return jobs
+}
+
+function requeueUnread(): void {
+  const jobs = unreadJobs()
   if (!jobs.length) return
+  const queue = liveAsked
+  if (queue && icPhase.value === 'run') {
+    const queued = new Set(queue.map(job => icKey(job.caseVolume, job.procLabel)))
+    let added = 0
+    for (const job of jobs) {
+      const key = icKey(job.caseVolume, job.procLabel)
+      if (queued.has(key)) continue
+      delete icByKey[key]
+      queue.push({ ...job, tries: 0 })
+      queued.add(key)
+      added += 1
+    }
+    if (added) icNote.value = `已把 ${added} 行没查成的放回正在核对的队列。`
+    return
+  }
   void lookupCases(++sheetQueryToken, jobs)
 }
 
@@ -909,11 +936,8 @@ async function onRefreshStatus(payload: { targets: Array<{ caseVolume: string; p
   }
 }
 
-const missedCount = computed(() => rows.value.filter(row => {
-  const found = sheetStatus(row).found
-  return found === '库里没有' || found === '没查成'
-}).length)
 const missingCount = computed(() => rows.value.filter(row => sheetStatus(row).found === '库里没有').length)
+const unreadCount = computed(() => rows.value.filter(row => sheetStatus(row).found === '没查成').length)
 const liveTask = computed(() => {
   if (!rows.value.length) return null
   const names = [...new Set(rows.value.map(row => row.customerName.trim()).filter(Boolean))]
@@ -938,12 +962,12 @@ function exportByVerdict(keep: (found: string) => boolean, filename: (count: num
   downloadXlsxSheets(sheets, filename(count))
 }
 
-function exportMissed(): void {
-  exportByVerdict(found => found === '库里没有' || found === '没查成', count => `查不到的文号-${count}行.xlsx`)
-}
-
 function exportMissing(): void {
   exportByVerdict(found => found === '库里没有', count => `库里没有-${count}行.xlsx`)
+}
+
+function exportUnread(): void {
+  exportByVerdict(found => found === '没查成', count => `没查成-${count}行.xlsx`)
 }
 
 async function askGaps(): Promise<void> {
@@ -1047,11 +1071,11 @@ function definitionHint(item: WorkflowDefinition | null): string {
         <p v-if="outcomeGroups.length" class="hint">{{ outcomeGroups.join('，') }}。</p>
         <div class="outcome-actions">
           <button v-if="missingCount" type="button" class="ghost tiny" @click="exportMissing">导出库里没有 {{ missingCount }}</button>
-          <button v-if="missedCount" type="button" class="ghost tiny" @click="exportMissed">导出查不到 {{ missedCount }}</button>
-          <button v-if="missedCount" type="button" class="ghost tiny" :disabled="icPhase === 'run'" @click="requeryMissed">查不到的重新入队</button>
+          <button v-if="unreadCount" type="button" class="ghost tiny" @click="exportUnread">导出没查成 {{ unreadCount }}</button>
+          <button v-if="unreadCount" type="button" class="ghost tiny" @click="requeueUnread">没查成重新入队 {{ unreadCount }}</button>
           <button type="button" class="solid tiny" :disabled="saving || icPhase === 'run'" @click="createAndSend">{{ saving ? '正在准备查询…' : '重新查询' }}</button>
         </div>
-        <p class="hint">导出按源表。重新入队只再查库里没有和没查成的。重新查询会整表再查，并补上客户联系人里唯一的邮箱。</p>
+        <p class="hint">库里没有是查过、文号对不上。没查成是这次请求没读到，可以重新放回正在核对的队列。重新查询会整表再查，并补上客户联系人里唯一的邮箱。</p>
         <div v-if="progress.length" class="send-progress" role="status">
           <div class="send-bar" aria-hidden="true"><span :style="{ width: progressPercent + '%' }"></span></div>
           <ol>
