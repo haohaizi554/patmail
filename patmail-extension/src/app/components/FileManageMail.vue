@@ -368,13 +368,13 @@ function fileNames(letter: FileManageLetterPlan): string {
         <tbody>
           <tr v-for="letter in letters" :key="letter.key" :class="{ 'is-selected': picked.includes(letter.key) }">
             <td class="pick"><input type="checkbox" :aria-label="letterLabel(letter)" :checked="picked.includes(letter.key)" :disabled="sending || Boolean(letter.blocked) || !letter.mailTypeId || !letter.subject" @change="toggleLetter(letter.key)" /></td>
-            <td class="files" :title="fileNames(letter)"><span class="clip wrap">{{ fileNames(letter) }}</span></td>
-            <td class="desc" :title="letter.description || '没有描述'"><span class="clip wrap">{{ letter.description || '没有描述' }}</span></td>
-            <td class="type" :title="letter.mailTypeName || '没对上'"><span class="clip wrap">{{ letter.mailTypeName || '没对上' }}</span></td>
-            <td class="to" title="案件联系人"><span class="clip wrap">案件联系人</span></td>
-            <td class="cc" title="默认发件人，商务"><span class="clip wrap">默认发件人，商务</span></td>
-            <td class="title" :title="letter.subject || '还没有标题'"><span class="clip one">{{ letter.subject || '还没有标题' }}</span></td>
-            <td class="state" :title="statusOf(letter)"><span class="clip wrap">{{ statusOf(letter) }}</span></td>
+            <td class="files" v-hint="fileNames(letter)"><span class="clip wrap">{{ fileNames(letter) }}</span></td>
+            <td class="desc" v-hint="letter.description || '没有描述'"><span class="clip wrap">{{ letter.description || '没有描述' }}</span></td>
+            <td class="type" v-hint="letter.mailTypeName || '没对上'"><span class="clip wrap">{{ letter.mailTypeName || '没对上' }}</span></td>
+            <td class="to" v-hint="'案件联系人'"><span class="clip wrap">案件联系人</span></td>
+            <td class="cc" v-hint="'默认发件人，商务'"><span class="clip wrap">默认发件人，商务</span></td>
+            <td class="title" v-hint="letter.subject || '还没有标题'"><span class="clip one">{{ letter.subject || '还没有标题' }}</span></td>
+            <td class="state" v-hint="statusOf(letter)"><span class="clip wrap">{{ statusOf(letter) }}</span></td>
           </tr>
         </tbody>
       </table>

@@ -70,8 +70,8 @@ const menu = computed(() => props.items || nav)
           系统设置
         </button>
         <div v-if="showMode" class="mode-switch" role="group" aria-label="客户系统">
-          <button type="button" :class="{ on: mode === 'large' }" :disabled="modeBusy" title="http://183.36.43.66:88" @click="emit('mode', 'large')">大客户</button>
-          <button type="button" :class="{ on: mode === 'sme' }" :disabled="modeBusy" title="http://183.36.43.44:88" @click="emit('mode', 'sme')">中小客户</button>
+          <button type="button" :class="{ on: mode === 'large' }" :disabled="modeBusy" v-hint="'http://183.36.43.66:88'" @click="emit('mode', 'large')">大客户</button>
+          <button type="button" :class="{ on: mode === 'sme' }" :disabled="modeBusy" v-hint="'http://183.36.43.44:88'" @click="emit('mode', 'sme')">中小客户</button>
         </div>
         <button v-if="showDemo" class="float-entry" @click="emit('navigate', '浮窗')">发文浮窗预览</button>
       </aside>
