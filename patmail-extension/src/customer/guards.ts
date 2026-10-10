@@ -1,4 +1,5 @@
 import { isFileSearchBusinessField } from '../api/file-search-params'
+import { isFileDownloadSelection } from '../mail/download-name'
 import { isForbiddenFieldName } from '../query/field-registry'
 import { isQueryGuid } from '../query/query-validator'
 import { isBoundQuery, isFileMailStyle, isLimitMailStyle, isQuerySurface, isWorkflowId } from './mail-flow'
@@ -26,6 +27,7 @@ export function isCustomerProfile(value: unknown): value is CustomerQueryProfile
   if (profile.mailsetId !== undefined && (typeof profile.mailsetId !== 'string' || !isQueryGuid(profile.mailsetId))) return false
   if (profile.mailsetLabel !== undefined && (typeof profile.mailsetLabel !== 'string' || profile.mailsetLabel.length > 160)) return false
   if (profile.boundQuery !== undefined && !isBoundQuery(profile.boundQuery)) return false
+  if (profile.fileDownloadName !== undefined && !isFileDownloadSelection(profile.fileDownloadName)) return false
   if (profile.pctTask !== undefined && !isPctTask(profile.pctTask)) return false
   if (profile.skills !== undefined && (!Array.isArray(profile.skills) || profile.skills.length > 4 || !profile.skills.every(isCustomerSkill))) return false
   if (profile.overrides === null || typeof profile.overrides !== 'object' || Array.isArray(profile.overrides)) return false

@@ -40,6 +40,7 @@ import { isQueryGuid } from '../query/query-validator'
 import { EasyMailReadService } from '../mail/easy/read-service'
 import type { ExistingMailDiagnostic } from '../shared/message'
 import { submitFileManageBatch, type FileManageSubmitItem, type FileManageSubmitResult } from '../customer/file-manage-submit'
+import { resolveDownloadFileNames, type FileDownloadSelection } from '../mail/download-name'
 import { submitLimitMailBatch, type LimitMailSubmitItem, type LimitMailSubmitResult } from '../customer/limit-mail-submit'
 import { loadCaseContacts } from '../case-contact/load'
 import type { CaseContactExport } from '../case-contact/query'
@@ -635,6 +636,18 @@ export class EasyRuntime {
 
   submitFileManageMails(items: FileManageSubmitItem[]): Promise<{ stopped: boolean; results: FileManageSubmitResult[] }> {
     return submitFileManageBatch(this.transport, items)
+  }
+
+  /** 用文件查询里选中的下载名称生成发文文件名。不下载文件。 */
+  resolveDownloadNames(fileIds: string[], selection: FileDownloadSelection): Promise<ApiResult<string[]>> {
+    return (async (): Promise<ApiResult<string[]>> => {
+      if (!(await this.confirmAccountRead())) {
+        return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
+      }
+      const result = await resolveDownloadFileNames(this.transport, fileIds, selection)
+      if (!result.ok && result.error.code === 'SESSION_EXPIRED') this.session.expire()
+      return result
+    })()
   }
 
   cancelLimitMonitor(): void {

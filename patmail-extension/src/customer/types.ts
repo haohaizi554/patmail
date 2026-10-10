@@ -1,3 +1,5 @@
+import type { FileDownloadSelection } from '../mail/download-name'
+
 export type QuerySurfaceId = 'file' | 'limit'
 export type LimitMailStyle = '1' | '2' | '3'
 /** 文件管理弹层 FileSearchMail.aspx。合并发文的 mailstyle=1 已核对，单个来文的提交值还没有。 */
@@ -82,6 +84,8 @@ export interface CustomerQueryProfile {
   fileMailStyle?: FileMailStyle
   /** 查询页最后一次提交的字段，不是操作步骤。 */
   boundQuery?: Record<string, string>
+  /** 文件查询里选中的下载名称。不参与查询，发文时用来生成文件名。 */
+  fileDownloadName?: FileDownloadSelection
   /** PCT 提醒提交给当前登录人审核。选了别人时不写这一项。 */
   reviewTarget?: ReviewTarget
   /** 从人员名单里选中的审核人。 */

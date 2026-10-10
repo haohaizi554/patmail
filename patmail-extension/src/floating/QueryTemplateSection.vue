@@ -25,6 +25,7 @@ import { MessageType, type FileSearchFormField, type MessageBridge } from '../sh
 import { useWorkspace } from '../app/composables/useWorkspace'
 import { hasOptionTree } from '../query/option-tree'
 import { describePickerReceipt, FILE_PICKER_FIELDS } from '../api/dictionaries/picker-catalog'
+import { selectionFromControls, type FileDownloadSelection } from '../mail/download-name'
 import ThemeSelect from '../shell/components/ThemeSelect.vue'
 import TreeOptionSelect from '../shell/components/TreeOptionSelect.vue'
 
@@ -40,7 +41,10 @@ const props = withDefaults(defineProps<{
   seed?: Record<string, string> | null
   seedToken?: number
 }>(), { manage: true, seed: null, seedToken: 0 })
-const emit = defineEmits<{ search: [query: FileSearchQuery] }>()
+const emit = defineEmits<{
+  search: [query: FileSearchQuery]
+  'download-name': [selection: FileDownloadSelection | null]
+}>()
 
 const historyOptions = ref<HistoryQueryOption[]>([])
 const localTemplates = ref<QueryTemplate[]>([])
@@ -212,6 +216,28 @@ function formValue(key: string): string {
 function downloadChoices(key: string): { value: string; label: string }[] {
   return optionsFor(key).filter(item => item.label.replace(/[\s\-—_]/g, '') !== '请选择')
 }
+function currentDownloadSelection(): FileDownloadSelection | null {
+  const templateId = formValue('filetemp').trim()
+  const column = formValue('selfilename1').trim()
+  const fixedText = formValue('txtfilename1').trim()
+  const templates = dictionaryFor('filetemp')?.dictionary.options ?? []
+  const picked = templates.find(item => item.value === templateId)
+  const columnLabel = downloadChoices('selfilename1').find(item => item.value === column)?.label ?? ''
+  const recipe = picked?.metadata?.newFilename && picked.metadata.fileNameType
+    ? { newFilename: picked.metadata.newFilename, fileNameType: picked.metadata.fileNameType }
+    : null
+  return selectionFromControls({
+    templateId,
+    column,
+    fixedText,
+    label: picked?.label || columnLabel,
+    template: recipe
+  })
+}
+watch(
+  () => [formValue('filetemp'), formValue('selfilename1'), formValue('txtfilename1'), pickers.value.fileTemp?.options.length ?? 0],
+  () => emit('download-name', currentDownloadSelection())
+)
 function setOverride(key: string, value: string): void {
   temporaryActive.value = { ...temporaryActive.value, [key]: true }
   temporary.value = { ...temporary.value, [key]: value }
@@ -734,6 +760,7 @@ async function saveCustomer(): Promise<void> {
     storageMessage.value = '请选择基础模板。'
     return
   }
+  const existing = customers.value.find(item => item.id === draftCustomerId.value)
   const result = await workspace.call({
     action: 'saveCustomer',
     expectedScope: scope,
@@ -745,6 +772,8 @@ async function saveCustomer(): Promise<void> {
       baseTemplateId: draftBaseId.value,
       overrides,
       enabled: draftEnabled.value,
+      ...(existing?.fileDownloadName ? { fileDownloadName: existing.fileDownloadName } : {}),
+      ...(existing?.boundQuery ? { boundQuery: existing.boundQuery } : {}),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     }
@@ -1020,7 +1049,7 @@ function applySeed(): void {
   openExtra.value = copy
 }
 
-watch(() => [props.userId, props.mode] as const, () => {
+watch(() => [props.userId, props.mode, props.origin] as const, () => {
   historyOptions.value = props.userId ? peekHistoryList(props.userId, 'file') : []
   historyMessage.value = ''
   basicDictionaries.value = {}
@@ -1219,7 +1248,7 @@ watch(selectedCustomerId, () => {
                 <input :value="formValue('tempName')" type="text" placeholder="模板名称" @input="onText('tempName', $event)" />
                 <button type="button" class="download-save" @click="downloadHint = '下载名称的保存和删除写在原网站账号上，这里先接上选择，不从插件提交。'">保存下载名称</button>
               </span>
-              <p class="download-note">此处可设置文件下载名称模板，填写模板名称保存后，可在第一个下拉中进行选择。模板为执行保存的用户专有，其他用户不共享。</p>
+              <p class="download-note">此处可设置文件下载名称模板，填写模板名称保存后，可在第一个下拉中进行选择。模板为执行保存的用户专有，其他用户不共享。选中的名称会带到后面的发文，用来生成文件名，不作为查询条件。</p>
               <p v-if="downloadHint" class="hint">{{ downloadHint }}</p>
             </div>
             <div v-else :class="cellClass(cell)">

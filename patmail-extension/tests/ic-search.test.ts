@@ -25,6 +25,19 @@ describe('案件查询', () => {
     expect(element).toContain('&lt;case_type&gt;31D1A147-2931-43B5-94AE-B72B1525BA8A&lt;/case_type&gt;')
     expect(element).toContain('&lt;tech_disclosure&gt;null&lt;/tech_disclosure&gt;')
     expect(built.data.get('cookie')).toBeNull()
+    expect(built.data.get('pageSize')).toBe('10')
+  })
+
+  it('最多 8 个文号并成一次查询', () => {
+    const volumes = ['PA1', 'PA2', 'PA3', 'PA4', 'PA5', 'PA6', 'PA7', 'PA8']
+    const built = buildIcSearchParams(volumes.join(';'), () => 1, 'case_volume', 50)
+    expect(built.ok).toBe(true)
+    if (!built.ok) return
+    expect(built.data.get('pageSize')).toBe('50')
+    const element = built.data.get('Element') ?? ''
+    expect(element).toContain(`&lt;case_volume&gt;${volumes.join(';')}&lt;/case_volume&gt;`)
+    expect(buildIcSearchParams([...volumes, 'PA9'].join(';'), () => 1).ok).toBe(false)
+    expect(buildIcSearchParams('P'.repeat(81), () => 1).ok).toBe(false)
   })
 
   it('从列表里取出文号和案件编号', () => {

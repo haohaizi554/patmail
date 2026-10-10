@@ -3,9 +3,10 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import ThemeSelect from '../shell/components/ThemeSelect.vue'
 import TreeOptionSelect from '../shell/components/TreeOptionSelect.vue'
 import type { HistoryQueryOption } from '../api/query-history'
+import { CURRENT_ENVIRONMENT } from '../api/config'
 import { LIMIT_BLOCKS, LIMIT_OPTION_KEYS, LIMIT_SELECTS, buildLimitQueryXml, readLimitQueryXml } from '../api/limit-form'
 import { pageSelectOptions } from '../query/form-page'
-import { activateOptionFallback, hydrateOptionFallback, optionFallbackEpoch, rememberDictionaries, savedChoices, subscribeOptionFallback } from '../query/option-fallback'
+import { activateOptionFallback, hydrateOptionFallback, optionFallbackEpoch, rememberChoices, rememberDictionaries, savedChoices, subscribeOptionFallback } from '../query/option-fallback'
 import type { NormalizedDictionary } from '../api/dictionaries'
 import { choicesFromDictionary, describePickerReceipt, LIMIT_PICKER_FIELDS } from '../api/dictionaries/picker-catalog'
 import { hasOptionTree } from '../query/option-tree'
@@ -78,12 +79,17 @@ function onCheck(key: string, event: Event): void {
   const on = (event.target as HTMLInputElement).checked
   setValue(key, on ? (key.endsWith('isnull') ? 'on' : 'true') : '')
 }
+function caseTypeFor(key: string): string {
+  const selected = valueOf('case_type')
+  if (selected || key !== 'case_status_id') return selected
+  return CURRENT_ENVIRONMENT.caseTypeId
+}
 function choices(key: string): { value: string; label: string; parent?: string }[] {
   fallbackTick.value
   const source = LIMIT_PICKER_FIELDS[key]
   const dictionary = source ? pickers.value[source] : undefined
   const live = dictionary && dictionary.options.length > 0
-    ? choicesFromDictionary(dictionary, valueOf('case_type'), valueOf('country'))
+    ? choicesFromDictionary(dictionary, caseTypeFor(key), valueOf('country'))
     : null
   const stored = props.userId ? savedChoices(props.userId, key) : null
   const saved = stored ?? pageSelectOptions(LIMIT_OPTION_KEYS[key] ?? key) ?? LIMIT_SELECTS[key] ?? []
@@ -309,7 +315,12 @@ async function loadPickers(force: boolean): Promise<void> {
     }
     pickers.value = response.payload.data.dictionaries
     pickersReady.value = true
-    if (props.userId) rememberDictionaries(props.userId, LIMIT_PICKER_FIELDS, response.payload.data.dictionaries)
+    if (props.userId) {
+      const fields = { ...LIMIT_PICKER_FIELDS }
+      delete fields.case_status_id
+      rememberDictionaries(props.userId, fields, response.payload.data.dictionaries)
+      rememberChoices(props.userId, 'case_status_id', choices('case_status_id'))
+    }
     checkMessage.value = describePickerReceipt(response.payload.data.dictionaries, response.payload.data.warnings)
   } catch {
     checkMessage.value = '读取期限下拉失败。'
@@ -331,6 +342,14 @@ function applySeed(): void {
 }
 
 watch(() => props.seedToken, () => {
+  if (!props.seed) {
+    if (!props.seedToken) return
+    values.value = {}
+    selectedId.value = ''
+    showMore.value = false
+    message.value = ''
+    return
+  }
   applySeed()
 }, { immediate: true })
 watch(() => props.userId, () => {
@@ -350,6 +369,8 @@ watch(() => props.userId, () => {
 watch(() => [valueOf('case_type'), valueOf('proc_type'), valueOf('country')].join('|'), (next, previous) => {
   if (!pickersReady.value || next === previous) return
   if (valueOf('ctrl_proc')) setValue('ctrl_proc', '')
+  const status = valueOf('case_status_id')
+  if (status && !choices('case_status_id').some(item => item.value === status)) setValue('case_status_id', '')
   window.clearTimeout(filterTimer)
   filterTimer = window.setTimeout(() => { void loadPickers(true) }, 400)
 })
@@ -405,7 +426,7 @@ watch(() => [valueOf('case_type'), valueOf('proc_type'), valueOf('country')].joi
             <label v-else-if="cell.kind === 'named'" class="query-cell">
               <span>{{ cell.label }}</span>
               <TreeOptionSelect v-if="treeChoices(cell.key).length" :model-value="valueOf(cell.key)" :options="treeChoices(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
-              <ThemeSelect v-else-if="choices(cell.key).length" :model-value="valueOf(cell.key)" :options="optionsFor(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
+              <ThemeSelect v-else-if="cell.key === 'case_status_id' || choices(cell.key).length" :model-value="valueOf(cell.key)" :options="optionsFor(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
               <input v-else :value="namedShown(cell.key)" type="text" @input="onText(cell.key, $event)" />
             </label>
             <label v-else-if="cell.kind === 'select'" class="query-cell">

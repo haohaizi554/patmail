@@ -55,6 +55,13 @@ watch(rules, (bundle) => {
 }, { immediate: true })
 watch(accountEpoch, () => { importText.value = '' })
 watch(ready, (ok) => { if (ok) { void loadReviewers(false); void loadSenders(false); void loadMailTypes(false); void loadSignatures(false) } }, { immediate: true })
+watch(() => connection.value.easyOrigin, (next, previous) => {
+  if (!previous || next === previous || !ready.value) return
+  void loadReviewers(true)
+  void loadSenders(true)
+  void loadMailTypes(true)
+  void loadSignatures(true)
+})
 
 async function loadReviewers(force: boolean): Promise<void> {
   if (!bridge || !ready.value) return

@@ -407,6 +407,7 @@ async function save(goAfter: boolean): Promise<void> {
       baseTemplateId: sameSurface ? (existing?.baseTemplateId || 'manual') : 'manual',
       overrides: sameSurface ? (existing?.overrides ?? {}) : {},
       ...(sameSurface && existing?.boundQuery ? { boundQuery: existing.boundQuery } : {}),
+      ...(sameSurface && existing?.fileDownloadName ? { fileDownloadName: existing.fileDownloadName } : {}),
       ...(sameSurface && surface.value === 'limit' && (workflow.value === 'pct-reminder' || workflow.value === 'pct-pengcheng') && existing?.pctTask && (existing.workflowId ?? 'pct-reminder') === workflow.value ? { pctTask: clonePctTask(existing.pctTask) } : {}),
       querySurface: surface.value,
       ...(surface.value === 'limit' && workflow.value ? { workflowId: workflow.value } : {}),
@@ -482,12 +483,18 @@ watch([workflow, ready], () => {
 watch(ready, (value) => {
   if (value) void loadCustomerList(false)
 }, { immediate: true })
-watch(() => connection.value.operatorId, () => {
+watch(() => `${connection.value.easyOrigin}\n${connection.value.operatorId}`, (next, previous) => {
+  if (!previous || next === previous) return
   customerCatalog.value = []
-  void loadCustomerList(false)
+  void loadCustomerList(true)
+  if (ready.value && workflow.value === 'pct-reminder') {
+    void loadMailTypes(true)
+    void loadMailSets(true)
+    void loadReviewers(true)
+  }
   if (!editingId.value && !name.value && !customerPick.value) return
   cancel()
-  formMessage.value = '登录的账号变了，没保存的内容已清掉。'
+  formMessage.value = '换了系统或账号，没保存的内容已清掉。'
 })
 </script>
 

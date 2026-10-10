@@ -242,6 +242,26 @@ watch(ready, (ok) => {
   void loadSignatures(false)
 }, { immediate: true })
 
+watch(() => connection.value.easyOrigin, (next, previous) => {
+  if (!previous || next === previous || !ready.value) return
+  mailTypes.value = []
+  fileHits.value = []
+  fileMessage.value = ''
+  picked.value = []
+  customerId.value = ''
+  mailTypeId.value = ''
+  draftTo.value = ''
+  draftCc.value = ''
+  draftSubject.value = ''
+  draftBody.value = ''
+  fillNotes.value = []
+  preview.value = null
+  detail.value = null
+  void loadMailTypes()
+  void loadSenders(true)
+  void loadSignatures(true)
+})
+
 watch(signatureDefaultKey, (key) => {
   if (signatureTouched.value) return
   signatureId.value = key

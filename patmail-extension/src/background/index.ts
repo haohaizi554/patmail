@@ -4,14 +4,14 @@ import { IndexedEvidenceStore, MemoryEvidenceStore } from '../automation/evidenc
 import { handleAuthorityMessage } from './authority'
 import { deliverAgentAnswer, handleAgentChat } from './agent'
 import { scopeExtensionPageMessage } from './scope'
-import { EasyConnectionController, sameConnectionSnapshot, type ConnectionSnapshot } from '../shared/connection'
+import { EasyConnectionController, sameConnectionSnapshot, tabOrigin, type ConnectionSnapshot } from '../shared/connection'
 import { handleWorkspaceMessage, openWorkspaceTab, recheckBoundSession, resumeEasySession, type WorkspaceHost } from './workspace'
 import { isRecord } from '../shared/guards'
 import { prepareForwardedSearch } from '../api/message-guards'
 import { isMessage, MessageType, type AppMessage, type BackgroundResponse } from '../shared/message'
 import { prepareApiDocs } from '../agent/rag-store'
 import { hydrateWriteSwitch, watchWriteSwitch } from '../settings/write-switch'
-import { customerMode, hydrateCustomerMode, modeOrigin, originMatchesMode } from '../settings/customer-mode'
+import { customerMode, hydrateCustomerMode, modeOrigin, originMatchesMode, watchCustomerMode } from '../settings/customer-mode'
 
 watchWriteSwitch()
 // 扩展 Service Worker 不能用顶层 await，否则 Chrome 直接拒绝启动，工具栏点击没有监听。
@@ -80,6 +80,12 @@ const host: WorkspaceHost = {
   persist: persistConnection
 }
 
+function alignToMode(): void {
+  connection.retarget(modeOrigin(customerMode()))
+  const tabId = connection.context.easyTabId
+  if (tabId != null && !originMatchesMode(connection.context.easyOrigin)) connection.detach(tabId)
+}
+
 function warmEasySession(): Promise<void> {
   if (warming) return warming
   if (connection.context.sessionStatus === 'authenticated' && Date.now() - warmedAt < 1500) return Promise.resolve()
@@ -96,11 +102,7 @@ const connectionReady = (async () => {
     await hydrateCustomerMode()
     const stored = await chrome.storage.local.get(CONNECTION_SNAPSHOT)
     connection.restoreCandidate(stored[CONNECTION_SNAPSHOT])
-    connection.retarget(modeOrigin(customerMode()))
-    const restoredTab = connection.context.easyTabId
-    if (restoredTab != null && !originMatchesMode(connection.context.easyOrigin)) {
-      connection.detach(restoredTab)
-    }
+    alignToMode()
     persistedSnapshot = connection.snapshot()
   } catch { /* 没有存过连接 */ }
   await warmEasySession()
@@ -134,6 +136,15 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (connection.context.easyTabId === tabId && connection.context.sessionStatus === 'pending') {
     scheduleSessionRead(tabId)
   }
+  const opened = tabOrigin(info.url ?? tab.url)
+  if (opened && originMatchesMode(opened) && connection.context.sessionStatus !== 'authenticated') {
+    void warmEasySession()
+  }
+})
+watchCustomerMode(() => {
+  alignToMode()
+  persistConnection()
+  void warmEasySession()
 })
 chrome.action.onClicked.addListener(() => { void host.openApp() })
 
@@ -232,7 +243,8 @@ if (chrome.alarms) {
   chrome.alarms.onAlarm.addListener(alarm => {
     if (alarm.name !== 'patmail-keepalive') return
     beat()
-    if (connection.context.sessionStatus !== 'authenticated') void warmEasySession()
+    if (connection.context.sessionStatus === 'authenticated') void recheckBoundSession(host).finally(() => persistConnection())
+    else void warmEasySession()
   })
   const created = chrome.alarms.create('patmail-keepalive', { periodInMinutes: 0.5 })
   void Promise.resolve(created).catch(() => {

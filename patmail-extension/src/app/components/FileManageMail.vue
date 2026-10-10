@@ -7,6 +7,7 @@ import { coerceFileSearchQuery } from '../../api/message-guards'
 import type { PatentFile } from '../../api/file-search-types'
 import type { MailSender } from '../../customer/mailset'
 import { customerMailStyleLabel, summarizeBoundQuery } from '../../customer/mail-flow'
+import { downloadNameText, type FileDownloadSelection } from '../../mail/download-name'
 import { FILE_MANAGE_BATCH, planFileManageLetters, senderAddress, type FileManageFile, type FileManageLetterPlan } from '../../customer/file-manage-plan'
 import { fileManageRunStatus } from '../../customer/file-manage-runs'
 import { fileIdsOf, fileManageSubmitShouldHalt, runFileManageSubmit, type FileManageSubmitItem } from '../../customer/file-manage-submit'
@@ -86,6 +87,21 @@ function asFile(file: PatentFile): FileManageFile {
   }
 }
 
+async function renameForMail(files: FileManageFile[], selection: FileDownloadSelection | undefined): Promise<{ ok: true; files: FileManageFile[] } | { ok: false; message: string }> {
+  if (!selection) return { ok: true, files }
+  if (!bridge) return { ok: false, message: '没有连上页面，下载名称没有套上，没有继续发文。' }
+  const response = await bridge.request({
+    type: MessageType.ResolveDownloadNames,
+    payload: { fileIds: files.map(file => file.fileId), selection }
+  })
+  if (response.type === MessageType.Error) return { ok: false, message: response.payload.message }
+  if (response.type !== MessageType.ResolveDownloadNamesResult) return { ok: false, message: '下载名称没有返回，没有按原文件名发文。' }
+  if (!response.payload.ok) return { ok: false, message: response.payload.error.message }
+  const names = response.payload.data.names
+  if (names.length !== files.length) return { ok: false, message: '生成的文件名数量和文件对不上，没有按原文件名发文。' }
+  return { ok: true, files: files.map((file, index) => ({ ...file, fileName: names[index] ?? file.fileName })) }
+}
+
 function rebuild(files: FileManageFile[]): void {
   const profile = customer.value
   if (!profile) return
@@ -160,7 +176,13 @@ async function search(): Promise<void> {
       notice.value = '按绑定条件没有查到文件。'
       return
     }
-    rebuild(files)
+    const named = await renameForMail(files, profile.fileDownloadName)
+    if (!named.ok) {
+      notice.value = named.message
+      return
+    }
+    rebuild(named.files)
+    if (profile.fileDownloadName) notes.value = [`文件名已按「${downloadNameText(profile.fileDownloadName)}」生成。`, ...notes.value]
     if (total > files.length) notes.value = [`查询共 ${total} 个文件，这次先取前 ${files.length} 个。`, ...notes.value]
     notice.value = `查到 ${files.length} 个文件，收成 ${letters.value.length} 封。`
   } finally {
@@ -315,6 +337,7 @@ function fileNames(letter: FileManageLetterPlan): string {
       </div>
       <template v-if="customer">
         <p class="hint">查询条件：{{ summarizeBoundQuery(customer.boundQuery) }}</p>
+        <p v-if="customer.fileDownloadName" class="hint">发文文件名：{{ downloadNameText(customer.fileDownloadName) }}。查询仍用原来的条件，文件名在发文前按这个下载名称生成。</p>
         <p class="hint">发文方式：{{ styleLabel }}。收件人是案件联系人。抄送是默认发件人{{ pickedSender ? `（${pickedSender.label}）` : '' }}，同时抄送商务。审核人是{{ reviewer ? reviewer.name : '还没设' }}。签名是{{ signatureChoice ? signatureChoice.name : '还没设' }}。</p>
         <p v-if="!pickedSender" class="hint">还没有默认发件人。到发文映射里设一个。</p>
         <p v-if="!reviewer" class="hint">还没有默认审核人。到发文映射里设一个。</p>

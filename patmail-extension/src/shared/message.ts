@@ -3,6 +3,7 @@ import { isPageInfo, isPageSnapshot, isRecord } from './guards'
 import { isEasyOrigin } from '../api/config'
 import { isCustomerMode, type CustomerMode } from '../settings/customer-mode'
 import { isCustomerProfile } from '../customer/guards'
+import { isFileDownloadSelection, type FileDownloadSelection } from '../mail/download-name'
 import type { CustomerQueryProfile } from '../customer/types'
 import type { MailRuleBundle } from '../mail/types'
 import { isQueryGuid, isQueryTemplate } from '../query/query-validator'
@@ -59,6 +60,8 @@ export const MessageType = {
   SubmitLimitMailResult: 'SUBMIT_LIMIT_MAIL_RESULT',
   SubmitFileManage: 'SUBMIT_FILE_MANAGE',
   SubmitFileManageResult: 'SUBMIT_FILE_MANAGE_RESULT',
+  ResolveDownloadNames: 'RESOLVE_DOWNLOAD_NAMES',
+  ResolveDownloadNamesResult: 'RESOLVE_DOWNLOAD_NAMES_RESULT',
   ExportCaseContacts: 'EXPORT_CASE_CONTACTS',
   ExportCaseContactsResult: 'EXPORT_CASE_CONTACTS_RESULT',
   ListMailProcesses: 'LIST_MAIL_PROCESSES',
@@ -153,6 +156,7 @@ export type ContentRequest =
   | Response<'SEARCH_LIMIT_MONITOR', { query: LimitMonitorQuery }>
   | Response<'SUBMIT_LIMIT_MAIL', { userId: string; items: Array<{ procId: string; procIds?: string[]; mailTypeId: string; mailStyle: '1'; mailId?: string; mode: 'ipr' | 'lead'; inventor?: boolean; customerName: string; contactName: string; iprName: string; leadName: string }> }>
   | Response<'SUBMIT_FILE_MANAGE', { userId: string; items: Array<{ fileId: string; fileIds: string[]; fileNames: string[]; mailTypeId: string; mailStyle: '1'; mailId?: string; recall?: boolean; subject: string; senderId: string; senderName: string; senderEmail: string; reviewerId: string; reviewerName: string; signature: string }> }>
+  | Response<'RESOLVE_DOWNLOAD_NAMES', { fileIds: string[]; selection: FileDownloadSelection }>
   | Response<'EXPORT_CASE_CONTACTS', { volumes: string[] }>
   | Response<'LIST_MAIL_PROCESSES', { query: ProcessListQuery }>
   | Response<'OPEN_EASY_FORM', { target: ProcessOpenTarget }>
@@ -324,6 +328,7 @@ export type ContentResponse =
   | Response<'SEARCH_LIMIT_MONITOR_RESULT', ApiResult<LimitMonitorResult>>
   | Response<'SUBMIT_LIMIT_MAIL_RESULT', { stopped: boolean; results: Array<{ procId: string; mailId: string; state: 'submitted' | 'created' | 'unknown' | 'failed'; message: string }> }>
   | Response<'SUBMIT_FILE_MANAGE_RESULT', { stopped: boolean; results: Array<{ fileId: string; mailId: string; state: 'submitted' | 'created' | 'unknown' | 'failed'; message: string }> }>
+  | Response<'RESOLVE_DOWNLOAD_NAMES_RESULT', ApiResult<{ names: string[] }>>
   | Response<'EXPORT_CASE_CONTACTS_RESULT', ApiResult<CaseContactExport>>
   | Response<'LIST_MAIL_PROCESSES_RESULT', ApiResult<ProcessListResult>>
   | Response<'OPEN_EASY_FORM_RESULT', { ok: boolean; message: string }>
@@ -374,6 +379,21 @@ function isCaseDemandAsset(value: unknown): value is CaseDemandAsset {
     typeof row.demandType === 'string' && row.demandType.length <= 20_000 &&
     typeof row.title === 'string' && row.title.length <= 20_000 &&
     typeof row.description === 'string' && row.description.length <= 20_000)
+}
+
+function isDownloadNameRequest(value: unknown): value is { fileIds: string[]; selection: FileDownloadSelection } {
+  if (!isRecord(value) || Object.keys(value).length !== 2) return false
+  const ids = value.fileIds
+  return Array.isArray(ids) && ids.length > 0 && ids.length <= 300 && ids.every(id => typeof id === 'string' && isQueryGuid(id)) &&
+    isFileDownloadSelection(value.selection)
+}
+
+function isDownloadNameResult(value: unknown): value is ApiResult<{ names: string[] }> {
+  if (!isRecord(value)) return false
+  if (value.ok === false) return isRecord(value.error) && typeof value.error.code === 'string' && typeof value.error.message === 'string'
+  if (value.ok !== true || !isRecord(value.data) || Object.keys(value.data).length !== 1 || !Array.isArray(value.data.names)) return false
+  const names = value.data.names
+  return names.length <= 300 && names.every(name => typeof name === 'string' && name.trim().length > 0 && name.length <= 180 && !name.includes(';'))
 }
 
 function isCaseBusFlowResult(value: unknown): value is ApiResult<{ gate: 'open' | 'pending' | 'done' }> {
@@ -699,6 +719,10 @@ export function isMessage(value: unknown): value is AppMessage {
       return isFileManageSubmitRequest(value.payload)
     case MessageType.SubmitFileManageResult:
       return isFileManageSubmitResponse(value.payload)
+    case MessageType.ResolveDownloadNames:
+      return isDownloadNameRequest(value.payload)
+    case MessageType.ResolveDownloadNamesResult:
+      return isDownloadNameResult(value.payload)
     case MessageType.ExportCaseContacts:
       return isRecord(value.payload) && isVolumeList(value.payload.volumes) && Object.keys(value.payload).length === 1
     case MessageType.ListMailProcesses:
@@ -847,6 +871,7 @@ export function isContentRequest(value: unknown): value is ContentRequest {
     value.type === MessageType.SearchLimitMonitor || value.type === MessageType.ListMailProcesses ||
     value.type === MessageType.SubmitLimitMail ||
     value.type === MessageType.SubmitFileManage ||
+    value.type === MessageType.ResolveDownloadNames ||
     value.type === MessageType.ExportCaseContacts ||
     value.type === MessageType.OpenEasyForm ||
     value.type === MessageType.ListFlowReviewers ||
@@ -871,7 +896,7 @@ export function isContentRequest(value: unknown): value is ContentRequest {
   )
 }
 
-const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'CANCEL_LIMIT_MONITOR', 'SEARCH_LIMIT_MONITOR', 'LOOKUP_IC_FLOW', 'EXPORT_CASE_CONTACTS', 'LIST_MAIL_PROCESSES', 'OPEN_EASY_FORM', 'LIST_FLOW_REVIEWERS', 'READ_CASE_DEMANDS', 'READ_CASE_BUS_FLOW', 'READ_CUSTOMER_DEMANDS', 'READ_CUSTOMER_DIRECTORY', 'READ_MAIL_CONTACTS', 'READ_MAIL_ADDRESSES', 'GET_PAGE_INFO', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE', 'CALL_EASY', 'READ_CASE_FIELDS'])
+const PAGE_FORWARD = new Set(['CHECK_SESSION', 'CANCEL_SESSION_CHECK', 'SEARCH_FILES', 'CANCEL_FILE_SEARCH', 'CANCEL_LIMIT_MONITOR', 'SEARCH_LIMIT_MONITOR', 'LOOKUP_IC_FLOW', 'EXPORT_CASE_CONTACTS', 'LIST_MAIL_PROCESSES', 'OPEN_EASY_FORM', 'LIST_FLOW_REVIEWERS', 'READ_CASE_DEMANDS', 'READ_CASE_BUS_FLOW', 'READ_CUSTOMER_DEMANDS', 'READ_CUSTOMER_DIRECTORY', 'READ_MAIL_CONTACTS', 'READ_MAIL_ADDRESSES', 'GET_PAGE_INFO', 'LIST_HISTORY_QUERIES', 'GET_HISTORY_QUERY', 'LOAD_DICTIONARY', 'SCAN_FILE_SEARCH_FORM', 'FIND_MAIL_EXECUTION', 'INSPECT_EASY_MAIL', 'READ_WORKFLOW', 'REFRESH_WORKFLOW', 'PREVIEW_WORKFLOW', 'DIAGNOSE_EXISTING_MAIL', 'RUN_READONLY_ACCEPTANCE', 'CALL_EASY', 'READ_CASE_FIELDS', 'RESOLVE_DOWNLOAD_NAMES'])
 const WRITE_FORWARD = new Set(['CREATE_EASY_MAIL', 'SAVE_EASY_MAIL', 'SAVE_HISTORY_QUERY', 'DELETE_HISTORY_QUERY', 'SUBMIT_LIMIT_MAIL', 'SUBMIT_FILE_MANAGE'])
 
 /** 不允许转发时给出原因。写开关关掉时，创建、保存和查询模板写回都停在这里。 */

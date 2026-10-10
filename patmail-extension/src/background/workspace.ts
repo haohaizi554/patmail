@@ -457,10 +457,12 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
     }
   }
   if (action.action === 'forward') {
-    const lookupBurst = action.message.type === MessageType.LookupIcFlow
+    const readBurst = (action.message.type === MessageType.LookupIcFlow
+      || action.message.type === MessageType.SearchLimitMonitor
+      || action.message.type === MessageType.ReadCaseBusFlow)
       && host.connection.context.sessionStatus === 'authenticated'
       && host.connection.context.easyTabId != null
-    if (!lookupBurst && action.message.type !== MessageType.CheckSession && action.message.type !== MessageType.CancelSessionCheck) {
+    if (!readBurst && action.message.type !== MessageType.CheckSession && action.message.type !== MessageType.CancelSessionCheck) {
       const gate = await recheckBoundSession(host)
       if (gate !== 'same') {
         return workspaceResult({ ok: false, message: gate === 'changed' ? '会话已变化，请重新检测后再继续。' : (host.connection.context.message || '尚未确认 EASY 用户。'), connection: host.connection.context })

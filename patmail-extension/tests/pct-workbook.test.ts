@@ -226,6 +226,64 @@ describe('一件没查成不停下其余', () => {
     }
   })
 
+  it('8 个文号并成一次查询，我方文号结果里已经带上客户文号就不再补查', async () => {
+    const calls: string[] = []
+    const post = async (operation: 'icSearch' | 'caseBusFlow', params: URLSearchParams): Promise<ApiResult<unknown>> => {
+      if (operation === 'caseBusFlow') return { ok: true, data: { ProcInfo: [], Eflow: [] } }
+      calls.push(`${params.get('pageSize')}:${elementTag(params.get('Element') ?? '', 'case_volume')}`)
+      const volumes = elementTag(params.get('Element') ?? '', 'case_volume').split(';')
+      return {
+        ok: true,
+        data: {
+          TableRows: volumes.map((volume, index) => ({
+            case_id: `aaaaaaaa-1111-4111-8111-${String(index + 1).padStart(12, '0')}`,
+            case_volume: volume,
+            case_volume_customer: `CS-${index + 1}`
+          }))
+        }
+      }
+    }
+    const found = await lookupIcFlow(Array.from({ length: 8 }, (_, index) => ({
+      caseVolume: `PA${index + 1}`,
+      customerVolume: `CS-${index + 1}`,
+      procLabel: '提醒申请PCT'
+    })), post)
+    expect(found.ok).toBe(true)
+    expect(calls).toEqual(['50:PA1;PA2;PA3;PA4;PA5;PA6;PA7;PA8'])
+    if (found.ok) expect(found.data.items.every(item => item.found)).toBe(true)
+  })
+
+  it('我方文号查回来的行已经对上客户文号时，不再发第二次查询', async () => {
+    let searches = 0
+    const post = async (operation: 'icSearch' | 'caseBusFlow', params: URLSearchParams): Promise<ApiResult<unknown>> => {
+      if (operation === 'caseBusFlow') return { ok: true, data: { ProcInfo: [], Eflow: [] } }
+      searches += 1
+      const our = elementTag(params.get('Element') ?? '', 'case_volume')
+      expect(our).toBe('PA25111975CN')
+      return {
+        ok: true,
+        data: {
+          TableRows: [{
+            case_id: 'aaaaaaaa-1111-4111-8111-111111111111',
+            case_volume: 'PA25111975CND-YS-撤销驳回',
+            case_volume_customer: 'HC20251191'
+          }]
+        }
+      }
+    }
+    const found = await lookupIcFlow([{
+      caseVolume: 'PA25111975CN',
+      customerVolume: 'HC20251191',
+      procLabel: '提醒申请PCT'
+    }], post)
+    expect(searches).toBe(1)
+    expect(found.ok).toBe(true)
+    if (found.ok) {
+      expect(found.data.items[0]?.found).toBe(true)
+      expect(found.data.items[0]?.correctedOur).toBeUndefined()
+    }
+  })
+
   it('没有子流程且事项已完成时标不用发', async () => {
     const post = async (operation: 'icSearch' | 'caseBusFlow'): Promise<ApiResult<unknown>> => {
       if (operation === 'caseBusFlow') {

@@ -1,4 +1,5 @@
 import { fileSearchValueLimit, isFileSearchBusinessField, type FileSearchQuery } from '../api/file-search-params'
+import { isFileDownloadSelection, type FileDownloadSelection } from '../mail/download-name'
 import { isForbiddenFieldName, fieldLabel } from '../query/field-registry'
 import { PAGE_OPTIONS } from '../query/form-layout'
 import { PCT_CUSTOMER_VOLUME_TYPE_NAME, PCT_OUR_VOLUME_TYPE_NAME, resolvePctRuntime, type PctRuntimeConfig } from '../workflow/pct-config'
@@ -177,6 +178,8 @@ export function applyBoundQuery(profile: CustomerQueryProfile, input: {
   fields: Record<string, string>
   templateId?: string
   reviewSelf?: boolean
+  /** 只在文件查询绑定时读取。null 表示这次没有选下载名称，清掉上次的。 */
+  downloadName?: FileDownloadSelection | null
 }): CustomerQueryProfile {
   const boundQuery = querySnapshot(input.fields)
   const fileOverrides = Object.fromEntries(Object.entries(boundQuery).filter(([key]) => isFileSearchBusinessField(key)))
@@ -186,6 +189,10 @@ export function applyBoundQuery(profile: CustomerQueryProfile, input: {
     baseTemplateId: input.templateId?.trim() || profile.baseTemplateId || 'manual',
     boundQuery,
     overrides: input.surface === 'file' ? fileOverrides : {}
+  }
+  if (input.surface === 'file') {
+    if (input.downloadName && isFileDownloadSelection(input.downloadName)) next.fileDownloadName = input.downloadName
+    else delete next.fileDownloadName
   }
   if (input.reviewSelf) next.reviewTarget = 'self'
   else delete next.reviewTarget
@@ -303,13 +310,21 @@ function byExactName(nodes: Array<{ id: string; name: string }>, name: string): 
   return found.length === 1 ? { id: found[0].id, name: found[0].name.trim() } : null
 }
 
+/** 先用工作流里点名的名称。这棵树没有那一项时，退回固定全名。完整名称后面多出来的后缀，只有唯一一条才算。 */
+function namedMailType(nodes: Array<{ id: string; name: string }>, configured: string, fallback: string): PctMailTypeNode | null {
+  const primary = matchMailTypeByName(nodes, configured || fallback)
+  if (primary) return primary
+  if (!configured || configured === fallback) return null
+  return matchMailTypeByName(nodes, fallback)
+}
+
 /** 点名选定的优先。没选定，或这次名单里没有它，再按完整名称到下拉里找。对不上就留空。 */
 export function matchPctMailTypes(nodes: Array<{ id: string; name: string }>, config?: PctRuntimeConfig): PctMailTypeMatch {
   const runtime = resolvePctRuntime(config)
   return {
-    customerVolume: pickedType(nodes, runtime.customerTypeId) ?? byExactName(nodes, runtime.customerTypeName || PCT_CUSTOMER_VOLUME_TYPE_NAME),
+    customerVolume: pickedType(nodes, runtime.customerTypeId) ?? namedMailType(nodes, runtime.customerTypeName, PCT_CUSTOMER_VOLUME_TYPE_NAME),
     ourVolumeOtherCity: null,
-    ourVolumeShenzhen: pickedType(nodes, runtime.ourTypeId) ?? byExactName(nodes, runtime.ourTypeName || PCT_OUR_VOLUME_TYPE_NAME)
+    ourVolumeShenzhen: pickedType(nodes, runtime.ourTypeId) ?? namedMailType(nodes, runtime.ourTypeName, PCT_OUR_VOLUME_TYPE_NAME)
   }
 }
 

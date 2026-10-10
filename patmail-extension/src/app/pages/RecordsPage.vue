@@ -260,6 +260,20 @@ async function loadAll(): Promise<void> {
   loading.value = false
 }
 
+watch(() => connection.value.easyOrigin, (next, previous) => {
+  if (!previous || next === previous || !ready.value) return
+  viewEpoch += 1
+  slots.value = {}
+  totals.value = {}
+  catalogs.clear()
+  catalogEpoch.clear()
+  rows.value = []
+  total.value = 0
+  page.value = 1
+  query.value = ''
+  void loadAll()
+})
+
 watch(ready, (ok) => {
   if (!ok) {
     slots.value = {}

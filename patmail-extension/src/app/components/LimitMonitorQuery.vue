@@ -27,6 +27,8 @@ const props = defineProps<{
   recipientMode?: 'ipr' | 'lead'
   inventorCustomers?: string[]
   flowByKey?: Record<string, string>
+  /** 下面的核对已经在读同一批流程。上表不再为这 40 行另开一轮流程图。 */
+  flowChecking?: boolean
 }>()
 
 const { open: writesOpen, ready: writesReady } = useWriteSwitch()
@@ -529,7 +531,7 @@ async function searchProcGroups(groups: Array<{ id: string; volumes: string }>):
           : `期限里还没结束的一共 ${rows.value.length} 件。${missedNote}${clipNote}`)
       : (lastError || '这个条件下没有期限记录。')
     publish()
-    if (rows.value.length && rows.value.length <= 80) void markSendGates(rows.value)
+    if (!props.flowChecking && rows.value.length && rows.value.length <= 80) void markSendGates(rows.value)
   } catch (error) {
     if (token !== procSearchToken) return
     message.value = typeof error === 'string' ? error : '期限查询失败，请重试。'
@@ -541,6 +543,22 @@ async function searchProcGroups(groups: Array<{ id: string; volumes: string }>):
   }
 }
 
+function clearProcQuery(): void {
+  procSearchToken += 1
+  gateToken += 1
+  loading.value = false
+  rows.value = []
+  gates.value = {}
+  checkingGates.value = false
+  total.value = 0
+  pageIndex.value = 1
+  selected.value = []
+  confirmedIds.value = []
+  sheetMerged.value = false
+  message.value = ''
+  publish()
+}
+
 watch(() => props.seedToken, () => {
   const groups = (props.procQueries ?? []).filter(item => isQueryGuid(item.id) && splitCaseVolumes(item.volumes).length > 0)
   if (groups.length) {
@@ -548,7 +566,10 @@ watch(() => props.seedToken, () => {
     return
   }
   const seed = props.seed
-  if (!seed || !props.seedToken) return
+  if (!seed || !props.seedToken) {
+    if (props.seedToken) clearProcQuery()
+    return
+  }
   const volume = props.caseVolume || seed.case_volume || ''
   const ctrl = seed.ctrl_proc ?? ''
   const fields = { ...seed }
@@ -577,7 +598,7 @@ watch(() => props.seedToken, () => {
     :plain-proc-ids="plainProcIds"
     :flow-by-proc="flowByProc"
     :gates="gates"
-    :checking="checkingGates"
+    :checking="checkingGates || Boolean(flowChecking)"
     :total="sheetMerged ? rows.length : total"
     :loading="loading"
     :message="message"

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, provide, ref } from 'vue'
 import { customerMode, hydrateCustomerMode, setCustomerMode, watchCustomerMode, type CustomerMode } from '../settings/customer-mode'
+import { resetTaskCheckProgress } from './check-progress'
+import { progressDialog } from './dialog'
 import { createFullPageBridge } from './services/full-page-bridge'
 import { useWorkspace } from './composables/useWorkspace'
 import { useAccountAvatar } from '../settings/use-account-avatar'
@@ -74,6 +76,8 @@ async function onMode(next: string): Promise<void> {
   if ((next !== 'large' && next !== 'sme') || next === mode.value || modeBusy.value) return
   modeBusy.value = true
   mode.value = next
+  resetTaskCheckProgress()
+  progressDialog.open = false
   try {
     await setCustomerMode(next)
     await workspace.call({ action: 'setCustomerMode', mode: next })
@@ -96,8 +100,10 @@ function onHash(): void {
 }
 onMounted(() => {
   window.addEventListener('hashchange', onHash)
-  void hydrateCustomerMode().then(() => { mode.value = customerMode() })
-  void workspace.call({ action: 'load' })
+  void hydrateCustomerMode().then(() => {
+    mode.value = customerMode()
+    void workspace.call({ action: 'load' })
+  })
 })
 onUnmounted(() => window.removeEventListener('hashchange', onHash))
 </script>

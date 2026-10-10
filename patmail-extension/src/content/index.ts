@@ -151,6 +151,13 @@ const bridge: MessageBridge = {
       case MessageType.SubmitFileManage:
         return { type: MessageType.SubmitFileManageResult,
           payload: await easyRuntime.submitFileManageMails(message.payload.items) }
+      case MessageType.ResolveDownloadNames: {
+        const named = await easyRuntime.resolveDownloadNames(message.payload.fileIds, message.payload.selection)
+        return {
+          type: MessageType.ResolveDownloadNamesResult,
+          payload: named.ok ? { ok: true, data: { names: named.data } } : named
+        }
+      }
       case MessageType.ExportCaseContacts:
         return { type: MessageType.ExportCaseContactsResult,
           payload: await easyRuntime.exportCaseContacts(message.payload.volumes) }

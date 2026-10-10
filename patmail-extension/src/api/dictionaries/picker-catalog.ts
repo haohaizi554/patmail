@@ -1,5 +1,5 @@
 import {
-  adaptBussType, adaptDictionaryValue, adaptNodeTree
+  adaptBussType, adaptDictionaryValue, adaptFileTemp, adaptNodeTree
 } from './adapters'
 import type { DictionaryOption, NormalizedDictionary } from './types'
 
@@ -97,6 +97,21 @@ function withCaseType(dictionary: NormalizedDictionary, raw: unknown): Normalize
   }
 }
 
+/** 同一案件类型里按源站 seq 排，同名只留第一条。 */
+function caseStatusChoices(options: DictionaryOption[]): TreeOptionChoice[] {
+  const sorted = options
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => (left.item.order ?? Number.MAX_SAFE_INTEGER) - (right.item.order ?? Number.MAX_SAFE_INTEGER) || left.index - right.index)
+  const seen = new Set<string>()
+  const choices: TreeOptionChoice[] = []
+  for (const { item } of sorted) {
+    if (seen.has(item.label)) continue
+    seen.add(item.label)
+    choices.push({ value: item.value, label: item.label })
+  }
+  return choices
+}
+
 /** 期限页只把案件状态（ALL / CASE）放进案件状态下拉。 */
 function caseStatusRows(raw: unknown): unknown {
   if (!Array.isArray(raw)) return raw
@@ -129,7 +144,7 @@ export function buildPickerCatalog(sources: Record<string, unknown>): { dictiona
     dept: adaptNodeTree('dept', arrayOf(sources.dept, 'DeptTree')),
     user: adaptNodeTree('user', arrayOf(sources.user, 'TreeUser')),
     agent: adaptNodeTree('agent', arrayOf(sources.agent, 'TreeUser')),
-    fileTemp: adaptNodeTree('fileTemp', arrayOf(sources.fileTemp, 'TempNameList')),
+    fileTemp: adaptFileTemp(arrayOf(sources.fileTemp, 'TempNameList')),
     branch: adaptNodeTree('branch', arrayOf(sources.branch, 'BranchList')),
     applyTags: adaptNodeTree('applyTags', arrayOf(sources.applyTags, 'ApplyTags')),
     limitCountry: adaptDictionaryValue('limitCountry', arrayOf(sources.limitInit, 'CountryInfo')),
@@ -176,9 +191,10 @@ export function describePickerReceipt(dictionaries: Record<string, NormalizedDic
 export function choicesFromDictionary(dictionary: NormalizedDictionary | undefined, caseTypeId = '', countryIds = ''): TreeOptionChoice[] {
   if (!dictionary) return []
   let options: DictionaryOption[] = dictionary.options.filter(item => !item.disabled)
-  // 期限页的案件状态按案件类型各有一套编号。原网站只放当前类型，没选类型时不列，避免「未递交」按类型重复出现。
+  // 源站只渲染当前案件类型。把专利、商标、版权的同名状态叠在一起，就会出现两个「未递交」。
   if (dictionary.key === 'limitCaseStatus') {
-    options = caseTypeId ? options.filter(item => item.metadata?.caseTypeId === caseTypeId) : []
+    if (!caseTypeId) return []
+    return caseStatusChoices(options.filter(item => item.metadata?.caseTypeId === caseTypeId))
   } else if (caseTypeId && options.some(item => item.metadata?.caseTypeId)) {
     const matched = options.filter(item => item.metadata?.caseTypeId === caseTypeId)
     if (matched.length) options = matched

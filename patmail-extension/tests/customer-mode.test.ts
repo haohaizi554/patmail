@@ -6,6 +6,7 @@ import { SerialTaskStore } from '../src/automation/indexed-store'
 import type { LocalArea } from '../src/background/account-data'
 import { EasyConnectionController } from '../src/shared/connection'
 import { isMessage, MessageType } from '../src/shared/message'
+import { expectedWorkspaceOrigin } from '../src/app/composables/useWorkspace'
 import { customerMode, modeOrigin, originMatchesMode, originsForMode, setCustomerMode } from '../src/settings/customer-mode'
 
 const large = 'http://183.36.43.66:88'
@@ -39,6 +40,12 @@ describe('客户系统切换', () => {
     expect(originsForMode('sme')).toEqual([sme])
     expect(originsForMode('large')).toContain(large)
     expect(originMatchesMode(sme, 'large')).toBe(false)
+    expect(expectedWorkspaceOrigin({
+      switchesSystem: false, sessionStatus: 'disconnected', easyOrigin: large, modeOrigin: sme
+    })).toBe(sme)
+    expect(expectedWorkspaceOrigin({
+      switchesSystem: false, sessionStatus: 'authenticated', easyOrigin: sme, modeOrigin: sme
+    })).toBe(sme)
     expect(isMessage({ type: MessageType.Workspace, payload: { action: 'setCustomerMode', mode: 'sme' } })).toBe(true)
     expect(isMessage({ type: MessageType.Workspace, payload: { action: 'setCustomerMode', mode: 'vip' } })).toBe(false)
   })

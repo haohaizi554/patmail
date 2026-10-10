@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onActivated, onMounted, ref } from 'vue'
+import { computed, inject, onActivated, onMounted, ref, watch } from 'vue'
 import LimitPage from '../../shell/pages/LimitPage.vue'
 import LimitQuerySection from '../../floating/LimitQuerySection.vue'
 import BindQueryBar from '../components/BindQueryBar.vue'
@@ -369,6 +369,24 @@ async function resumeQuery(): Promise<void> {
   seedQuery(splitCaseVolumes(caseVolume), ctrl)
   await search({ type: 'all', caseVolume, ctrlProcId: ctrl, fields: { case_volume: caseVolume, ctrl_proc: ctrl } })
 }
+
+watch(() => connection.value.easyOrigin, (next, previous) => {
+  if (!previous || next === previous) return
+  gateToken += 1
+  rows.value = []
+  gates.value = {}
+  checkingGates.value = false
+  selected.value = []
+  confirmedIds.value = []
+  message.value = ''
+  total.value = 0
+  loading.value = false
+  sheetMerged.value = false
+  submittedFields.value = {}
+  draftFields.value = {}
+  seed.value = null
+  seedToken.value += 1
+})
 
 onMounted(() => { void resumeQuery() })
 onActivated(() => { void resumeQuery() })

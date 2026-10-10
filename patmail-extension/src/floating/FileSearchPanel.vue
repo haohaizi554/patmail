@@ -9,6 +9,7 @@ import FileSearchQuery from '../app/components/FileSearchQuery.vue'
 import ThemeSelect from '../shell/components/ThemeSelect.vue'
 import EmptyGuide from '../app/components/EmptyGuide.vue'
 import { MessageType, type MessageBridge } from '../shared/message'
+import type { FileDownloadSelection } from '../mail/download-name'
 import { useWorkspace } from '../app/composables/useWorkspace'
 
 const props = withDefaults(defineProps<{
@@ -17,7 +18,10 @@ const props = withDefaults(defineProps<{
   seed?: Record<string, string> | null
   seedToken?: number
 }>(), { showSession: true, seed: null, seedToken: 0 })
-const emit = defineEmits<{ searched: [query: FileSearchRequest] }>()
+const emit = defineEmits<{
+  searched: [query: FileSearchRequest]
+  'download-name': [selection: FileDownloadSelection | null]
+}>()
 const bridge = inject<MessageBridge>('bridge')
 const workspace = useWorkspace()
 const accountOrigin = computed(() => props.pageOrigin || location.origin)
@@ -126,7 +130,7 @@ async function loadBindCustomers(): Promise<void> {
   bindCustomers.value = payload.customers.map(item => ({ id: item.id, name: item.name }))
 }
 
-watch(() => workspace.connection.value.operatorId, (next, previous) => {
+watch(() => `${workspace.connection.value.easyOrigin}\n${workspace.connection.value.operatorId}`, (next, previous) => {
   if (!previous || next === previous) return
   selected.value = {}
   bindProfileId.value = ''
@@ -160,6 +164,7 @@ onBeforeUnmount(() => {
       :seed-token="seedToken"
       :epoch="epoch"
       @searched="emit('searched', $event)"
+      @download-name="emit('download-name', $event)"
       @plan="showMail = true"
       @review="showSelected = !showSelected"
     >

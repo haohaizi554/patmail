@@ -4,6 +4,7 @@ import PageHead from '../../shell/components/PageHead.vue'
 import { bg } from '../../shell/assets'
 import type { FileSearchQuery } from '../../api/file-search-params'
 import { snapshotFromFileQuery } from '../../customer/mail-flow'
+import type { FileDownloadSelection } from '../../mail/download-name'
 import FileSearchPanel from '../../floating/FileSearchPanel.vue'
 import BindQueryBar from '../components/BindQueryBar.vue'
 import { useWorkspace } from '../composables/useWorkspace'
@@ -11,6 +12,7 @@ import { useWorkspace } from '../composables/useWorkspace'
 const { connection } = useWorkspace()
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
 const fields = ref<Record<string, string>>({})
+const downloadName = ref<FileDownloadSelection | null>(null)
 
 function onSearched(query: FileSearchQuery): void {
   fields.value = snapshotFromFileQuery(query)
@@ -25,8 +27,8 @@ function onSearched(query: FileSearchQuery): void {
   </section>
   <template v-else>
     <p class="hint">先套模板，再手工改条件。文件描述和发文类型是一对一，对照表在「发文映射」，可以直接看，也可以随时改。</p>
-    <FileSearchPanel :page-origin="connection.easyOrigin" :show-session="false" @searched="onSearched">
-      <BindQueryBar surface="file" :fields="fields" />
+    <FileSearchPanel :page-origin="connection.easyOrigin" :show-session="false" @searched="onSearched" @download-name="downloadName = $event">
+      <BindQueryBar surface="file" :fields="fields" :download-name="downloadName" />
     </FileSearchPanel>
   </template>
 </template>

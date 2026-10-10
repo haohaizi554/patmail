@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { emptyConnection, sameConnectionSnapshot, type ConnectionSnapshot, type EasyConnectionContext, type EasyTabCandidate } from '../../shared/connection'
+import { customerMode, modeOrigin } from '../../settings/customer-mode'
 import { MessageType, type WorkspaceAction, type WorkspaceResultPayload } from '../../shared/message'
 import { sendToBackground } from '../../utils/runtime'
 
@@ -35,6 +36,13 @@ export interface WorkspaceCommitCheck {
   latestMutationId?: number
   expectedEpoch?: number
   connectionEpoch?: number
+}
+
+/** 还没连上时，期待的是当前客户模式的站点，不是空连接里默认的大客户地址。 */
+export function expectedWorkspaceOrigin(input: { switchesSystem: boolean; sessionStatus: string; easyOrigin: string; modeOrigin: string }): string {
+  if (input.switchesSystem) return ''
+  if (input.sessionStatus === 'authenticated') return input.easyOrigin
+  return input.modeOrigin
 }
 
 /** 过期请求不能提交。同账号的保存回执不会被后面的只读刷新丢掉。换账号后旧请求失效。 */
@@ -134,7 +142,12 @@ export function useWorkspace() {
     const kind = mutations.has(action.action) ? 'mutation' : action.action === 'bind' || action.action === 'refreshSession' ? 'account' : 'read'
     const epoch = connectionEpoch
     const requestId = kind === 'mutation' ? ++mutationSerial : ++requestSerial
-    const expectedOrigin = switchesSystem ? '' : connection.value.easyOrigin
+    const expectedOrigin = expectedWorkspaceOrigin({
+      switchesSystem,
+      sessionStatus: connection.value.sessionStatus,
+      easyOrigin: connection.value.easyOrigin,
+      modeOrigin: modeOrigin(customerMode())
+    })
     inflight += 1
     try {
       const response = await sendToBackground({ type: MessageType.Workspace, payload: action }, 30_000)

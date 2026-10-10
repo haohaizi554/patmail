@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { isCustomerProfile } from '../src/customer/guards'
 import { applyBoundQuery, mailStylesFor, matchPctMailTypes, pctMailTypeFor, pctVolumeSlot, querySnapshot, summarizeBoundQuery } from '../src/customer/mail-flow'
+import { resolvePctRuntime } from '../src/workflow/pct-config'
 import type { CustomerQueryProfile } from '../src/customer/types'
 
 function profile(extra: Partial<CustomerQueryProfile> = {}): CustomerQueryProfile {
@@ -30,6 +31,27 @@ describe('PCT 提醒文号', () => {
 
   it('只有我方文号时对上热加载的我方案号深圳市', () => {
     expect(pctMailTypeFor({ customerVolume: '  ', ourVolume: 'PA2518728CND' }, mailTypes)?.id).toBe('93f289c5-f3c5-4f6d-a90b-50ac1fb8d092')
+  })
+
+  it('固定全名后面只有一条更长的名称时仍对上，两条就不猜', () => {
+    expect(matchPctMailTypes([
+      { id: '71d067a3-d1a3-4d4b-87f9-38ea9d96bf70', name: '提醒申请PCT（贵方案号）-深圳市-中小' }
+    ]).customerVolume?.id).toBe('71d067a3-d1a3-4d4b-87f9-38ea9d96bf70')
+    expect(matchPctMailTypes([
+      { id: '71d067a3-d1a3-4d4b-87f9-38ea9d96bf70', name: '提醒申请PCT（贵方案号）-深圳市-甲' },
+      { id: '82e178b4-e2b4-4e5c-98fa-49fb0ea7cf81', name: '提醒申请PCT（贵方案号）-深圳市-乙' }
+    ]).customerVolume).toBeNull()
+  })
+
+  it('点过的名称这棵树没有时，退回固定全名', () => {
+    expect(matchPctMailTypes(mailTypes, resolvePctRuntime({
+      customerTypeId: '11111111-1111-1111-1111-111111111111',
+      customerTypeName: '另一套系统才有的类型'
+    })).customerVolume?.name).toBe('提醒申请PCT（贵方案号）-深圳市')
+    expect(matchPctMailTypes([
+      { id: '71d067a3-d1a3-4d4b-87f9-38ea9d96bf70', name: '另一套系统才有的类型' },
+      ...mailTypes
+    ], resolvePctRuntime({ customerTypeName: '另一套系统才有的类型' })).customerVolume?.id).toBe('71d067a3-d1a3-4d4b-87f9-38ea9d96bf70')
   })
 
   it('树还没读到时不写死名称，名字只是包含那几个词时也不对', () => {
@@ -75,6 +97,17 @@ describe('绑定最后提交的字段', () => {
     })
     expect(next.overrides).toEqual({ case_volume: 'PA1' })
     expect(next.boundQuery).toEqual({ case_volume: 'PA1', not_a_field: 'x' })
+  })
+
+  it('文件查询绑定下载名称，再次绑定没选时清掉', () => {
+    const downloadName = { templateId: 'd9896997-1e83-4c7d-9a49-da69ba56e7aa', newFilename: 'case_volume', fileNameType: 'colname', label: '微众官文' }
+    const bound = applyBoundQuery(profile(), { surface: 'file', fields: { case_volume: 'PA1' }, downloadName })
+    expect(bound.fileDownloadName).toEqual(downloadName)
+    expect(bound.boundQuery).toEqual({ case_volume: 'PA1' })
+    expect(isCustomerProfile(bound)).toBe(true)
+    const cleared = applyBoundQuery(bound, { surface: 'file', fields: { case_volume: 'PA1' }, downloadName: null })
+    expect(cleared.fileDownloadName).toBeUndefined()
+    expect(isCustomerProfile(profile({ fileDownloadName: { label: '只有标签' } }))).toBe(false)
   })
 
   it('拒绝不认识的发文模式', () => {

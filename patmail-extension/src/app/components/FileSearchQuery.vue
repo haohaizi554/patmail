@@ -8,6 +8,7 @@ import { selectPage, toSelectedFile, toggleSelected, type SelectedPatentFile } f
 import QueryTemplateSection from '../../floating/QueryTemplateSection.vue'
 import ThemeSelect from '../../shell/components/ThemeSelect.vue'
 import { MessageType, type MessageBridge } from '../../shared/message'
+import type { FileDownloadSelection } from '../../mail/download-name'
 
 const props = withDefaults(defineProps<{
   userId: string
@@ -23,6 +24,7 @@ const selected = defineModel<Record<string, SelectedPatentFile>>('selected', { d
 
 const emit = defineEmits<{
   searched: [query: FileSearchQuery]
+  'download-name': [selection: FileDownloadSelection | null]
   plan: []
   review: []
 }>()
@@ -224,6 +226,7 @@ onBeforeUnmount(() => {
       :seed="seed"
       :seed-token="seedToken"
       @search="executeSearch"
+      @download-name="emit('download-name', $event)"
     />
     <slot />
     <section ref="resultsSection" class="card file-results" aria-label="查询结果">

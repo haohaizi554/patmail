@@ -11,7 +11,7 @@ import { IC_LOOKUP_WIDTH } from '../../customer/ic-flow-lookup'
 import { MAILED_UNFINISHED_REVIEW, SKIP_SEND_REVIEW, type IcFlowHit } from '../../customer/pct-flow-status'
 import { paintTaskCheckProgress, resetTaskCheckProgress } from '../check-progress'
 import { applyArbitrationReply, checkedSourceSheets, iprArbitrationWaves, isPctWorkbookSheet, missedSourceSheets, pctRowsFromWorkbook, type ArbitrationDecision } from '../../customer/pct-workbook'
-import { applyPctMailTypes, buildPctTask, clonePctTask, matchSheetCtrlProcs, procGapNotes, readWorkflowTask, summarizePctTask, volumesOf, writeWorkflowTask } from '../../customer/pct-sheet'
+import { applyPctMailTypes, buildPctTask, clonePctTask, matchSheetCtrlProcs, PCT_WORKFLOW_TASK_KEY, procGapNotes, readWorkflowTask, summarizePctTask, volumesOf, writeWorkflowTask } from '../../customer/pct-sheet'
 import type { CustomerQueryProfile, PctTaskRow } from '../../customer/types'
 import { groupWorkflowRows } from '../../customer/workflow-mail'
 import { arbitratedMark, carriedMark, sheetDisplayName, sheetRecipientNames, usesInventorSheet } from '../../customer/pct-recipients'
@@ -298,6 +298,17 @@ async function onSheet(event: Event): Promise<void> {
   }
 }
 
+watch(() => [props.mailTypes, runtime.value] as const, () => {
+  if (!rows.value.length || !props.mailTypes.length || !rows.value.some(row => !row.mailTypeId)) return
+  const next = rows.value.map(row => {
+    if (row.mailTypeId) return row
+    return applyPctMailTypes([row], props.mailTypes, runtime.value)[0] ?? row
+  })
+  if (next.every((row, index) => row.mailTypeId === rows.value[index]?.mailTypeId)) return
+  rows.value = next
+  buildPreview()
+})
+
 function setRowType(volume: string, id: string): void {
   const name = props.mailTypes.find(item => item.id === id)?.name ?? ''
   rows.value = rows.value.map(row => row.ourVolume === volume ? { ...row, mailTypeId: id, mailTypeLabel: name } : row)
@@ -355,6 +366,33 @@ function clearHits(): void {
   icEpoch.value += 1
   for (const key of Object.keys(limitByKey)) delete limitByKey[key]
 }
+
+function leaveSystem(): void {
+  sheetImportToken += 1
+  saving.value = false
+  sheetName.value = ''
+  sheetNotice.value = ''
+  rows.value = []
+  gapWaves.value = []
+  askingGap.value = false
+  arbitrationOpen.value = false
+  arbitrationBoard.value = []
+  abnormalKeys.value = new Set()
+  confirmedProcIds.value = []
+  previews.value = []
+  cards.value = []
+  progress.value = []
+  status.value = ''
+  senderTouched.value = false
+  resetLimit()
+  queryToken.value += 1
+  try { sessionStorage.removeItem(PCT_WORKFLOW_TASK_KEY) } catch { /* 当前页面没有会话存储时略过 */ }
+}
+
+watch(() => connection.value.easyOrigin, (next, previous) => {
+  if (!previous || next === previous) return
+  leaveSystem()
+})
 
 function resetLimit(): void {
   sheetQueryToken += 1
@@ -532,8 +570,8 @@ async function lookupCases(token: number, only?: FlowAsk[], kind: 'unread' | 'mi
   }
   icEpoch.value += 1
   let stopped = ''
-  // 一批 16 行走同一条 LookupIcFlow，里面 8 路同时查。一行一条消息时，每行都先做一次登录检查，单位时间条数会掉下去。
-  const batchSize = 16
+  // 一批 48 行走同一条 LookupIcFlow。里面 8 个文号并成一次查询，同时 6 条连接。
+  const batchSize = 48
 
   function publishRun(): void {
     if (token !== sheetQueryToken) return
@@ -1293,6 +1331,7 @@ function definitionHint(item: WorkflowDefinition | null): string {
         :recipient-mode="recipientMode"
         :inventor-customers="inventorCustomers"
         :flow-by-key="flowByKey"
+        :flow-checking="icPhase === 'run'"
         @result="onLimitResult"
         @confirm="onSheetConfirm"
         @refresh-status="onRefreshStatus"
@@ -1331,7 +1370,7 @@ function definitionHint(item: WorkflowDefinition | null): string {
         </tbody>
       </table>
       <p v-if="status" class="save-status" role="status">{{ status }}</p>
-      <section v-if="cards.length" class="card inset">
+      <section v-if="rows.length && icPhase !== 'idle'" class="card inset">
         <h2>{{ outcome }}</h2>
         <ul v-if="outcomeBars.length" class="outcome-bars">
           <li v-for="bar in outcomeBars" :key="bar.key">

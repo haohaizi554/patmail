@@ -29,6 +29,7 @@ export class CustomerQueryService {
       ...(input.limitMailStyle ? { limitMailStyle: input.limitMailStyle } : {}),
       ...(input.fileMailStyle ? { fileMailStyle: input.fileMailStyle } : {}),
       ...(input.boundQuery ? { boundQuery: { ...input.boundQuery } } : {}),
+      ...(input.fileDownloadName ? { fileDownloadName: { ...input.fileDownloadName } } : {}),
       ...(input.reviewTarget ? { reviewTarget: input.reviewTarget } : {}),
       ...(input.reviewerId && input.reviewerName?.trim() ? { reviewerId: input.reviewerId, reviewerName: input.reviewerName.trim().slice(0, 80) } : {}),
       ...(input.mailsetId && input.mailsetLabel ? { mailsetId: input.mailsetId, mailsetLabel: input.mailsetLabel } : {}),

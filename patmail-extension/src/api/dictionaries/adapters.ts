@@ -132,7 +132,22 @@ export function adaptDictionaryValue(key: string, raw: unknown): NormalizedDicti
   })
 }
 
-/** 部门树、人员树、代理机构树、下载名称模板都是 id/name，父级在 pid 或 parent_id。 */
+/** 下载名称模板要留下 new_filename 和 file_name_type，发文时才能交给 GetFileName。 */
+export function adaptFileTemp(raw: unknown): NormalizedDictionary {
+  return adaptRows('fileTemp', raw, row => {
+    const value = text(row.id)
+    const label = text(row.temp_name)
+    if (!value || !label || value.length > 80) return null
+    const newFilename = text(row.new_filename)
+    const fileNameType = text(row.file_name_type)
+    const metadata = newFilename && fileNameType && newFilename.length <= 2000 && fileNameType.length <= 500
+      ? { newFilename, fileNameType }
+      : undefined
+    return option(value, label, metadata ? { metadata } : undefined)
+  })
+}
+
+/** 部门树、人员树、代理机构树都是 id/name，父级在 pid 或 parent_id。 */
 export function adaptNodeTree(key: string, raw: unknown): NormalizedDictionary {
   return adaptRows(key, raw, row => {
     const value = text(row.id) || text(row.dept_id) || text(row.business_type_id) || text(row.value)

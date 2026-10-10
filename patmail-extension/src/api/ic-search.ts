@@ -22,16 +22,18 @@ function tag(name: string, value = ''): string {
   return `&lt;${name}&gt;${xmlText(value)}&lt;/${name}&gt;`
 }
 
-/** 案件查询 ICSearchList。表单和期限监控一样先交空条件，但结束的事项也不会被这张表丢掉。 */
+/** 案件查询 ICSearchList。表单和期限监控一样先交空条件，但结束的事项也不会被这张表丢掉。多个文号用分号接在同一个栏里，最多 8 个。 */
 export function buildIcSearchParams(
   caseVolume: string,
   now: () => number = Date.now,
-  field: IcSearchField = 'case_volume'
+  field: IcSearchField = 'case_volume',
+  pageSize = 10
 ): ApiResult<URLSearchParams> {
-  const volume = caseVolume.trim()
-  if (!volume || volume.length > 80) {
+  const parts = caseVolume.split(/[;；]/).map(item => item.trim()).filter(Boolean)
+  if (!parts.length || parts.length > 8 || parts.some(part => part.length > 80) || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 50) {
     return apiError('INVALID_QUERY', field === 'case_volume_customer' ? '客户文号无效。' : '我方文号无效。')
   }
+  const volume = parts.join(';')
   const element = IC_SEARCH_ELEMENT_FIELDS.map(name => {
     if (name === field) return tag(name, volume)
     if (name === 'case_type') return tag(name, CURRENT_ENVIRONMENT.caseTypeId)
@@ -41,7 +43,7 @@ export function buildIcSearchParams(
   const params = new URLSearchParams()
   const pairs: Array<[string, string]> = [
     ['pageIndex', '1'],
-    ['pageSize', '10'],
+    ['pageSize', String(pageSize)],
     ['Call', 'ICSearchList'],
     ['Element', element],
     ['is_proc', 'false'],

@@ -11,7 +11,7 @@ export type EasyOperation =
   | 'getFlowInfo' | 'getFlowHistory' | 'getUrgencyList' | 'getFlowSubmit' | 'getFlowLastStatus' | 'caseBusFlow'
   | 'limitMonitor' | 'limitMailCustomer' | 'mailSubmit' | 'mailProcess' | 'processAP' | 'processEF' | 'getIsNewCpc'
   | 'agencySearchCase' | 'agencyCaseInfo' | 'patentCaseData' | 'icSearch' | 'customerList'
-  | 'caseManageInfo' | 'caseCustomField' | 'caseInventor'
+  | 'caseManageInfo' | 'caseCustomField' | 'caseInventor' | 'getFileName'
 
 export interface TransportOptions {
   fetcher?: typeof fetch
@@ -79,7 +79,8 @@ const ROUTES: Record<EasyOperation, { path: string; call: string }> = {
   caseInventor: { path: '/AjaxServers/PatentAction.ashx', call: 'GetCaseInventor' },
   patentCaseData: { path: '/AjaxServers/PatentAction.ashx', call: 'GetPatentData' },
   icSearch: { path: '/AjaxServers/CaseInfo.ashx', call: 'ICSearchList' },
-  customerList: { path: '/AjaxServers/Customer.ashx', call: 'GetCustomerlist' }
+  customerList: { path: '/AjaxServers/Customer.ashx', call: 'GetCustomerlist' },
+  getFileName: { path: '/AjaxServers/CaseInfo.ashx', call: 'GetFileName' }
 }
 
 function loginRedirect(response: Response, origin: string): boolean {
