@@ -1305,7 +1305,7 @@ function definitionHint(item: WorkflowDefinition | null): string {
                 <path d="M13 3.8V9h5.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
                 <path d="M8.5 13.2h7M8.5 16.2h7M8.5 19h4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
               </svg>
-              <span>{{ sheetName || '选择表格' }}</span>
+              <span v-hint.clip="sheetName || '选择表格'">{{ sheetName || '选择表格' }}</span>
             </span>
           </span>
         </label>

@@ -937,7 +937,7 @@ onUnmounted(() => {
               <button type="button" class="agent-session-name-go" :disabled="sessionLocked || !renameDraft.trim()" @click="commitRename">确定</button>
             </template>
             <template v-else>
-              <button type="button" class="agent-session-open" :disabled="sessionLocked" @click="openSession(item.id)">{{ item.title }}</button>
+              <button type="button" class="agent-session-open" :disabled="sessionLocked" v-hint.clip="item.title" @click="openSession(item.id)">{{ item.title }}</button>
               <button type="button" class="agent-session-rename" :disabled="sessionLocked" :aria-label="`改名${item.title}`" @click="beginRename(item)">改名</button>
               <button type="button" class="agent-session-delete" :disabled="sessionLocked" :aria-label="`删除${item.title}`" @click="removeSession(item.id)">删除</button>
             </template>
@@ -971,7 +971,7 @@ onUnmounted(() => {
               <button type="button" class="think-bar" :aria-expanded="liveThoughtOpen" @click="liveThoughtOpen = !liveThoughtOpen">
                 <span class="think-chevron" :class="{ open: liveThoughtOpen }" aria-hidden="true"></span>
                 <span class="think-label">{{ liveLog.some(item => item.kind === 'step') ? '过程' : '正在思考' }}</span>
-                <span v-if="!liveThoughtOpen" class="think-lead">{{ liveLead }}</span>
+                <span v-if="!liveThoughtOpen" class="think-lead" v-hint.clip="liveLead">{{ liveLead }}</span>
               </button>
               <template v-if="liveThoughtOpen">
                 <template v-for="(item, index) in liveLog" :key="index">
@@ -979,7 +979,7 @@ onUnmounted(() => {
                   <p v-else class="think-step" :class="item.state">
                     <span class="agent-step-mark" aria-hidden="true"></span>
                     <span class="agent-step-label">{{ item.text }}</span>
-                    <span v-if="item.detail" class="agent-step-detail">{{ item.detail }}</span>
+                    <span v-if="item.detail" class="agent-step-detail" v-hint.clip="item.detail">{{ item.detail }}</span>
                   </p>
                 </template>
                 <pre v-if="liveThought" ref="liveThoughtBox" class="think-body live">{{ liveThought }}</pre>
@@ -989,7 +989,7 @@ onUnmounted(() => {
               <li v-for="(step, index) in liveSteps" :key="`${index}-${step.label}`" :class="step.state">
                 <span class="agent-step-mark" aria-hidden="true"></span>
                 <span class="agent-step-label">{{ step.label }}</span>
-                <span v-if="step.detail" class="agent-step-detail">{{ step.detail }}</span>
+                <span v-if="step.detail" class="agent-step-detail" v-hint.clip="step.detail">{{ step.detail }}</span>
               </li>
             </ol>
             <p v-if="liveDraft" class="agent-step-label">正在写</p>
@@ -1029,8 +1029,8 @@ onUnmounted(() => {
         </div>
         <div v-if="queue.length" class="agent-queue">
           <ul id="agent-queue-list" class="agent-queue-list">
-            <li v-for="(item, index) in queueHead" :key="index"><span>排队</span>{{ item.display }}</li>
-            <li v-for="(item, index) in (queueOpen ? queueRest : [])" :key="`rest-${index}`"><span>排队</span>{{ item.display }}</li>
+            <li v-for="(item, index) in queueHead" :key="index" v-hint.clip="item.display"><span>排队</span>{{ item.display }}</li>
+            <li v-for="(item, index) in (queueOpen ? queueRest : [])" :key="`rest-${index}`" v-hint.clip="item.display"><span>排队</span>{{ item.display }}</li>
           </ul>
           <button v-if="queueRest.length" type="button" class="agent-queue-head" :aria-expanded="queueOpen" aria-controls="agent-queue-list" @click="queueOpen = !queueOpen">
             <span class="think-chevron" :class="{ open: queueOpen }" aria-hidden="true"></span>
@@ -1052,7 +1052,7 @@ onUnmounted(() => {
               @mousedown.prevent="fillCommand(command, true)"
             >
               <span class="agent-cmd">/{{ command.name }}</span>
-              <span class="agent-cmd-desc">{{ command.description }}</span>
+              <span class="agent-cmd-desc" v-hint.clip="command.description">{{ command.description }}</span>
             </button>
           </template>
           <p class="agent-palette-foot">↑↓ 选择 · Enter 使用 · Esc 收起</p>

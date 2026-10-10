@@ -73,7 +73,7 @@ const reminders = [
           <thead><tr><th>客户名称</th><th>发文类型</th><th>文件数量</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="row in homeTasks" :key="row.name">
-              <td class="who"><BrandLogo :brand="row.brand" /><span>{{ row.name }}</span></td>
+              <td class="who"><BrandLogo :brand="row.brand" /><span v-hint.clip="row.name">{{ row.name }}</span></td>
               <td>{{ row.type }}</td>
               <td>{{ row.count }}</td>
               <td><em class="status" :class="row.status">● {{ row.status }}</em></td>

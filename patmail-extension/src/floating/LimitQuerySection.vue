@@ -387,7 +387,7 @@ watch(() => [valueOf('case_type'), valueOf('proc_type'), valueOf('country')].joi
     <ul v-if="templates.length" class="template-picks">
       <li v-for="item in templates" :key="item.id">
         <button type="button" :class="{ on: selectedId === item.id }" @click="applyTemplate(item.id)">
-          <b>{{ templateLabel(item) }}</b>
+          <b v-hint.clip="templateLabel(item)">{{ templateLabel(item) }}</b>
         </button>
       </li>
     </ul>

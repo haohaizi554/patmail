@@ -50,7 +50,7 @@ const hits = [
         <table class="grid">
           <thead><tr><th>客户</th><th>文件描述</th><th>发文方式</th><th>状态</th></tr></thead>
           <tbody>
-            <tr v-for="h in hits" :key="h[1]"><td class="who"><BrandLogo :brand="h[0]" /><span>{{ h[1] }}</span></td><td>{{ h[2] }}</td><td>{{ h[3] }}</td><td><em class="status" :class="h[4] === '已匹配' ? '已完成' : '待处理'">● {{ h[4] }}</em></td></tr>
+            <tr v-for="h in hits" :key="h[1]"><td class="who"><BrandLogo :brand="h[0]" /><span v-hint.clip="h[1]">{{ h[1] }}</span></td><td>{{ h[2] }}</td><td>{{ h[3] }}</td><td><em class="status" :class="h[4] === '已匹配' ? '已完成' : '待处理'">● {{ h[4] }}</em></td></tr>
           </tbody>
         </table>
       </section>

@@ -52,7 +52,7 @@ const recent = [
           <tbody>
             <tr v-for="c in rows" :key="c.name">
               <td><input type="checkbox" /></td>
-              <td class="who"><BrandLogo :brand="c.brand" /><span>{{ c.name }}<small>{{ c.slogan }}</small></span></td>
+              <td class="who"><BrandLogo :brand="c.brand" /><span v-hint.clip="`${c.name} ${c.slogan}`">{{ c.name }}<small>{{ c.slogan }}</small></span></td>
               <td>{{ c.industry }}</td>
               <td>✉ {{ c.mode }}</td>
               <td><em class="chip">{{ c.to }}</em></td>

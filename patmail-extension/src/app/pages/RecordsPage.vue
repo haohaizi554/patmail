@@ -342,7 +342,7 @@ watch(ready, (ok) => {
           <td>{{ row.at.replace('T', ' ').replace(/\.\d+Z$/, '') }}</td>
           <td>{{ row.customer }}</td>
           <td>{{ row.status }}</td>
-          <td><span class="note">{{ row.note }}</span></td>
+          <td><span class="note" v-hint.clip="row.note">{{ row.note }}</span></td>
         </tr>
       </tbody>
     </table>
