@@ -187,8 +187,10 @@ export function pctRowsFromWorkbook(
   const decided = noted.filter(row => row.iprArbitrated).length
   const remindCount = noted.filter(row => row.letterKind !== 'national' && row.letterKind !== 'design').length
   const nationalCount = noted.filter(row => row.letterKind === 'national' || row.letterKind === 'design').length
+  const hiddenRows = [...remindSheets, ...nationalSheets].reduce((sum, sheet) => sum + (sheet.hiddenRows ?? 0), 0)
   const notice = [
     named ? `提醒申请 PCT ${remindCount} 行，进国家 ${nationalCount} 行。` : '',
+    hiddenRows ? `表格有筛选，隐藏的 ${hiddenRows} 行没有导入，导出也只含可见行。` : '',
     parts.map(part => part.notice).filter(Boolean).join(''),
     gaps.length ? `${gaps.length} 行 IPR 仍是空的，可以交给助手。` : '',
     decided ? `处理细节裁了 ${decided} 行，收件人后面标（仲）。` : ''

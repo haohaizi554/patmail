@@ -82,6 +82,18 @@ describe('两张表一起读', () => {
     expect(iprArbitrationBrief(parsed.rows)).toContain('客户要求')
     expect(iprArbitrationBrief(parsed.rows)).not.toContain('review_case_fields')
   })
+
+  it('筛选藏起来的行不导入，导出也只有可见行', () => {
+    const parsed = pctRowsFromWorkbook([{
+      name: '提醒申请PCT',
+      hiddenRows: 2,
+      rows: [header, ['PA1', 'CS-1', '宁德时代', '', '邹学军', '提醒申请PCT']]
+    }], nodes)
+    expect(parsed.rows.map(row => row.ourVolume)).toEqual(['PA1'])
+    expect(parsed.notice).toContain('隐藏的 2 行没有导入')
+    const sheets = checkedSourceSheets(parsed.rows, () => '已核对', DEFAULT_PCT_RUNTIME.columns)
+    expect(sheets.flatMap(sheet => sheet.rows.map(row => row[0]))).toEqual([DEFAULT_PCT_RUNTIME.columns.ourVolume, 'PA1'])
+  })
 })
 
 describe('一件没查成不停下其余', () => {

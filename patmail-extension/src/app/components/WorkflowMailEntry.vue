@@ -1259,11 +1259,21 @@ function definitionHint(item: WorkflowDefinition | null): string {
           <ThemeSelect :model-value="senderId" placeholder="选择发件邮箱" empty-text="发件邮箱还没读到。先确认已经连上，再重新打开这一页。" :options="senderOptions" @update:model-value="chooseSender(String($event))" />
         </label>
         <label>表格 <span class="need-mark">必填</span>
-          <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" @change="onSheet" />
+          <span class="sheet-pick">
+            <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label="选择表格" @change="onSheet" />
+            <span class="sheet-pick-face" :class="{ picked: sheetName }">
+              <svg class="sheet-pick-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 3.5h6.2L19 9.2V20a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 6 20V5A1.5 1.5 0 0 1 7.5 3.5H7z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                <path d="M13 3.8V9h5.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                <path d="M8.5 13.2h7M8.5 16.2h7M8.5 19h4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+              <span>{{ sheetName || '选择表格' }}</span>
+            </span>
+          </span>
         </label>
       </div>
       <p v-for="note in styleNotes" :key="note" class="hint">这张表按同一客户、同一收件人和抄送合成一封。{{ note }}</p>
-      <p v-if="sheetName" class="hint">{{ sheetName }}{{ sheetNotice ? `。${sheetNotice}` : '' }}</p>
+      <p v-if="sheetNotice" class="hint">{{ sheetNotice }}</p>
       <button v-if="gapWaves.length" type="button" class="ghost" :disabled="askingGap" @click="askGaps">交给助手仲裁空着的 IPR{{ gapWaves.length > 1 ? `（分 ${gapWaves.length} 批）` : '' }}</button>
       <button v-if="icPhase === 'done' && rows.length" type="button" class="ghost" @click="exportChecked">导出核对表</button>
       <button v-if="arbitrationBoard.length" type="button" class="ghost" @click="arbitrationOpen = true">仲裁结果 {{ arbitrationBoard.length }}</button>

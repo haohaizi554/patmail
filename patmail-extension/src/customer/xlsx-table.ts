@@ -24,12 +24,30 @@ function columnIndex(ref: string): number {
   return index - 1
 }
 
-/** 第一张表的单元格。共享字符串用下标，普通单元格用文本。 */
-export function rowsFromSheetXml(xml: string, shared: string[]): string[][] {
+function rowHiddenByFilter(attrs: string): boolean {
+  return /\bhidden="(?:1|true)"/i.test(attrs)
+}
+
+/** 有筛选时只留下可见行。没筛选时隐藏行仍读进来。 */
+export function sheetGridFromXml(xml: string, shared: string[]): { rows: string[][]; hiddenRows: number } {
+  const filtered = /<autoFilter\b/.test(xml)
   const rows: string[][] = []
-  for (const match of xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
-    const cells: string[] = []
-    for (const cell of match[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+  let hiddenRows = 0
+  for (const match of xml.matchAll(/<row\b([^>]*)>([\s\S]*?)<\/row>/g)) {
+    if (filtered && rowHiddenByFilter(match[1])) {
+      hiddenRows += 1
+      continue
+    }
+    const cells = cellsFromRowXml(match[2], shared)
+    if (cells.some(item => item)) rows.push(cells)
+    if (rows.length >= 5000) break
+  }
+  return { rows, hiddenRows }
+}
+
+function cellsFromRowXml(body: string, shared: string[]): string[] {
+  const cells: string[] = []
+  for (const cell of body.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
       const attrs = cell[1]
       const body = cell[2] ?? ''
       const ref = attrs.match(/\br="([A-Z]+\d+)"/i)?.[1] ?? ''
@@ -45,10 +63,12 @@ export function rowsFromSheetXml(xml: string, shared: string[]): string[][] {
       while (cells.length < index) cells.push('')
       cells[index] = text.trim()
     }
-    if (cells.some(item => item)) rows.push(cells)
-    if (rows.length >= 5000) break
-  }
-  return rows
+  return cells
+}
+
+/** 第一张表的单元格。共享字符串用下标，普通单元格用文本。带筛选时不含隐藏行。 */
+export function rowsFromSheetXml(xml: string, shared: string[]): string[][] {
+  return sheetGridFromXml(xml, shared).rows
 }
 
 async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
@@ -106,6 +126,8 @@ async function readZip(buffer: ArrayBuffer, include?: (name: string) => boolean)
 export interface XlsxSheet {
   name: string
   rows: string[][]
+  /** 筛选藏起来、因此没有导入的行。 */
+  hiddenRows?: number
 }
 
 function sheetEntries(files: Map<string, string>): Array<{ name: string; path: string }> {
@@ -283,7 +305,10 @@ export async function readXlsxSheets(buffer: ArrayBuffer, pick?: (name: string) 
   const wanted = new Set(['xl/workbook.xml', 'xl/_rels/workbook.xml.rels', 'xl/sharedStrings.xml', ...use.map(item => item.path)])
   const files = await readZip(buffer, name => wanted.has(name))
   const shared = sharedStringsFromXml(files.get('xl/sharedStrings.xml') ?? '')
-  return use.map(item => ({ name: item.name, rows: rowsFromSheetXml(files.get(item.path) ?? '', shared) }))
+  return use.map(item => {
+    const grid = sheetGridFromXml(files.get(item.path) ?? '', shared)
+    return { name: item.name, rows: grid.rows, ...(grid.hiddenRows ? { hiddenRows: grid.hiddenRows } : {}) }
+  })
 }
 
 export async function readXlsxRows(buffer: ArrayBuffer): Promise<string[][]> {

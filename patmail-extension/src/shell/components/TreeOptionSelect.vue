@@ -28,7 +28,7 @@ const found = computed(() => applied.value.trim() ? searchOptionTree(tree.value,
 const expanded = computed(() => found.value ? { ...manualExpanded.value, ...Object.fromEntries([...found.value.expand].map(id => [id, true])) } : manualExpanded.value)
 const summary = computed(() => {
   const names = selected.value.map(id => tree.value.byId.get(id)?.label).filter((item): item is string => Boolean(item))
-  if (names.length === 0) return '不限'
+  if (names.length === 0) return selected.value.length ? `已选 ${selected.value.length} 项` : '不限'
   if (names.length <= 2) return names.join('、')
   return `${names.slice(0, 2).join('、')} 等 ${names.length} 项`
 })

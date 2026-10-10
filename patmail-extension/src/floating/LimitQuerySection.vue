@@ -99,6 +99,12 @@ function treeChoices(key: string): { value: string; label: string; parent?: stri
 function optionsFor(key: string): { value: string; label: string; parent?: string }[] {
   return [{ value: '', label: '不限' }, ...choices(key)]
 }
+function namedLabel(key: string): string {
+  const ids = key === 'ctrl_proc' ? splitCtrlProcIds(valueOf(key)) : []
+  if (ids.length < 2) return ''
+  const labels = ids.map(id => choices(key).find(item => item.value === id)?.label ?? '')
+  return labels.every(Boolean) ? labels.join('、') : `已选 ${ids.length} 项`
+}
 function namedShown(key: string): string {
   const value = valueOf(key)
   if (!value) return ''
@@ -392,7 +398,7 @@ watch(() => [valueOf('case_type'), valueOf('proc_type'), valueOf('country')].joi
             <label v-else-if="cell.kind === 'named' && cell.key === 'ctrl_proc'" class="query-cell">
               <span>{{ cell.label }}</span>
               <TreeOptionSelect v-if="treeChoices(cell.key).length" :model-value="valueOf(cell.key)" :options="treeChoices(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
-              <ThemeSelect v-else-if="choices(cell.key).length" :model-value="valueOf(cell.key)" :options="optionsFor(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
+              <ThemeSelect v-else-if="choices(cell.key).length" :model-value="valueOf(cell.key)" :value-label="namedLabel(cell.key)" :options="optionsFor(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
               <span v-else class="hint">先校对字段，再选择处理事项</span>
               <span v-if="splitCtrlProcIds(valueOf(cell.key)).length > 1" class="hint">选中的事项会一起放进同一次查询。一行只会命中其中一项。</span>
             </label>

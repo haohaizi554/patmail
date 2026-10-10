@@ -176,7 +176,10 @@ export function describePickerReceipt(dictionaries: Record<string, NormalizedDic
 export function choicesFromDictionary(dictionary: NormalizedDictionary | undefined, caseTypeId = '', countryIds = ''): TreeOptionChoice[] {
   if (!dictionary) return []
   let options: DictionaryOption[] = dictionary.options.filter(item => !item.disabled)
-  if (caseTypeId && options.some(item => item.metadata?.caseTypeId)) {
+  // 期限页的案件状态按案件类型各有一套编号。原网站只放当前类型，没选类型时不列，避免「未递交」按类型重复出现。
+  if (dictionary.key === 'limitCaseStatus') {
+    options = caseTypeId ? options.filter(item => item.metadata?.caseTypeId === caseTypeId) : []
+  } else if (caseTypeId && options.some(item => item.metadata?.caseTypeId)) {
     const matched = options.filter(item => item.metadata?.caseTypeId === caseTypeId)
     if (matched.length) options = matched
   }

@@ -268,6 +268,14 @@
 .send-progress li.is-stop strong { color: #e44586; }
 .entry-title { margin: 16px 0 8px; font-size: 14px; }
 .need-mark { color: #e44586; font-weight: 700; }
+.form-grid .sheet-pick { position: relative; display: block; margin-top: 6px; }
+.form-grid .sheet-pick input { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.sheet-pick-face { display: flex; align-items: center; gap: 8px; height: 36px; border: 1px solid #eadff0; border-radius: 10px; background: #fff; padding: 0 10px; font-weight: 650; color: #8d97b0; cursor: pointer; }
+.sheet-pick-face.picked { color: #243056; }
+.sheet-pick-face span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-pick:hover .sheet-pick-face { border-color: #ffb3d0; }
+.sheet-pick:focus-within .sheet-pick-face { border-color: #ff4f93; box-shadow: 0 0 0 3px #ffe4ef; }
+.sheet-pick-icon { width: 18px; height: 18px; flex: none; color: #12b981; }
 .form-grid .span-all { grid-column: 1 / -1; }
 .empty-guide { display: grid; gap: 8px; padding: 12px; border: 1px dashed #f3b6d0; border-radius: 12px; background: #fff7fb; }
 .empty-guide p { margin: 0; font-size: 13px; line-height: 1.5; color: #66758f; }

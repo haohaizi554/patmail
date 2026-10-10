@@ -10,10 +10,12 @@ const props = withDefaults(defineProps<{
   disabled?: boolean
   placeholder?: string
   emptyText?: string
+  valueLabel?: string
 }>(), {
   disabled: false,
   placeholder: '请选择',
-  emptyText: ''
+  emptyText: '',
+  valueLabel: ''
 })
 
 const emit = defineEmits<{
@@ -39,8 +41,8 @@ const current = computed(() => props.modelValue !== undefined ? props.modelValue
 const selected = computed(() => props.options.find(item => item.value === current.value))
 const searchable = computed(() => selectNeedsSearch(props.options.length))
 const listed = computed(() => searchable.value ? filterSelectOptions(props.options, query.value) : props.options)
-const shown = computed(() => selected.value?.label || (current.value === '' || current.value == null ? props.placeholder : String(current.value)))
-const placeholderShown = computed(() => !selected.value)
+const shown = computed(() => selected.value?.label || props.valueLabel || (current.value === '' || current.value == null ? props.placeholder : String(current.value)))
+const placeholderShown = computed(() => !selected.value && !props.valueLabel)
 
 function optionId(index: number): string {
   return `${listId}-${index}`

@@ -7,7 +7,7 @@ import { resolvePctRuntime } from '../src/workflow/pct-config'
 import { applyPctMailTypes, buildPctTask, matchSheetCtrlProcs, NATIONAL_PROC_LABEL, pctRowsFromTable, procGapNotes, summarizePctTask } from '../src/customer/pct-sheet'
 import type { CustomerQueryProfile, PctTaskDraft } from '../src/customer/types'
 import { joinCaseVolumes, splitCaseVolumes } from '../src/customer/volume-list'
-import { readXlsxRows, rowsFromSheetXml, sharedStringsFromXml } from '../src/customer/xlsx-table'
+import { readXlsxRows, rowsFromSheetXml, sharedStringsFromXml, sheetGridFromXml } from '../src/customer/xlsx-table'
 
 const sample = 'C:\\Users\\Administrator\\Documents\\WXWork\\1688855905806482\\Cache\\File\\2026-09\\鹏城实验室.xlsx'
 
@@ -230,6 +230,22 @@ describe('xlsx', () => {
     const shared = sharedStringsFromXml('<sst><si><t>我方文号</t></si><si><t>PA1</t></si></sst>')
     const rows = rowsFromSheetXml('<sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row><row r="2"><c r="A2" t="s"><v>1</v></c></row></sheetData>', shared)
     expect(rows).toEqual([['我方文号'], ['PA1']])
+  })
+
+  it('带筛选的表只留下可见行，没筛选时隐藏行仍保留', () => {
+    const shared = sharedStringsFromXml('<sst><si><t>处理人</t></si><si><t>郑文慧</t></si><si><t>陈秋晓</t></si></sst>')
+    const filtered = [
+      '<worksheet><sheetData>',
+      '<row r="1"><c r="A1" t="s"><v>0</v></c></row>',
+      '<row r="2" hidden="1"><c r="A2" t="s"><v>2</v></c></row>',
+      '<row r="3"><c r="A3" t="s"><v>1</v></c></row>',
+      '</sheetData><autoFilter ref="A1:A3"><filterColumn colId="0"><customFilters><customFilter operator="equal" val="郑文慧"/></customFilters></filterColumn></autoFilter></worksheet>'
+    ].join('')
+    const grid = sheetGridFromXml(filtered, shared)
+    expect(grid.rows).toEqual([['处理人'], ['郑文慧']])
+    expect(grid.hiddenRows).toBe(1)
+    const plain = '<sheetData><row r="1" hidden="1"><c r="A1" t="s"><v>2</v></c></row></sheetData>'
+    expect(rowsFromSheetXml(plain, shared)).toEqual([['陈秋晓']])
   })
 
   it('空单元格写成自闭合时，不会把下一格的共享字符串下标当成文字', () => {

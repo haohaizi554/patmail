@@ -28,6 +28,7 @@ describe('下拉校对目录', () => {
         ],
         case_status: [
           { value: 'open', text_zh_cn: '未结案', case_type_id: PATENT, status_class: 'CASE' },
+          { value: 'tm-open', text_zh_cn: '未结案', case_type_id: TRADEMARK, status_class: 'CASE' },
           { value: 'proc', text_zh_cn: '处理中', case_type_id: PATENT, status_class: 'PROC' }
         ],
         Case_direction: [{ value: 'II', text_zh_cn: '内-内' }],
@@ -41,7 +42,7 @@ describe('下拉校对目录', () => {
     expect(built.dictionaries.fileTemp.options).toEqual([expect.objectContaining({ value: 'temp-1', label: '我的下载名' })])
     expect(built.dictionaries.applyTags.status).toBe('empty')
     expect(built.dictionaries.limitProcType.options).toEqual([expect.objectContaining({ value: OFFICIAL, label: '官方事项' })])
-    expect(built.dictionaries.limitCaseStatus.options.map(item => item.value)).toEqual(['open'])
+    expect(built.dictionaries.limitCaseStatus.options.map(item => item.value)).toEqual(['open', 'tm-open'])
     expect(built.dictionaries.limitCtrlProc.options.find(item => item.value === 'proc-2')?.parentValue).toBe('proc-1')
     expect(built.warnings.some(item => item.startsWith('agent'))).toBe(false)
 
@@ -53,6 +54,10 @@ describe('下拉校对目录', () => {
     expect(business.map(item => item.label)).toEqual(['普通新申请'])
     const tree = choicesFromDictionary(built.dictionaries.dept)
     expect(tree.find(item => item.value === CHILD)?.parent).toBe(DEPT)
+    expect(choicesFromDictionary(built.dictionaries.limitCaseStatus, '').map(item => item.value)).toEqual([])
+    expect(choicesFromDictionary(built.dictionaries.limitCaseStatus, PATENT).map(item => item.value)).toEqual(['open'])
+    expect(choicesFromDictionary(built.dictionaries.limitCaseStatus, TRADEMARK).map(item => item.label)).toEqual(['未结案'])
+    expect(choicesFromDictionary(built.dictionaries.limitCaseStatus, TRADEMARK).map(item => item.value)).toEqual(['tm-open'])
     expect(describePickerReceipt(built.dictionaries)).toContain('部门 2')
     expect(describePickerReceipt(built.dictionaries)).toContain('处理事项 2')
   })
