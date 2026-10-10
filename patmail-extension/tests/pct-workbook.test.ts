@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { lookupIcFlow } from '../src/customer/ic-flow-lookup'
 import { NATIONAL_OUR_TYPE, pctRowsFromTable } from '../src/customer/pct-sheet'
-import { arbitrateDetail, arbitrationBatchSize, detailLines, iprArbitrationBrief, iprArbitrationWaves, isPctWorkbookSheet, missedSourceSheets, noteForBlankIpr, pctRowsFromWorkbook } from '../src/customer/pct-workbook'
+import { applyArbitrationReply, arbitrateDetail, arbitrationBatchSize, checkedSourceSheets, detailLines, iprArbitrationBrief, iprArbitrationWaves, isPctWorkbookSheet, missedSourceSheets, noteForBlankIpr, pctRowsFromWorkbook } from '../src/customer/pct-workbook'
+import { matchListedCustomer } from '../src/customer/customer-list'
+import { caseTextUsable } from '../src/customer/case-arbitration'
 import { readXlsxSheets, xlsxBookBytes } from '../src/customer/xlsx-table'
 import { DEFAULT_PCT_RUNTIME } from '../src/workflow/pct-config'
 import type { ApiResult } from '../src/api/types'
@@ -15,6 +17,11 @@ const nodes = [
 ]
 
 const header = ['我方文号', '客户文号', '客户名称', '第一客户联系人', '客户联系人(IPR)', '处理事项']
+
+function elementTag(element: string, name: string): string {
+  const matched = element.match(new RegExp(`&lt;${name}&gt;([\\s\\S]*?)&lt;/${name}&gt;`))
+  return matched?.[1] ?? ''
+}
 
 describe('两张表一起读', () => {
   it('进国家有我方文号就用我方案号，没有再用贵方，外观单独一种', () => {
@@ -72,7 +79,8 @@ describe('两张表一起读', () => {
     expect(arbitrateDetail('中兴通讯股份有限公司', rules)).toBe('不用发')
     expect(arbitrateDetail('季华实验室', ['季华实验室，发给发明人'])).toBe('发明人')
     expect(iprArbitrationBrief(parsed.rows)).toContain('仲裁收件人')
-    expect(iprArbitrationBrief(parsed.rows)).toContain('review_case_fields')
+    expect(iprArbitrationBrief(parsed.rows)).toContain('客户要求')
+    expect(iprArbitrationBrief(parsed.rows)).not.toContain('review_case_fields')
   })
 })
 
@@ -122,6 +130,111 @@ describe('一件没查成不停下其余', () => {
       expect(mixed.data.items[0]?.statusUnread).toBe(true)
     }
   })
+
+  it('我方文号没有时改查客户文号，只差后缀就改成库里的文号', async () => {
+    const library = 'aaaaaaaa-1111-4111-8111-111111111111'
+    const post = async (operation: 'icSearch' | 'caseBusFlow', params: URLSearchParams): Promise<ApiResult<unknown>> => {
+      if (operation === 'caseBusFlow') {
+        return {
+          ok: true,
+          data: {
+            ProcInfo: [{ proc_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', ctrl_proc: '提醒申请PCT', finish_date: '', proc_status: '' }],
+            Eflow: [{ id: 'flow-1', proc_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', eflow_name: '发文', order_by: 2, node_code: 'END' }]
+          }
+        }
+      }
+      const element = params.get('Element') ?? ''
+      const our = elementTag(element, 'case_volume')
+      const customer = elementTag(element, 'case_volume_customer')
+      if (our === 'PA2519196CND-YS-放弃复审' && customer === '') return { ok: true, data: { TableRows: [] } }
+      if (our === '' && customer === 'PA2519196CND-YS') {
+        return { ok: true, data: { TableRows: [{ case_id: library, case_volume: 'PA2519196CND-YS', case_volume_customer: 'PA2519196CND-YS' }] } }
+      }
+      return { ok: true, data: { TableRows: [] } }
+    }
+    const found = await lookupIcFlow([{
+      caseVolume: 'PA2519196CND-YS-放弃复审',
+      customerVolume: 'PA2519196CND-YS',
+      procLabel: '提醒申请PCT'
+    }], post)
+    expect(found.ok).toBe(true)
+    if (found.ok) {
+      expect(found.data.items[0]?.found).toBe(true)
+      expect(found.data.items[0]?.gate).toBe('done')
+      expect(found.data.items[0]?.correctedOur).toBe('PA2519196CND-YS')
+      expect(found.data.items[0]?.correctedCustomer).toBeUndefined()
+    }
+  })
+
+  it('客户文号补查对上库里带后缀的我方文号', async () => {
+    const library = 'aaaaaaaa-1111-4111-8111-111111111111'
+    const post = async (operation: 'icSearch' | 'caseBusFlow', params: URLSearchParams): Promise<ApiResult<unknown>> => {
+      if (operation === 'caseBusFlow') {
+        return {
+          ok: true,
+          data: {
+            ProcInfo: [{ proc_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', ctrl_proc: '提醒申请PCT', finish_date: '2026-09-01', proc_status: '完成' }],
+            Eflow: []
+          }
+        }
+      }
+      const element = params.get('Element') ?? ''
+      const our = elementTag(element, 'case_volume')
+      const customer = elementTag(element, 'case_volume_customer')
+      if (our === 'PA25117182CND' && customer === '') return { ok: true, data: { TableRows: [] } }
+      if (our === '' && customer === 'HC20251191') {
+        return {
+          ok: true,
+          data: { TableRows: [{ case_id: library, case_volume: 'PA25117182CND-米茅', case_volume_customer: 'HC20251191' }] }
+        }
+      }
+      return { ok: true, data: { TableRows: [] } }
+    }
+    const found = await lookupIcFlow([{
+      caseVolume: 'PA25117182CND',
+      customerVolume: 'HC20251191',
+      procLabel: '提醒申请PCT'
+    }], post)
+    expect(found.ok).toBe(true)
+    if (found.ok) {
+      expect(found.data.items[0]?.found).toBe(true)
+      expect(found.data.items[0]?.correctedOur).toBe('PA25117182CND-米茅')
+      expect(found.data.items[0]?.correctedCustomer).toBeUndefined()
+      expect(found.data.items[0]?.skipSend).toBe(true)
+    }
+    const onlyCustomer = await lookupIcFlow([{
+      caseVolume: 'HC20251191',
+      customerVolume: 'HC20251191',
+      procLabel: '提醒申请PCT'
+    }], post)
+    expect(onlyCustomer.ok).toBe(true)
+    if (onlyCustomer.ok) {
+      expect(onlyCustomer.data.items[0]?.found).toBe(true)
+      expect(onlyCustomer.data.items[0]?.correctedOur).toBeUndefined()
+    }
+  })
+
+  it('没有子流程且事项已完成时标不用发', async () => {
+    const post = async (operation: 'icSearch' | 'caseBusFlow'): Promise<ApiResult<unknown>> => {
+      if (operation === 'caseBusFlow') {
+        return {
+          ok: true,
+          data: {
+            ProcInfo: [{ proc_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', ctrl_proc: '提醒申请PCT', finish_date: '2026-09-01', proc_status: '完成' }],
+            Eflow: []
+          }
+        }
+      }
+      return { ok: true, data: { TableRows: [{ case_id: 'aaaaaaaa-1111-4111-8111-111111111111', case_volume: 'PA1' }] } }
+    }
+    const found = await lookupIcFlow([{ caseVolume: 'PA1', procLabel: '提醒申请PCT' }], post)
+    expect(found.ok).toBe(true)
+    if (found.ok) {
+      expect(found.data.items[0]?.skipSend).toBe(true)
+      expect(found.data.items[0]?.gate).toBe('open')
+      expect(found.data.items[0]?.uncontrolled).toBeUndefined()
+    }
+  })
 })
 
 function gap(ourVolume: string, customerName: string, note = ''): import('../src/customer/types').PctTaskRow {
@@ -148,14 +261,56 @@ describe('仲裁交给本地模型时分批', () => {
     ])
     expect(short).toHaveLength(2)
     expect(short[0]).toContain('第 1/2 批')
-    expect(short[0]).toContain('先查我方文号 A1')
-    expect(short[0]).toContain('A1、A2')
+    expect(short[0]).toContain('我方文号 A1')
+    expect(short[0]).toContain('我方文号 A2')
+    expect(short[0]).toContain('客户要求')
+    expect(short[0]).toContain('每一行单独裁')
+    expect(short[0]).toContain('身份')
+    expect(short[0]).toContain('抄送身份')
+    expect(short[0]).not.toContain('结论覆盖')
     expect(short[0]).not.toContain('D1')
+    expect(short[0]).not.toContain('review_case_fields')
     expect(short[1]).toContain('荣耀')
     const longNote = '处理细节：'.padEnd(130, '甲')
     expect(arbitrationBatchSize([longNote, longNote])).toBe(1)
     expect(iprArbitrationWaves([gap('A1', '歌尔', longNote), gap('B1', '宁德', longNote)])).toHaveLength(2)
-    expect(iprArbitrationBrief([gap('A1', '歌尔')])).toContain('review_case_fields')
+    expect(iprArbitrationBrief([gap('A1', '歌尔')], { 歌尔: '每月单独发给孙丽敏' })).toContain('每月单独发给孙丽敏')
+    const withCase = iprArbitrationBrief([gap('A1', '歌尔')], { 歌尔: '客户要求：发给李聪' }, { A1: '案件字段：文号 A1\n案件页：\n案件名称：样例' })
+    expect(withCase).toContain('著录项目')
+    expect(withCase).toContain('案件名称：样例')
+    expect(withCase).not.toContain('还有')
+  })
+
+  it('按文号写回，拿不准的不填', () => {
+    const rows = [gap('PA2519006CND', '华润怡宝'), gap('PA2518902CND', '唯品会'), gap('PA2518903CND', '唯品会')]
+    const applied = applyArbitrationReply(rows, [
+      '文号 PA2519006CND｜收件人 李英｜身份 客户联系人｜抄送 无｜抄送身份 无｜依据 第一客户联系人',
+      '文号 PA2518902CND｜收件人 李聪、郭旭｜身份 IPR、IPR｜抄送 王五｜抄送身份 商务｜依据 微电子联系人',
+      '文号 PA2518903CND｜拿不准｜依据 第一客户联系人和客户要求对不上'
+    ].join('\n'))
+    expect(applied.written).toBe(2)
+    expect(applied.unsure).toBe(1)
+    expect(applied.rows[0]?.iprName).toBe('李英')
+    expect(applied.rows[0]?.iprArbitrated).toBe(true)
+    expect(applied.rows[0]?.mailCc).toBeUndefined()
+    expect(applied.decisions[0]?.role).toBe('客户联系人')
+    expect(applied.rows[1]?.iprName).toBe('李聪、郭旭')
+    expect(applied.rows[1]?.mailCc).toBe('王五')
+    expect(applied.decisions[1]?.role).toBe('IPR、IPR')
+    expect(applied.decisions[1]?.ccRole).toBe('商务')
+    expect(applied.rows[2]?.iprName).toBe('')
+    expect(applied.decisions[2]?.unsure).toBe(true)
+  })
+
+  it('客户名单对不上多家时不猜，著录项目空文不拿去仲裁', () => {
+    const listed = matchListedCustomer('华润怡宝', [{ id: '11111111-1111-4111-8111-111111111111', name: '华润怡宝' }])
+    expect(listed && listed !== 'many' ? listed.name : '').toBe('华润怡宝')
+    expect(matchListedCustomer('招商银行', [
+      { id: '11111111-1111-4111-8111-111111111111', name: '招商银行-信息技术部' },
+      { id: '22222222-2222-4222-8222-222222222222', name: '招银理财有限责任公司（招商银行）' }
+    ])).toBe('many')
+    expect(caseTextUsable('案件字段：文号 PA1\n案件要求：没有读到要求。\n发明人：没有读到发明人。\n案件页：没有读到基本信息。')).toBe(false)
+    expect(caseTextUsable('案件字段：文号 PA1\n案件要求：没有读到要求。\n发明人：张三\n案件页：没有读到基本信息。')).toBe(true)
   })
 })
 
@@ -180,6 +335,19 @@ describe('查不到的行按源表导出', () => {
     expect(sheets[0]?.rows[1]).toEqual(['PA2', 'HC2', '歌尔', '', '', '提醒申请PCT', '库里没有'])
     expect(sheets[1]?.rows[1]?.[0]).toBe('WO1')
     expect(sheets[1]?.rows[1]?.at(-1)).toBe('没查成')
+  })
+
+  it('核对完的表在原列后面加审核状态', () => {
+    const national = gap('WO1', '歌尔')
+    national.letterKind = 'national'
+    const sheets = checkedSourceSheets(
+      [gap('PA1', '歌尔'), national],
+      row => row.ourVolume === 'WO1' ? '还没提交审核' : '已经审核通过',
+      DEFAULT_PCT_RUNTIME.columns
+    )
+    expect(sheets[0]?.rows[0]?.at(-1)).toBe('审核状态')
+    expect(sheets[0]?.rows[1]).toEqual(['PA1', '', '歌尔', '', '', '提醒申请PCT', '已经审核通过'])
+    expect(sheets[1]?.rows[1]?.at(-1)).toBe('还没提交审核')
   })
 })
 

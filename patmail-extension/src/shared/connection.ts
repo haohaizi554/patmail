@@ -54,9 +54,9 @@ export interface EasyTabCandidate {
   origin: string
 }
 
-export function emptyConnection(): EasyConnectionContext {
+export function emptyConnection(origin: string = EASY_ORIGIN): EasyConnectionContext {
   return {
-    easyOrigin: EASY_ORIGIN,
+    easyOrigin: isEasyOrigin(origin) ? origin : EASY_ORIGIN,
     easyTabId: null,
     operatorId: '',
     lastOperatorId: '',
@@ -124,6 +124,30 @@ export interface SessionObservation {
 /** 身份只来自绑定标签页上的会话检测。 */
 export class EasyConnectionController {
   context: EasyConnectionContext = emptyConnection()
+  /** 当前客户模式的主站。断开绑定后空连接仍指向这里。 */
+  homeOrigin = EASY_ORIGIN
+
+  /** 只改主站。已经绑着标签页时，不把登录身份换成另一个站点。 */
+  retarget(origin: string): void {
+    if (!isEasyOrigin(origin)) return
+    this.homeOrigin = origin
+    if (this.context.easyTabId != null) return
+    this.context = {
+      ...emptyConnection(origin),
+      lastOperatorId: this.context.lastOperatorId,
+      connectionVersion: this.context.connectionVersion,
+      message: this.context.message
+    }
+  }
+
+  private cleared(patch: Partial<EasyConnectionContext>): EasyConnectionContext {
+    return {
+      ...emptyConnection(this.homeOrigin),
+      lastOperatorId: this.context.lastOperatorId,
+      connectionVersion: this.context.connectionVersion + 1,
+      ...patch
+    }
+  }
 
   list(tabs: BrowserTabRef[]): EasyTabCandidate[] {
     return easyTabCandidates(tabs)
@@ -132,18 +156,15 @@ export class EasyConnectionController {
   beginBind(tab: BrowserTabRef): { ok: true } | { ok: false; message: string } {
     const origin = tabOrigin(tab.url)
     if (typeof tab.id !== 'number' || !origin) {
-      this.context = {
-        ...emptyConnection(),
-        lastOperatorId: this.context.lastOperatorId,
-        connectionVersion: this.context.connectionVersion + 1,
+      this.context = this.cleared({
         sessionStatus: 'error',
         message: '这个标签页不是已确认的 EASY 站点。'
-      }
+      })
       return { ok: false, message: this.context.message }
     }
     const connectionVersion = this.context.connectionVersion + 1
     this.context = {
-      ...emptyConnection(),
+      ...emptyConnection(origin),
       easyOrigin: origin,
       easyTabId: tab.id,
       lastOperatorId: this.context.lastOperatorId,
@@ -183,12 +204,7 @@ export class EasyConnectionController {
 
   detach(tabId: number): void {
     if (this.context.easyTabId !== tabId) return
-    this.context = {
-      ...emptyConnection(),
-      lastOperatorId: this.context.lastOperatorId,
-      connectionVersion: this.context.connectionVersion + 1,
-      message: '绑定的 EASY 标签页已关闭。'
-    }
+    this.context = this.cleared({ message: '绑定的 EASY 标签页已关闭。' })
   }
 
   observeNavigation(tabId: number, url: string | undefined): void {
@@ -196,13 +212,10 @@ export class EasyConnectionController {
     const connectionVersion = this.context.connectionVersion + 1
     const origin = tabOrigin(url)
     if (!origin) {
-      this.context = {
-        ...emptyConnection(),
-        lastOperatorId: this.context.lastOperatorId,
-        connectionVersion,
+      this.context = this.cleared({
         sessionStatus: 'error',
         message: '绑定页面已经离开 EASY 站点。'
-      }
+      })
       return
     }
     if (origin !== this.context.easyOrigin) {

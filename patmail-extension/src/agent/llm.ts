@@ -1,4 +1,4 @@
-import type { AgentConfig } from './config'
+import { fallbackAgentConfig, usesFallbackEndpoint, type AgentConfig } from './config'
 
 /** OpenAI 兼容的对话消息。tool 相关字段供后续 agent 循环使用，本次接入先走纯文本。 */
 export interface ChatMessage {
@@ -38,6 +38,16 @@ export interface ChatOutcome {
   raw: unknown
 }
 
+/** 服务端回传的 model 优先。没有这一栏时，用这次实际发出去的模型名。 */
+export function servedModel(outcome: ChatOutcome, requested: string): string {
+  const raw = outcome.raw
+  if (typeof raw === 'object' && raw !== null) {
+    const name = (raw as Record<string, unknown>).model
+    if (typeof name === 'string' && name.trim()) return name.trim().slice(0, 200)
+  }
+  return requested.trim().slice(0, 200)
+}
+
 export type LlmFailureKind = 'rate_limit' | 'upstream' | 'transient' | 'auth' | 'overflow' | 'timeout' | 'other'
 
 export class LlmError extends Error {
@@ -51,7 +61,7 @@ export class LlmError extends Error {
   }
 }
 
-/** 单模型不换备用链。502 一类网关失败可以再试，认证失败不试。 */
+/** 502 一类网关失败可以再试，认证失败不试。连不上时由备用模型接手，不在这里换。 */
 export function llmFailureKind(error: LlmError): LlmFailureKind {
   if (error.code === 'REQUEST_TIMEOUT') return 'timeout'
   if (error.status === 429) return 'rate_limit'
@@ -60,6 +70,25 @@ export function llmFailureKind(error: LlmError): LlmFailureKind {
   if (error.status === 401 || error.status === 403) return 'auth'
   if (error.status === 413 || /context length|maximum context|too many tokens|context_length_exceeded/i.test(error.message)) return 'overflow'
   return 'other'
+}
+
+/** 主模型没接上、超时、被限流或没返回有效内容时换备用。认证失败、上下文过长和用户停下不换。 */
+export function shouldFallbackModel(error: LlmError): boolean {
+  if (error.message === '已停下。') return false
+  const kind = llmFailureKind(error)
+  if (kind === 'timeout' || kind === 'transient' || kind === 'upstream' || kind === 'rate_limit') return true
+  if (error.status !== undefined && error.status >= 500) return true
+  return error.code === 'INVALID_RESPONSE'
+}
+
+/** 小米 MiMo 用 thinking / api-key；本地 Qwen 用 chat_template_kwargs。 */
+export function modelDialect(config: AgentConfig): 'qwen' | 'mimo' {
+  try {
+    if (new URL(config.baseUrl).hostname.endsWith('xiaomimimo.com')) return 'mimo'
+  } catch {
+    // 地址不合法时仍按主模型的请求格式发。
+  }
+  return 'qwen'
 }
 
 export interface ChatDelta {
@@ -86,11 +115,25 @@ function endpointOf(baseUrl: string): string {
 function requestHeaders(config: AgentConfig): Record<string, string> {
   return {
     'Content-Type': 'application/json',
-    // 该端点用 x-api-key 鉴权；同时带 Bearer，兼容标准 OpenAI 网关。
+    // 本地端点用 x-api-key；小米端点用 api-key。Bearer 两边都带。
     'x-api-key': config.apiKey,
+    ...(modelDialect(config) === 'mimo' ? { 'api-key': config.apiKey } : {}),
     Authorization: `Bearer ${config.apiKey}`,
     Accept: 'text/event-stream, application/json'
   }
+}
+
+function completionLimit(config: AgentConfig): Record<string, unknown> {
+  if (config.maxTokens <= 0) return {}
+  return modelDialect(config) === 'mimo'
+    ? { max_completion_tokens: config.maxTokens }
+    : { max_tokens: config.maxTokens }
+}
+
+function thinkingBody(config: AgentConfig): Record<string, unknown> {
+  if (modelDialect(config) === 'mimo') return { thinking: { type: config.thinking ? 'enabled' : 'disabled' } }
+  // Qwen3 系用这个字段开关思考链。关掉时必须显式传 false，只省略字段时服务端仍可能在想。
+  return { chat_template_kwargs: { enable_thinking: config.thinking } }
 }
 
 interface ToolDraft { id: string; name: string; arguments: string }
@@ -236,9 +279,8 @@ export async function chatCompletion(config: AgentConfig, options: ChatOptions):
         })),
         ...(options.tools === undefined || options.tools.length === 0 ? {} : { tools: options.tools }),
         ...(options.temperature === undefined ? {} : { temperature: options.temperature }),
-        ...(config.maxTokens > 0 ? { max_tokens: config.maxTokens } : {}),
-        // Qwen3 系用这个字段开关思考链。关掉时必须显式传 false，只省略字段时服务端仍可能在想。
-        chat_template_kwargs: { enable_thinking: config.thinking },
+        ...completionLimit(config),
+        ...thinkingBody(config),
         ...(options.onDelta ? { stream: true } : {})
       }),
       signal: controller.signal
@@ -292,4 +334,38 @@ export async function chatCompletion(config: AgentConfig, options: ChatOptions):
     clearTimeout(timer)
     options.signal?.removeEventListener('abort', onExternalAbort)
   }
+}
+
+/**
+ * 这一轮先打主模型。主模型不通就换备用，并在本轮后续请求里继续用备用。
+ * 下一轮要重新 bind，好让主模型恢复后还能先试主模型。
+ * 已经开始吐字的请求不改接备用，避免两段回答粘在一起。
+ */
+export function bindModelFallback(hooks?: { onSwitch?: () => void }): (config: AgentConfig, options: ChatOptions) => Promise<ChatOutcome> {
+  let sticky = false
+  let told = false
+  return async (config, options) => {
+    if (sticky) return chatCompletion(fallbackAgentConfig(config), options)
+    if (usesFallbackEndpoint(config)) return chatCompletion(config, options)
+    let streamed = false
+    const watched: ChatOptions = options.onDelta
+      ? { ...options, onDelta: partial => { streamed = true; options.onDelta?.(partial) } }
+      : options
+    try {
+      return await chatCompletion(config, watched)
+    } catch (error) {
+      if (streamed || !(error instanceof LlmError) || !shouldFallbackModel(error)) throw error
+      sticky = true
+      if (!told) {
+        told = true
+        hooks?.onSwitch?.()
+      }
+      return chatCompletion(fallbackAgentConfig(config), options)
+    }
+  }
+}
+
+/** 单次调用的备用。对话一轮用 bindModelFallback，避免每一步都先撞主模型。 */
+export function chatCompletionWithFallback(config: AgentConfig, options: ChatOptions): Promise<ChatOutcome> {
+  return bindModelFallback()(config, options)
 }

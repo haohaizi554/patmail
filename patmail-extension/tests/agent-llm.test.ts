@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { chatCompletion, LlmError, llmFailureKind } from '../src/agent/llm'
-import { AGENT_CONFIG_DEFAULT, isAgentConfig, normalizeAgentConfig } from '../src/agent/config'
+import { bindModelFallback, chatCompletion, LlmError, llmFailureKind, modelDialect, servedModel } from '../src/agent/llm'
+import { AGENT_CONFIG_DEFAULT, AGENT_FALLBACK, fallbackAgentConfig, isAgentConfig, normalizeAgentConfig } from '../src/agent/config'
 
 const config = { ...AGENT_CONFIG_DEFAULT, maxTokens: 100 }
 
@@ -56,6 +56,16 @@ describe('chatCompletion', () => {
     expect(outcome.choices[0]?.reasoning).toBe('')
     expect(outcome.choices[0]?.content).toBe('你好')
     expect(outcome.usage).toEqual({ promptTokens: 5, completionTokens: 2 })
+    expect(servedModel(outcome, config.model)).toBe(config.model)
+  })
+
+  it('reports the model name the server sent back', async () => {
+    const fetcher = (async () => jsonResponse({
+      model: 'Qwen3.6-35B-A3B-oQ4-fp16-mtp',
+      choices: [{ message: { role: 'assistant', content: '在' }, finish_reason: 'stop' }]
+    })) as typeof fetch
+    const outcome = await chatCompletion(config, { messages: [{ role: 'user', content: '你好' }], fetcher })
+    expect(servedModel(outcome, 'other')).toBe('Qwen3.6-35B-A3B-oQ4-fp16-mtp')
   })
 
   it('sends enable_thinking and keeps the reasoning chain when thinking is on', async () => {
@@ -134,5 +144,104 @@ describe('chatCompletion', () => {
     expect(seen).toEqual(['先看文号', '先看文号，再回答', '先看文号，再回答'])
     expect(outcome.choices[0]?.reasoning).toBe('先看文号，再回答')
     expect(outcome.choices[0]?.content).toBe('可以查。')
+  })
+
+  it('talks to MiMo with api-key, thinking and max_completion_tokens', async () => {
+    let captured = ''
+    let headers: Headers | undefined
+    const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
+      captured = String(init?.body)
+      headers = new Headers(init?.headers)
+      expect(String(url)).toBe('https://api.xiaomimimo.com/v1/chat/completions')
+      return jsonResponse({ choices: [{ message: { content: '我是备用。' }, finish_reason: 'stop' }] })
+    }) as typeof fetch
+    const backup = fallbackAgentConfig({ ...config, thinking: true })
+    expect(modelDialect(backup)).toBe('mimo')
+    expect(backup.model).toBe('mimo-v2.6-pro')
+    const outcome = await chatCompletion(backup, { messages: [{ role: 'user', content: '你好' }], fetcher })
+    const body = JSON.parse(captured) as Record<string, unknown>
+    expect(body.model).toBe(AGENT_FALLBACK.model)
+    expect(body.thinking).toEqual({ type: 'enabled' })
+    expect(body.max_completion_tokens).toBe(100)
+    expect(body.chat_template_kwargs).toBeUndefined()
+    expect(body.max_tokens).toBeUndefined()
+    expect(headers?.get('api-key')).toBe(AGENT_FALLBACK.apiKey)
+    expect(headers?.get('authorization')).toBe(`Bearer ${AGENT_FALLBACK.apiKey}`)
+    expect(outcome.choices[0]?.content).toBe('我是备用。')
+  })
+})
+
+describe('model fallback', () => {
+  it('uses the backup after the primary is unreachable and keeps it for the rest of the turn', async () => {
+    const models: string[] = []
+    let primaryCalls = 0
+    const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { model: string; thinking?: { type: string } }
+      models.push(body.model)
+      if (String(url).includes('43.138.138.200')) {
+        primaryCalls += 1
+        return new Response('bad gateway', { status: 502 })
+      }
+      expect(body.thinking).toEqual({ type: 'disabled' })
+      return jsonResponse({ choices: [{ message: { content: '备用接上了' }, finish_reason: 'stop' }] })
+    }) as typeof fetch
+    const notices: string[] = []
+    const chat = bindModelFallback({ onSwitch: () => notices.push('switched') })
+    const first = await chat(config, { messages: [{ role: 'user', content: '你好' }], fetcher })
+    const second = await chat(config, { messages: [{ role: 'user', content: '再来' }], fetcher })
+    expect(first.choices[0]?.content).toBe('备用接上了')
+    expect(second.choices[0]?.content).toBe('备用接上了')
+    expect(primaryCalls).toBe(1)
+    expect(models).toEqual([config.model, 'mimo-v2.6-pro', 'mimo-v2.6-pro'])
+    expect(notices).toEqual(['switched'])
+  })
+
+  it('does not switch when the primary rejects the key or the user stops', async () => {
+    let calls = 0
+    const denied = (async () => {
+      calls += 1
+      return new Response('unauthorized', { status: 401 })
+    }) as typeof fetch
+    await expect(bindModelFallback()(config, { messages: [{ role: 'user', content: 'hi' }], fetcher: denied })).rejects.toSatisfy((error: unknown) => {
+      return error instanceof LlmError && error.status === 401
+    })
+    expect(calls).toBe(1)
+
+    const stopped = (async (_url: string | URL | Request, init?: RequestInit) => {
+      calls += 1
+      init?.signal?.throwIfAborted?.()
+      throw new DOMException('aborted', 'AbortError')
+    }) as typeof fetch
+    const signal = AbortSignal.abort()
+    await expect(bindModelFallback()(config, { messages: [{ role: 'user', content: 'hi' }], fetcher: stopped, signal })).rejects.toSatisfy((error: unknown) => {
+      return error instanceof LlmError && error.message === '已停下。'
+    })
+    expect(calls).toBe(2)
+  })
+
+  it('does not switch after the primary has already started streaming', async () => {
+    let calls = 0
+    const fetcher = (async () => {
+      calls += 1
+      const encoder = new TextEncoder()
+      let sent = false
+      const stream = new ReadableStream({
+        pull(controller) {
+          if (!sent) {
+            sent = true
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: '半句' } }] })}\n\n`))
+            return
+          }
+          controller.error(new Error('socket closed'))
+        }
+      })
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }) as typeof fetch
+    await expect(bindModelFallback()(config, {
+      messages: [{ role: 'user', content: 'hi' }],
+      fetcher,
+      onDelta: () => {}
+    })).rejects.toBeInstanceOf(LlmError)
+    expect(calls).toBe(1)
   })
 })

@@ -13,9 +13,12 @@ const props = defineProps({
   profileDept: { type: String, default: '知识产权部' },
   avatarSrc: { type: String, default: '' },
   showDemo: { type: Boolean, default: true },
-  showSettings: { type: Boolean, default: true }
+  showSettings: { type: Boolean, default: true },
+  showMode: { type: Boolean, default: false },
+  mode: { type: String, default: 'large' },
+  modeBusy: { type: Boolean, default: false }
 })
-const emit = defineEmits(['navigate', 'update:search', 'settings', 'preview'])
+const emit = defineEmits(['navigate', 'update:search', 'settings', 'preview', 'mode'])
 const menu = computed(() => props.items || nav)
 </script>
 
@@ -66,6 +69,10 @@ const menu = computed(() => props.items || nav)
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.5 1.5M16.5 16.5 18 18M18 6l-1.5 1.5M7.5 16.5 6 18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           系统设置
         </button>
+        <div v-if="showMode" class="mode-switch" role="group" aria-label="客户系统">
+          <button type="button" :class="{ on: mode === 'large' }" :disabled="modeBusy" title="http://183.36.43.66:88" @click="emit('mode', 'large')">大客户</button>
+          <button type="button" :class="{ on: mode === 'sme' }" :disabled="modeBusy" title="http://183.36.43.44:88" @click="emit('mode', 'sme')">中小客户</button>
+        </div>
         <button v-if="showDemo" class="float-entry" @click="emit('navigate', '浮窗')">发文浮窗预览</button>
       </aside>
       <div class="workspace">

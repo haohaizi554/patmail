@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, reactive, ref, watch } from 'vue'
+import { computed, inject, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import MailTypeTreeSelect from '../../shell/components/MailTypeTreeSelect.vue'
 import ThemeSelect from '../../shell/components/ThemeSelect.vue'
 import EmptyGuide from './EmptyGuide.vue'
@@ -8,13 +8,18 @@ import type { MailSender } from '../../customer/mailset'
 import { PCT_RESUME_KEY, PENDING_CUSTOMER_KEY } from '../../customer/mail-flow'
 import { fillSheetEmails } from '../../customer/customer-page'
 import { IC_LOOKUP_WIDTH } from '../../customer/ic-flow-lookup'
-import { iprArbitrationWaves, isPctWorkbookSheet, missedSourceSheets, pctRowsFromWorkbook } from '../../customer/pct-workbook'
-import { applyPctMailTypes, buildPctTask, clonePctTask, matchSheetCtrlProcs, readWorkflowTask, summarizePctTask, volumesOf, writeWorkflowTask } from '../../customer/pct-sheet'
+import { MAILED_UNFINISHED_REVIEW, SKIP_SEND_REVIEW, type IcFlowHit } from '../../customer/pct-flow-status'
+import { paintTaskCheckProgress, resetTaskCheckProgress } from '../check-progress'
+import { applyArbitrationReply, checkedSourceSheets, iprArbitrationWaves, isPctWorkbookSheet, missedSourceSheets, pctRowsFromWorkbook, type ArbitrationDecision } from '../../customer/pct-workbook'
+import { applyPctMailTypes, buildPctTask, clonePctTask, matchSheetCtrlProcs, procGapNotes, readWorkflowTask, summarizePctTask, volumesOf, writeWorkflowTask } from '../../customer/pct-sheet'
 import type { CustomerQueryProfile, PctTaskRow } from '../../customer/types'
 import { groupWorkflowRows } from '../../customer/workflow-mail'
 import { arbitratedMark, carriedMark, sheetDisplayName, sheetRecipientNames, usesInventorSheet } from '../../customer/pct-recipients'
 import { inventorCustomerNames, isRunnableWorkflow, recipientModeOf } from '../../workflow/catalog'
 import { downloadXlsxSheets, readXlsxSheets } from '../../customer/xlsx-table'
+import { fetchCustomerList } from '../../customer/customer-list-load'
+import { matchListedCustomer } from '../../customer/customer-list'
+import { caseTextUsable } from '../../customer/case-arbitration'
 import { assembleMail, fillFromRules } from '../../mail'
 import type { AssembledMail } from '../../mail/assemble'
 import type { MailRuleBundle, SelectedPatentFile } from '../../mail/types'
@@ -61,17 +66,24 @@ const limitPhase = ref<'idle' | 'run' | 'done' | 'fail'>('idle')
 const limitNote = ref('')
 const icPhase = ref<'idle' | 'run' | 'done' | 'fail'>('idle')
 const icNote = ref('')
-type IcHit = { found: boolean; gate: '' | 'open' | 'pending' | 'done'; unread?: true; statusUnread?: true }
-const icByKey = reactive<Record<string, IcHit>>({})
+type IcHit = { found: boolean; gate: '' | 'open' | 'pending' | 'done'; uncontrolled?: true; skipSend?: true; unread?: true; statusUnread?: true }
+type FlowAsk = { caseVolume: string; procLabel: string; customerVolume?: string }
+let icHits: Record<string, IcHit> = Object.create(null)
+const icEpoch = ref(0)
+const PUBLISH_MS = 800
+let publishTimer = 0
 const limitByKey = reactive<Record<string, string>>({})
 const gapWaves = ref<string[]>([])
 const sheetPage = ref(1)
 const askingGap = ref(false)
+const arbitrationOpen = ref(false)
+const arbitrationBoard = ref<Array<ArbitrationDecision & { customer: string }>>([])
 const abnormalKeys = ref(new Set<string>())
 const confirmedProcIds = ref<string[]>([])
 let sheetQueryToken = 0
 let sheetImportToken = 0
-let liveAsked: Array<{ caseVolume: string; procLabel: string; tries: number }> | null = null
+let liveAsked: Array<FlowAsk & { tries: number }> | null = null
+let liveMeter: { total: number; startedAt: number; finished: Set<string> } | null = null
 const SHEET_PAGE_SIZE = 100
 
 const definition = computed(() => props.catalog.workflows.find(item => item.id === workflowId.value) ?? null)
@@ -119,12 +131,14 @@ const styleNotes = computed(() => {
     return [`「${name}」在客户管理里保存的发文方式是${label ? `「${label}」` : '另一种'}。发到原网站时会按保存的方式。`]
   })
 })
-const offCount = computed(() => rows.value.filter(row => row.procLabel && row.procLabel !== runtime.value.procLabel).length)
+const procGaps = computed(() => procGapNotes(rows.value, runtime.value.procLabel))
 const pendingRows = computed(() => rows.value.filter(row => sheetStatus(row).review === '还没提交审核'))
-const outcome = computed(() => {
-  if (!rows.value.length) return ''
+const outcomePack = computed(() => {
+  const empty = { text: '', bars: [] as Array<{ key: string; label: string; count: number; color: string; percent: number }> }
+  if (!rows.value.length) return empty
   let pending = 0
   let submitted = 0
+  let mailed = 0
   let done = 0
   let missing = 0
   let unread = 0
@@ -132,6 +146,7 @@ const outcome = computed(() => {
   let statusMiss = 0
   let checking = 0
   let abnormal = 0
+  let skipped = 0
   for (const row of rows.value) {
     const status = sheetStatus(row)
     if (status.review === '异常') abnormal += 1
@@ -140,6 +155,8 @@ const outcome = computed(() => {
     else if (status.found === '正在查' || status.review === '…') checking += 1
     else if (status.review === '还没提交审核') pending += 1
     else if (status.review === '已提交审核') submitted += 1
+    else if (status.review === MAILED_UNFINISHED_REVIEW) mailed += 1
+    else if (status.review === SKIP_SEND_REVIEW) skipped += 1
     else if (status.review === '已经审核通过') done += 1
     else if (status.review === '没有这项处理事项') noProc += 1
     else if (status.review === '状态没读到') statusMiss += 1
@@ -147,9 +164,11 @@ const outcome = computed(() => {
     else missing += 1
   }
   const letters = pending && icPhase.value !== 'run' ? groupWorkflowRows('1', rows.value.filter(row => sheetStatus(row).review === '还没提交审核'), specials.value, recipientMode.value).length : 0
-  return [
+  const text = [
     pending ? (letters ? `还有 ${pending} 行待处理，会分成 ${letters} 封。` : `还有 ${pending} 行待处理。`) : '没有待处理的行。',
     submitted ? `已提交审核 ${submitted} 行。` : '',
+    mailed ? `${MAILED_UNFINISHED_REVIEW} ${mailed} 行。` : '',
+    skipped ? `${SKIP_SEND_REVIEW} ${skipped} 行。` : '',
     done ? `已经审核通过 ${done} 行。` : '',
     missing ? `库里没有 ${missing} 行。` : '',
     unread ? `没查成 ${unread} 行。` : '',
@@ -158,7 +177,27 @@ const outcome = computed(() => {
     abnormal ? `异常 ${abnormal} 行。` : '',
     checking ? `还有 ${checking} 行正在核对。` : ''
   ].filter(Boolean).join('')
+  const bars = [
+    { key: 'pending', label: '待处理', count: pending, color: '#1d4ed8' },
+    { key: 'submitted', label: '已提交审核', count: submitted, color: '#9a6700' },
+    { key: 'mailed', label: MAILED_UNFINISHED_REVIEW, count: mailed, color: '#3e5670' },
+    { key: 'skipped', label: SKIP_SEND_REVIEW, count: skipped, color: '#7a3e86' },
+    { key: 'done', label: '已经审核通过', count: done, color: '#157a45' },
+    { key: 'missing', label: '库里没有', count: missing, color: '#c4234e' },
+    { key: 'unread', label: '没查成', count: unread, color: '#c4234e' },
+    { key: 'noProc', label: '没有这项处理事项', count: noProc, color: '#8b95a8' },
+    { key: 'statusMiss', label: '状态没读到', count: statusMiss, color: '#8b95a8' },
+    { key: 'abnormal', label: '异常', count: abnormal, color: '#9a6700' },
+    { key: 'checking', label: '正在核对', count: checking, color: '#b7c0d2' }
+  ].filter(item => item.count > 0)
+  const widest = Math.max(...bars.map(item => item.count), 1)
+  return {
+    text,
+    bars: bars.map(item => ({ ...item, percent: Math.max(2, Math.round(item.count / widest * 1000) / 10) }))
+  }
 })
+const outcome = computed(() => outcomePack.value.text)
+const outcomeBars = computed(() => outcomePack.value.bars)
 const outcomeGroups = computed(() => {
   if (icPhase.value === 'run') return []
   const groups = groupWorkflowRows('1', pendingRows.value, specials.value, recipientMode.value)
@@ -226,6 +265,8 @@ async function onSheet(event: Event): Promise<void> {
   progress.value = []
   status.value = ''
   abnormalKeys.value = new Set()
+  arbitrationBoard.value = []
+  arbitrationOpen.value = false
   resetLimit()
   if (!file) return
   sheetName.value = file.name
@@ -302,8 +343,16 @@ function carriedContactNote(row: PctTaskRow): string {
   return marked ? `第一客户联系人 ${marked}` : ''
 }
 
+function releasePublish(): void {
+  if (!publishTimer) return
+  window.clearTimeout(publishTimer)
+  publishTimer = 0
+}
+
 function clearHits(): void {
-  for (const key of Object.keys(icByKey)) delete icByKey[key]
+  releasePublish()
+  icHits = Object.create(null)
+  icEpoch.value += 1
   for (const key of Object.keys(limitByKey)) delete limitByKey[key]
 }
 
@@ -319,6 +368,8 @@ function resetLimit(): void {
   icPhase.value = 'idle'
   icNote.value = ''
   clearHits()
+  liveMeter = null
+  resetTaskCheckProgress()
 }
 
 function volumeKey(value: string): string {
@@ -328,14 +379,18 @@ function volumeKey(value: string): string {
 function statusShade(text: string): string {
   if (text === '还没提交审核') return 'shade-open'
   if (text === '已经审核通过') return 'shade-done'
+  if (text === MAILED_UNFINISHED_REVIEW) return 'shade-mailed'
+  if (text === SKIP_SEND_REVIEW) return 'shade-skip'
   if (text === '已提交审核') return 'shade-pending'
   if (text === '异常') return 'shade-abnormal'
   if (text === '库里没有' || text === '没查成') return 'shade-missing'
   return ''
 }
 
-function reviewLabel(gate: 'open' | 'pending' | 'done' | undefined): string {
+function reviewLabel(gate: 'open' | 'pending' | 'done' | undefined, hit?: { uncontrolled?: true; skipSend?: true }): string {
+  if (hit?.skipSend) return SKIP_SEND_REVIEW
   if (gate === 'pending') return '已提交审核'
+  if (gate === 'done' && hit?.uncontrolled) return MAILED_UNFINISHED_REVIEW
   if (gate === 'done') return '已经审核通过'
   if (gate === 'open') return '还没提交审核'
   return '—'
@@ -351,7 +406,7 @@ function limitReview(row: PctTaskRow): string {
 
 function sheetMemo(row: PctTaskRow): string {
   const status = sheetStatus(row)
-  return `${status.found}\n${status.review}`
+  return `${status.found}\n${status.review}\n${row.ourVolume}\n${row.customerVolume}\n${row.ourVolumeCorrected ? 1 : 0}\n${row.customerVolumeCorrected ? 1 : 0}`
 }
 
 function sheetStatus(row: PctTaskRow): { found: string; review: string } {
@@ -361,8 +416,9 @@ function sheetStatus(row: PctTaskRow): { found: string; review: string } {
 }
 
 function sheetReview(row: PctTaskRow): { found: string; review: string } {
+  const published = icEpoch.value
   const fromLimit = limitReview(row)
-  const hit = icByKey[icKey(row.ourVolume, row.procLabel)]
+  const hit = published >= 0 ? icHits[icKey(row.ourVolume.trim() || row.customerVolume, row.procLabel)] : undefined
   if (hit) {
     if (hit.unread) return { found: '没查成', review: '—' }
     if (hit.statusUnread) return { found: '有', review: '状态没读到' }
@@ -370,7 +426,7 @@ function sheetReview(row: PctTaskRow): { found: string; review: string } {
       if (fromLimit && fromLimit !== '…') return { found: '有', review: fromLimit }
       return { found: '库里没有', review: '—' }
     }
-    const fromFlow = hit.gate ? reviewLabel(hit.gate) : ''
+    const fromFlow = hit.gate ? reviewLabel(hit.gate, hit) : ''
     if (fromLimit === '还没提交审核' && fromFlow === '已经审核通过') {
       return { found: '有', review: fromLimit }
     }
@@ -393,77 +449,129 @@ const flowByKey = computed(() => {
   for (const row of rows.value) {
     const review = sheetStatus(row).review
     if (!review || review === '—' || review === '…') continue
-    out[icKey(row.ourVolume, row.procLabel)] = review
+    out[icKey(row.ourVolume.trim() || row.customerVolume, row.procLabel)] = review
   }
   return out
 })
 
-async function lookupCases(token: number, only?: Array<{ caseVolume: string; procLabel: string }>): Promise<void> {
-  const again = Boolean(only)
-  icPhase.value = 'run'
-  if (!again) {
-    for (const key of Object.keys(icByKey)) delete icByKey[key]
+function flowAsk(our: string, proc: string, customer = ''): FlowAsk | null {
+  const ours = our.trim()
+  const theirs = customer.trim()
+  const caseVolume = ours || theirs
+  const procLabel = proc.trim()
+  if (!caseVolume || !procLabel) return null
+  const ask: FlowAsk = { caseVolume, procLabel }
+  if (!ours && theirs) ask.customerVolume = theirs
+  else if (ours && theirs && volumeKey(ours) !== volumeKey(theirs)) ask.customerVolume = theirs
+  return ask
+}
+
+function applyVolumeFixes(item: IcFlowHit): void {
+  if (!item.correctedOur && !item.correctedCustomer) return
+  const proc = item.procLabel.trim()
+  const sent = volumeKey(item.caseVolume)
+  for (const row of rows.value) {
+    if (row.procLabel.trim() !== proc) continue
+    if (volumeKey(row.ourVolume.trim() || row.customerVolume.trim()) !== sent) continue
+    if (item.correctedOur && row.ourVolume.trim()) {
+      row.ourVolume = item.correctedOur
+      row.ourVolumeCorrected = true
+    }
+    if (item.correctedCustomer && row.customerVolume.trim()) {
+      row.customerVolume = item.correctedCustomer
+      row.customerVolumeCorrected = true
+    }
   }
-  icNote.value = again ? '正在把没查成的重新入队…' : '正在用案件查询核对文号和流程状态…'
+}
+
+function hitFromItem(item: IcFlowHit): IcHit {
+  if (item.unread) return { found: false, gate: '', unread: true }
+  if (item.statusUnread) return { found: true, gate: '', statusUnread: true }
+  return {
+    found: item.found,
+    gate: item.gate,
+    ...(item.uncontrolled ? { uncontrolled: true as const } : {}),
+    ...(item.skipSend ? { skipSend: true as const } : {})
+  }
+}
+
+async function lookupCases(token: number, only?: FlowAsk[], kind: 'unread' | 'missing' = 'unread'): Promise<void> {
+  const again = Boolean(only)
+  releasePublish()
   if (!bridge || connection.value.sessionStatus !== 'authenticated') {
     icPhase.value = 'fail'
     icNote.value = '还没连上 EASY，库里有没有还没查。'
+    resetTaskCheckProgress()
     return
   }
   const page = bridge
   const seen = new Set<string>()
-  const source = only ?? rows.value.map(row => ({ caseVolume: row.ourVolume, procLabel: row.procLabel }))
-  const asked: Array<{ caseVolume: string; procLabel: string; tries: number }> = []
+  const source = only ?? rows.value.map(row => flowAsk(row.ourVolume, row.procLabel, row.customerVolume)).filter((row): row is FlowAsk => Boolean(row))
+  const asked: Array<FlowAsk & { tries: number }> = []
   liveAsked = asked
   for (const row of source) {
-    const caseVolume = row.caseVolume.trim()
-    const procLabel = row.procLabel.trim()
-    if (!caseVolume || !procLabel) continue
-    const key = icKey(caseVolume, procLabel)
+    const ask = row.customerVolume && volumeKey(row.customerVolume) === volumeKey(row.caseVolume)
+      ? row
+      : flowAsk(row.caseVolume, row.procLabel, row.customerVolume ?? '')
+    if (!ask) continue
+    const key = icKey(ask.caseVolume, ask.procLabel)
     if (seen.has(key)) continue
     seen.add(key)
-    if (again) delete icByKey[key]
-    asked.push({ caseVolume, procLabel, tries: 0 })
+    asked.push({ ...ask, tries: 0 })
   }
-  const total = asked.length
-  type Hit = { found: boolean; gate: '' | 'open' | 'pending' | 'done'; unread?: true; statusUnread?: true }
-  const next: Record<string, Hit> = {}
-  const pending: Record<string, Hit> = {}
-  let flushTimer = 0
+  const meter = { total: asked.length, startedAt: Date.now(), finished: new Set<string>() }
+  liveMeter = meter
+  paintTaskCheckProgress(0, meter.total, meter.startedAt, 'run')
+  await new Promise(resolve => window.setTimeout(resolve, 50))
+  if (token !== sheetQueryToken) return
+  icPhase.value = 'run'
+  icNote.value = !again ? '正在用案件查询核对文号和流程状态…' : kind === 'missing' ? '正在把库里没有的放回队尾…' : '正在把没查成的重新入队…'
+  if (!again) icHits = Object.create(null)
+  else {
+    for (const job of asked) delete icHits[icKey(job.caseVolume, job.procLabel)]
+  }
+  icEpoch.value += 1
   let stopped = ''
   // 一批 16 行走同一条 LookupIcFlow，里面 8 路同时查。一行一条消息时，每行都先做一次登录检查，单位时间条数会掉下去。
   const batchSize = 16
 
-  function flush(): void {
-    if (flushTimer) {
-      window.clearTimeout(flushTimer)
-      flushTimer = 0
-    }
-    if (token !== sheetQueryToken || !Object.keys(pending).length) return
-    Object.assign(next, pending)
-    for (const key of Object.keys(pending)) {
-      icByKey[key] = pending[key]
-      delete pending[key]
-    }
-    icNote.value = `正在核对 ${Object.keys(next).length}/${total}…`
+  function publishRun(): void {
+    if (token !== sheetQueryToken) return
+    icNote.value = `正在核对 ${meter.finished.size}/${meter.total}…`
+    icEpoch.value += 1
+    paintTaskCheckProgress(meter.finished.size, meter.total, meter.startedAt, 'run')
   }
 
-  function stage(key: string, hit: Hit): void {
-    pending[key] = hit
-    if (Object.keys(pending).length >= 24) flush()
-    else if (!flushTimer) flushTimer = window.setTimeout(flush, 500)
+  function schedulePublish(): void {
+    if (publishTimer || token !== sheetQueryToken) return
+    publishTimer = window.setTimeout(() => {
+      publishTimer = 0
+      publishRun()
+    }, PUBLISH_MS)
   }
 
-  function store(item: { caseVolume: string; procLabel: string; found: boolean; gate: '' | 'open' | 'pending' | 'done'; unread?: true; statusUnread?: true }): void {
-    const key = icKey(item.caseVolume, item.procLabel)
-    if (item.unread) stage(key, { found: false, gate: '', unread: true })
-    else if (item.statusUnread) stage(key, { found: true, gate: '', statusUnread: true })
-    else stage(key, { found: item.found, gate: item.gate })
+  function stage(key: string, hit: IcHit): void {
+    icHits[key] = hit
+    schedulePublish()
   }
 
-  function requeue(job: { caseVolume: string; procLabel: string; tries: number }): void {
+  function store(item: IcFlowHit): void {
+    applyVolumeFixes(item)
+    const hit = hitFromItem(item)
+    const key = icKey(item.correctedOur || item.caseVolume, item.procLabel)
+    stage(key, hit)
+    const previous = icKey(item.caseVolume, item.procLabel)
+    if (previous !== key) stage(previous, hit)
+    meter.finished.add(previous)
+  }
+
+  function requeue(job: FlowAsk & { tries: number }): void {
     if (job.tries < 1) asked.push({ ...job, tries: job.tries + 1 })
-    else stage(icKey(job.caseVolume, job.procLabel), { found: false, gate: '', unread: true })
+    else {
+      const key = icKey(job.caseVolume, job.procLabel)
+      stage(key, { found: false, gate: '', unread: true })
+      meter.finished.add(key)
+    }
   }
 
   async function worker(): Promise<void> {
@@ -472,7 +580,7 @@ async function lookupCases(token: number, only?: Array<{ caseVolume: string; pro
       if (!jobs.length) return
       const response = await page.request({
         type: MessageType.LookupIcFlow,
-        payload: { rows: jobs.map(job => ({ caseVolume: job.caseVolume, procLabel: job.procLabel })) }
+        payload: { rows: jobs.map(job => ({ caseVolume: job.caseVolume, procLabel: job.procLabel, ...(job.customerVolume ? { customerVolume: job.customerVolume } : {}) })) }
       })
       if (token !== sheetQueryToken) return
       if (response.type !== MessageType.LookupIcFlowResult || !response.payload.ok) {
@@ -492,9 +600,10 @@ async function lookupCases(token: number, only?: Array<{ caseVolume: string; pro
       for (const item of response.payload.data.items) {
         const key = icKey(item.caseVolume, item.procLabel)
         returned.add(key)
-        const tries = jobs.find(job => icKey(job.caseVolume, job.procLabel) === key)?.tries ?? 0
+        const job = jobs.find(entry => icKey(entry.caseVolume, entry.procLabel) === key)
+        const tries = job?.tries ?? 0
         if (item.unread && tries < 1) {
-          asked.push({ caseVolume: item.caseVolume, procLabel: item.procLabel, tries: tries + 1 })
+          asked.push({ caseVolume: item.caseVolume, procLabel: item.procLabel, ...(job?.customerVolume ? { customerVolume: job.customerVolume } : {}), tries: tries + 1 })
           continue
         }
         store(item)
@@ -508,59 +617,82 @@ async function lookupCases(token: number, only?: Array<{ caseVolume: string; pro
   try {
     await worker()
   } finally {
+    releasePublish()
     if (liveAsked === asked) liveAsked = null
+    if (liveMeter === meter) liveMeter = null
   }
-  if (flushTimer) window.clearTimeout(flushTimer)
   if (token !== sheetQueryToken) return
-  flush()
+  icEpoch.value += 1
+  paintTaskCheckProgress(meter.finished.size, meter.total, meter.startedAt, stopped ? 'fail' : 'done')
   if (stopped) {
     icPhase.value = 'fail'
     icNote.value = stopped
     return
   }
   icPhase.value = 'done'
-  const found = Object.values(next).filter(item => item.found).length
-  const unreadCount = Object.values(next).filter(item => item.unread).length
+  let found = 0
+  let unreadCount = 0
+  for (const key of meter.finished) {
+    const hit = icHits[key]
+    if (!hit) continue
+    if (hit.found) found += 1
+    if (hit.unread) unreadCount += 1
+  }
   const missed = unreadCount ? `${unreadCount} 件没查成，其余已经对过。` : ''
+  const againLabel = kind === 'missing' ? '库里没有' : '没查成'
   icNote.value = again
-    ? `没查成的 ${total} 行又对过，这次对上 ${found} 件。${missed}`
+    ? `${againLabel}的 ${meter.total} 行又对过，这次对上 ${found} 件。${missed}`
     : `案件查询对上 ${found} 件。${missed}结束的事项也会留在结果里。`
 }
 
-function unreadJobs(): Array<{ caseVolume: string; procLabel: string }> {
-  const jobs: Array<{ caseVolume: string; procLabel: string }> = []
+function jobsByFound(found: string): FlowAsk[] {
+  const jobs: FlowAsk[] = []
   const seen = new Set<string>()
   for (const row of rows.value) {
-    if (sheetStatus(row).found !== '没查成') continue
-    const caseVolume = row.ourVolume.trim()
-    const procLabel = row.procLabel.trim()
-    const key = icKey(caseVolume, procLabel)
-    if (!caseVolume || !procLabel || seen.has(key)) continue
+    if (sheetStatus(row).found !== found) continue
+    const ask = flowAsk(row.ourVolume, row.procLabel, row.customerVolume)
+    if (!ask) continue
+    const key = icKey(ask.caseVolume, ask.procLabel)
+    if (seen.has(key)) continue
     seen.add(key)
-    jobs.push({ caseVolume, procLabel })
+    jobs.push(ask)
   }
   return jobs
 }
 
-function requeueUnread(): void {
-  const jobs = unreadJobs()
+function requeueFound(found: '没查成' | '库里没有', kind: 'unread' | 'missing', queuedNote: (count: number) => string): void {
+  const jobs = jobsByFound(found)
   if (!jobs.length) return
   const queue = liveAsked
-  if (queue && icPhase.value === 'run') {
+  const meter = liveMeter
+  if (queue && meter && icPhase.value === 'run') {
     const queued = new Set(queue.map(job => icKey(job.caseVolume, job.procLabel)))
     let added = 0
     for (const job of jobs) {
       const key = icKey(job.caseVolume, job.procLabel)
       if (queued.has(key)) continue
-      delete icByKey[key]
+      delete icHits[key]
       queue.push({ ...job, tries: 0 })
       queued.add(key)
+      if (!meter.finished.delete(key)) meter.total += 1
       added += 1
     }
-    if (added) icNote.value = `已把 ${added} 行没查成的放回正在核对的队列。`
+    if (added) {
+      icEpoch.value += 1
+      paintTaskCheckProgress(meter.finished.size, meter.total, meter.startedAt, 'run')
+      icNote.value = queuedNote(added)
+    }
     return
   }
-  void lookupCases(++sheetQueryToken, jobs)
+  void lookupCases(++sheetQueryToken, jobs, kind)
+}
+
+function requeueUnread(): void {
+  requeueFound('没查成', 'unread', count => `已把 ${count} 行没查成的放回正在核对的队列。`)
+}
+
+function requeueMissing(): void {
+  requeueFound('库里没有', 'missing', count => `已把 ${count} 行库里没有的放进队尾。`)
 }
 
 function onLimitResult(payload: { items: LimitMonitorRow[]; gates: Record<string, 'open' | 'pending' | 'done'>; checking: boolean; message: string }): void {
@@ -708,8 +840,8 @@ async function startSheetQuery(): Promise<void> {
     volumes: joinCaseVolumes(rows.value.filter(row => row.procLabel.trim() === (resolved.names[index] ?? '')).map(row => row.ourVolume.trim()).filter(Boolean))
   }))
   queryCaseVolume.value = ''
-  querySeed.value = { ctrl_proc: ids[0] ?? '' }
-  if (ids.length > 1) limitNote.value = `表格里有 ${ids.length} 种处理事项，期限监控按事项分开查。`
+  querySeed.value = { ctrl_proc: ids.join(',') }
+  if (ids.length > 1) limitNote.value = `表格里有 ${ids.length} 种处理事项。查询一次带上这些事项和全部文号，一行只会命中其中一项。`
   queryToken.value += 1
   queryOpen.value = true
   void lookupCases(token)
@@ -907,7 +1039,12 @@ async function onRefreshStatus(payload: { targets: Array<{ caseVolume: string; p
     logProgress(`正在用案件查询回传 ${unique.length} 件。`)
     const response = await bridge.request({
       type: MessageType.LookupIcFlow,
-      payload: { rows: unique.slice(0, IC_LOOKUP_WIDTH).map(item => ({ caseVolume: item.caseVolume.trim(), procLabel: item.procLabel.trim() })) }
+      payload: {
+        rows: unique.slice(0, IC_LOOKUP_WIDTH).map(item => {
+          const row = rows.value.find(entry => volumeKey(entry.ourVolume) === volumeKey(item.caseVolume) && entry.procLabel.trim() === item.procLabel.trim())
+          return flowAsk(item.caseVolume, item.procLabel, row?.customerVolume ?? '') ?? { caseVolume: item.caseVolume.trim(), procLabel: item.procLabel.trim() }
+        })
+      }
     })
     if (response.type !== MessageType.LookupIcFlowResult || !response.payload.ok) {
       const message = response.type === MessageType.LookupIcFlowResult && !response.payload.ok
@@ -919,11 +1056,14 @@ async function onRefreshStatus(payload: { targets: Array<{ caseVolume: string; p
       return
     }
     for (const item of response.payload.data.items) {
-      const key = icKey(item.caseVolume, item.procLabel)
-      if (item.unread) icByKey[key] = { found: false, gate: '', unread: true }
-      else if (item.statusUnread) icByKey[key] = { found: true, gate: '', statusUnread: true }
-      else icByKey[key] = { found: item.found, gate: item.gate }
+      applyVolumeFixes(item)
+      const hit = hitFromItem(item)
+      const key = icKey(item.correctedOur || item.caseVolume, item.procLabel)
+      icHits[key] = hit
+      const previous = icKey(item.caseVolume, item.procLabel)
+      if (previous !== key) icHits[previous] = hit
     }
+    icEpoch.value += 1
     if (icPhase.value === 'idle') icPhase.value = 'done'
     for (const item of unique) {
       const row = rows.value.find(entry => volumeKey(entry.ourVolume) === volumeKey(item.caseVolume) && entry.procLabel.trim() === item.procLabel.trim())
@@ -970,12 +1110,125 @@ function exportUnread(): void {
   exportByVerdict(found => found === '没查成', count => `没查成-${count}行.xlsx`)
 }
 
+function exportChecked(): void {
+  const sheets = checkedSourceSheets(rows.value, row => {
+    const status = sheetStatus(row)
+    if (status.review && status.review !== '—' && status.review !== '…') return status.review
+    return status.found
+  }, runtime.value.columns)
+  if (!sheets.length) return
+  downloadXlsxSheets(sheets, `核对结果-${rows.value.length}行.xlsx`)
+}
+
+async function mapPool<T>(items: T[], size: number, run: (item: T) => Promise<void>): Promise<void> {
+  let index = 0
+  async function worker(): Promise<void> {
+    for (;;) {
+      const current = index
+      index += 1
+      const item = items[current]
+      if (item === undefined) return
+      await run(item)
+    }
+  }
+  const workers = Math.min(size, items.length)
+  if (workers > 0) await Promise.all(Array.from({ length: workers }, () => worker()))
+}
+
+async function readCustomerInfo(customerId: string): Promise<string> {
+  if (!bridge) return ''
+  const demand = await bridge.request({ type: MessageType.ReadCustomerDemands, payload: { customerId } })
+  const directory = await bridge.request({ type: MessageType.ReadCustomerDirectory, payload: { customerId } })
+  const demandText = demand.type === MessageType.CustomerDemandResult && demand.payload.ok ? demand.payload.data.text.trim() : ''
+  const contacts = directory.type === MessageType.CustomerDirectoryResult && directory.payload.ok ? directory.payload.data.rows : []
+  if (!demandText && !contacts.length) return ''
+  const people = contacts.slice(0, 40).map(row => [row.name, row.contactType, row.email].filter(Boolean).join('｜'))
+  return [
+    `客户要求：\n${demandText || '这一页没有客户要求。'}`,
+    people.length ? `客户联系人：\n${people.join('\n')}` : '客户联系人：这一页没有联系人。'
+  ].join('\n')
+}
+
+async function readCaseText(volume: string): Promise<string> {
+  if (!bridge) return ''
+  const response = await bridge.request({ type: MessageType.ReadCaseFields, payload: { caseVolume: volume } })
+  return response.type === MessageType.ReadCaseFieldsResult ? response.payload.text : ''
+}
+
+function onArbitrationResult(event: Event): void {
+  const text = event instanceof CustomEvent && typeof event.detail === 'string' ? event.detail : ''
+  if (!text.trim()) return
+  const applied = applyArbitrationReply(rows.value, text)
+  rows.value = applied.rows
+  gapWaves.value = iprArbitrationWaves(rows.value)
+  const known = new Map(arbitrationBoard.value.map(item => [volumeKey(item.volume), item]))
+  for (const decision of applied.decisions) {
+    const row = rows.value.find(item => volumeKey(item.ourVolume) === volumeKey(decision.volume) || (item.customerVolume && volumeKey(item.customerVolume) === volumeKey(decision.volume)))
+    known.set(volumeKey(decision.volume), { ...decision, customer: row?.customerName ?? '' })
+  }
+  arbitrationBoard.value = [...known.values()]
+  if (applied.decisions.length) arbitrationOpen.value = true
+  const note = applied.written ? `仲裁写回 ${applied.written} 行。` : '这批回复没有对上的文号，没有写回表格。'
+  const unsure = applied.unsure ? `拿不准 ${applied.unsure} 行，没有填收件人。` : ''
+  sheetNotice.value = [note, unsure].filter(Boolean).join('')
+  buildPreview()
+}
+
+onMounted(() => window.addEventListener('patmail-arbitration-result', onArbitrationResult))
+onUnmounted(() => window.removeEventListener('patmail-arbitration-result', onArbitrationResult))
+
 async function askGaps(): Promise<void> {
-  const waves = gapWaves.value.filter(item => item.trim())
-  if (!waves.length || askingGap.value) return
+  const gaps = rows.value.filter(row => !row.iprName.trim())
+  if (!gaps.length || askingGap.value) return
+  if (!bridge) {
+    sheetNotice.value = '还没连上，客户信息和著录项目都没读到，没有交给仲裁。'
+    return
+  }
   askingGap.value = true
-  window.dispatchEvent(new CustomEvent('patmail-arbitrate', { detail: waves }))
-  askingGap.value = false
+  try {
+    sheetNotice.value = '正在读客户名单…'
+    const listed = await fetchCustomerList(bridge, false)
+    if (!listed.ok) {
+      sheetNotice.value = `${listed.message}客户信息和著录项目都没读到，没有交给仲裁。`
+      return
+    }
+    const customerInfo: Record<string, string> = {}
+    const names = [...new Set(gaps.map(row => row.customerName.trim()).filter(Boolean))]
+    for (const name of names) {
+      const matched = matchListedCustomer(name, listed.customers)
+      if (!matched || matched === 'many') continue
+      const info = await readCustomerInfo(matched.id)
+      if (info) customerInfo[name] = info
+    }
+    const caseInfo: Record<string, string> = {}
+    const volumes = [...new Set(gaps.map(row => row.ourVolume.trim() || row.customerVolume.trim()).filter(Boolean))]
+    let done = 0
+    await mapPool(volumes, 4, async volume => {
+      const text = await readCaseText(volume)
+      done += 1
+      if (done % 8 === 0 || done === volumes.length) sheetNotice.value = `正在读著录项目 ${done}/${volumes.length}`
+      if (caseTextUsable(text)) caseInfo[volume] = text
+    })
+    const eligible = gaps.filter(row => {
+      const volume = row.ourVolume.trim() || row.customerVolume.trim()
+      return Boolean(customerInfo[row.customerName.trim()]) || Boolean(caseInfo[volume])
+    })
+    const held = gaps.length - eligible.length
+    const waves = iprArbitrationWaves(eligible, customerInfo, caseInfo).filter(item => item.trim())
+    const missingCustomer = names.filter(name => !customerInfo[name])
+    const heldNote = held ? `${held} 行客户信息和著录项目都没读到，没有交给仲裁。` : ''
+    const partialNote = missingCustomer.length && eligible.length
+      ? `这些客户的客户信息没对上，有著录项目的行仍会仲裁：${missingCustomer.slice(0, 8).join('、')}。`
+      : ''
+    if (!waves.length) {
+      sheetNotice.value = [heldNote || '没有读到可以仲裁的客户信息或著录项目，没有交给仲裁。', partialNote].filter(Boolean).join('')
+      return
+    }
+    sheetNotice.value = [`已读到 ${eligible.length} 行，分 ${waves.length} 批交给仲裁。`, heldNote, partialNote].filter(Boolean).join('')
+    window.dispatchEvent(new CustomEvent('patmail-arbitrate', { detail: waves }))
+  } finally {
+    askingGap.value = false
+  }
 }
 
 function definitionHint(item: WorkflowDefinition | null): string {
@@ -988,7 +1241,7 @@ function definitionHint(item: WorkflowDefinition | null): string {
   <section class="card">
     <div class="card-head"><h2>按工作流发文</h2></div>
     <p v-if="workflowId === FILE_MANAGE_ID" class="hint">选择已经绑好文件管理的客户。按这位客户保存的查询条件和发文方式查出文件。文件描述按发文映射对上发文类型。收件人是案件联系人，抄送是默认发件人和商务，审核人是默认审核人，标题用标题模板，正文用发文页邮件签名下拉里的格式。所属部门包含研发本部时，在文件描述右侧写入全部发明人，顿号分隔。</p>
-    <p v-else class="hint">一次读「提醒申请PCT」和「PCT进国家」两张表。进国家有我方文号就用我方案号，没有再用贵方。外观用涉外外观那一种。同一客户里连续空着的 IPR 沿用上一行。完全空着的，按处理细节摘一句，也可以交给助手去案件要求里仲裁。邮箱那一列不读。</p>
+    <p v-else class="hint">一次读「提醒申请PCT」和「PCT进国家」两张表。进国家有我方文号就用我方案号，没有再用贵方。外观用涉外外观那一种。同一客户里连续空着的 IPR 只沿紧挨着的上一行往下补，中间隔了别的客户就不补。完全空着的，先读客户信息和著录项目，读到了才交给助手，按文号把收件人写回这一行。核对完成后可以导出，在原表上加一列审核状态。邮箱那一列不读。</p>
     <div class="form-grid">
       <div v-if="workflowOptions.length === 0" class="span-all">
         <EmptyGuide text="还没有工作流。去工作流里看 PCT提醒。" action="去工作流" hash="/workflow" />
@@ -1012,9 +1265,11 @@ function definitionHint(item: WorkflowDefinition | null): string {
       <p v-for="note in styleNotes" :key="note" class="hint">这张表按同一客户、同一收件人和抄送合成一封。{{ note }}</p>
       <p v-if="sheetName" class="hint">{{ sheetName }}{{ sheetNotice ? `。${sheetNotice}` : '' }}</p>
       <button v-if="gapWaves.length" type="button" class="ghost" :disabled="askingGap" @click="askGaps">交给助手仲裁空着的 IPR{{ gapWaves.length > 1 ? `（分 ${gapWaves.length} 批）` : '' }}</button>
+      <button v-if="icPhase === 'done' && rows.length" type="button" class="ghost" @click="exportChecked">导出核对表</button>
+      <button v-if="arbitrationBoard.length" type="button" class="ghost" @click="arbitrationOpen = true">仲裁结果 {{ arbitrationBoard.length }}</button>
       <p v-if="mailTypes.length === 0" class="hint">发文类型还没读到。确认已经连上后，重新打开这一页。</p>
       <p v-if="unmatched.length" class="hint">这 {{ unmatched.length }} 行没有对上发文类型，请点选。</p>
-      <p v-if="offCount" class="hint">有 {{ offCount }} 行的处理事项不是「{{ runtime.procLabel }}」。</p>
+      <p v-for="note in procGaps" :key="note" class="hint">{{ note }}</p>
       <p class="hint">上面按我方文号和处理事项去期限监控里查还没办完的，不看出官方期限有没有过。流程状态跟着下面的核对一起填。</p>
       <LimitMonitorQuery
         :bridge="bridge"
@@ -1046,10 +1301,10 @@ function definitionHint(item: WorkflowDefinition | null): string {
       <table v-for="n in sheetSeen" v-show="n === sheetPageSafe && rows.length" :key="n" class="grid">
         <thead><tr><th>我方文号</th><th>客户</th><th>客户文号</th><th>处理事项</th><th>发文类型</th><th>收件人</th><th>抄送</th><th>查询结果</th><th>审核状态</th></tr></thead>
         <tbody>
-          <tr v-for="row in rowsOnSheetPage(n)" :key="row.ourVolume + '\n' + row.procLabel" v-memo="[row, sheetMemo(row)]">
-            <td>{{ row.ourVolume }}</td>
+          <tr v-for="row in rowsOnSheetPage(n)" :key="row.ourVolume + '\n' + row.procLabel" v-memo="[row, sheetMemo(row)]" :class="{ 'is-pending': sheetStatus(row).review === MAILED_UNFINISHED_REVIEW }">
+            <td :class="{ 'volume-corrected': row.ourVolumeCorrected }">{{ row.ourVolume }}</td>
             <td>{{ row.customerName || '表格里没有' }}</td>
-            <td>{{ row.customerVolume || '无' }}</td>
+            <td :class="{ 'volume-corrected': row.customerVolumeCorrected }">{{ row.customerVolume || '无' }}</td>
             <td>{{ row.procLabel }}</td>
             <td>
               <span v-if="row.mailTypeId">{{ row.mailTypeLabel }}</span>
@@ -1068,14 +1323,21 @@ function definitionHint(item: WorkflowDefinition | null): string {
       <p v-if="status" class="save-status" role="status">{{ status }}</p>
       <section v-if="cards.length" class="card inset">
         <h2>{{ outcome }}</h2>
+        <ul v-if="outcomeBars.length" class="outcome-bars">
+          <li v-for="bar in outcomeBars" :key="bar.key">
+            <span class="outcome-bar-meta"><span>{{ bar.label }}</span><b>{{ bar.count }}</b></span>
+            <span class="outcome-bar-track"><span :style="{ width: bar.percent + '%', background: bar.color }"></span></span>
+          </li>
+        </ul>
         <p v-if="outcomeGroups.length" class="hint">{{ outcomeGroups.join('，') }}。</p>
         <div class="outcome-actions">
           <button v-if="missingCount" type="button" class="ghost tiny" @click="exportMissing">导出库里没有 {{ missingCount }}</button>
           <button v-if="unreadCount" type="button" class="ghost tiny" @click="exportUnread">导出没查成 {{ unreadCount }}</button>
           <button v-if="unreadCount" type="button" class="ghost tiny" @click="requeueUnread">没查成重新入队 {{ unreadCount }}</button>
-          <button type="button" class="solid tiny" :disabled="saving || icPhase === 'run'" @click="createAndSend">{{ saving ? '正在准备查询…' : '重新查询' }}</button>
+          <button v-if="missingCount" type="button" class="ghost tiny" @click="requeueMissing">库里没有放进队尾 {{ missingCount }}</button>
+          <button type="button" class="solid tiny" :disabled="saving || icPhase === 'run'" @click="createAndSend">{{ saving ? '正在准备查询…' : '整表再查' }}</button>
         </div>
-        <p class="hint">库里没有是查过、文号对不上。没查成是这次请求没读到，可以重新放回正在核对的队列。重新查询会整表再查，并补上客户联系人里唯一的邮箱。</p>
+        <p class="hint">库里没有是查过、文号对不上，放进当前核对队列的队尾再查。没查成是这次请求没读到。整表再查会整张表重来，并补上客户联系人里唯一的邮箱。</p>
         <div v-if="progress.length" class="send-progress" role="status">
           <div class="send-bar" aria-hidden="true"><span :style="{ width: progressPercent + '%' }"></span></div>
           <ol>
@@ -1087,5 +1349,34 @@ function definitionHint(item: WorkflowDefinition | null): string {
         </div>
       </section>
     </template>
+    <div v-if="arbitrationOpen" class="mask app-dialog" @click.self="arbitrationOpen = false">
+      <div class="dialog arbitration-board" role="dialog" aria-labelledby="arbitration-title">
+        <header>
+          <h3 id="arbitration-title">仲裁结果 {{ arbitrationBoard.length }} 行</h3>
+          <button type="button" aria-label="关闭" @click="arbitrationOpen = false">×</button>
+        </header>
+        <p>收件人和抄送按助手写回的身份列出。拿不准的行没有填进表格。</p>
+        <div class="arbitration-scroll">
+          <table class="grid">
+            <thead>
+              <tr>
+                <th>我方文号</th><th>客户</th><th>收件人</th><th>身份</th><th>抄送</th><th>抄送身份</th><th>依据</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="line in arbitrationBoard" :key="line.volume" :class="{ 'is-unsure': line.unsure }">
+                <td>{{ line.volume }}</td>
+                <td>{{ line.customer || '—' }}</td>
+                <td>{{ line.unsure ? '拿不准' : (line.recipient || '—') }}</td>
+                <td>{{ line.role || '—' }}</td>
+                <td>{{ line.cc || '无' }}</td>
+                <td>{{ line.ccRole || '—' }}</td>
+                <td>{{ line.reason || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </section>
 </template>

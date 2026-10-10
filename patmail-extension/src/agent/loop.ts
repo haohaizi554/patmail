@@ -126,7 +126,15 @@ const SYSTEM_PROMPT = [
   '8. 以 /技能名 开头的是用户点名的技能。说明附在这句后面，只办这一件。',
   '9. 更早对话只留原文摘录，不是查证结论。文号、客户、日期、个数以这次工具返回为准。摘录里没有对应工具原文的，要重新查，不要顺着旧说法补细节。',
   '10. 一件事要分好几步时，先调用 plan_work，写 2 到 6 步。每步一个短标题，并写上要用的工具名。查案件或查期限时把参数写进 args。然后按顺序做，一步的工具和参数都对上再做下一步。只查一次的小事不要写计划。',
-  '11. 用户要仲裁收件人时，不要提交发文，也不要创建任务，不要自己拼接口。只裁这一批。同一客户多件时，只对给出的第一个我方文号调用一次 review_case_fields，结论覆盖同批文号。只在工具返回的栏里选定收件人和抄送。拿不准就 ask_user，把依据和判断一起给出。裁完就停，不要自己要下一批。'
+  '11. 用户要仲裁收件人时，表格字段、客户信息和著录项目已经写在这句话里。每一行单独裁，第一客户联系人不同就不能收成同一个人。每一行写成：文号 <我方文号>｜收件人 <人名，多人顿号>｜身份 <发明人、客户联系人、IPR、技术负责人、商务或不用发>｜抄送 <人名或无>｜抄送身份 <同上或无>｜依据 <一句话>。拿不准写成：文号 <我方文号>｜拿不准｜依据 <一句话>。不要调用工具，不要构造接口，不要自己去查，不要创建任务，不要让用户挑选。裁完就停，不要自己要下一批。'
+].join('\n')
+
+const ARBITRATION_SYSTEM = [
+  '你是 PatMail 的收件人仲裁。表格字段、客户信息和著录项目已经写在用户这句话里，那是插件自己读好的原文。',
+  '每一行单独裁。第一客户联系人不同的，不能收成同一个人。',
+  '每一行写成：文号 <我方文号>｜收件人 <人名，多人顿号>｜身份 <发明人、客户联系人、IPR、技术负责人、商务或不用发>｜抄送 <人名或无>｜抄送身份 <同上或无>｜依据 <一句话>',
+  '拿不准写成：文号 <我方文号>｜拿不准｜依据 <一句话>。身份写在单独一栏，不要写进人名括号。',
+  '不要调用工具，不要构造接口，不要自己去查，不要创建任务，不要让用户挑选文件。用简体中文。'
 ].join('\n')
 
 export interface AgentTurnResult {
@@ -153,14 +161,14 @@ function messageOf(turn: { role: string; content: string; guidance?: string }): 
 }
 
 /** 系统提示保持不变。摘录和长期记忆挂在这一轮的用户消息上，不改已经发出的历史。 */
-function toChat(state: AgentMemoryState): ChatMessage[] {
+function toChat(state: AgentMemoryState, system = SYSTEM_PROMPT): ChatMessage[] {
   const asked = [...state.turns].reverse().find(turn => turn.role === 'user' && !turn.hidden)?.content ?? ''
   const facts = factsForPrompt(state, asked).map(fact => `- ${fact.text}`).join('\n')
   const visibleUsers = state.turns.flatMap((turn, index) => turn.role === 'user' && !turn.hidden ? [index] : [])
   const firstUser = visibleUsers[0]
   const lastUser = visibleUsers[visibleUsers.length - 1]
   return [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: system },
     ...state.turns.map((turn, index): ChatMessage => ({
       role: turn.role,
       content: outgoingContent(turn, index, firstUser, lastUser, state.summary, facts),
@@ -472,7 +480,7 @@ async function runToolBatch(state: AgentMemoryState, calls: AssistantToolCall[],
 }
 
 /** 一轮用户请求：先裁工具结果，再按工具调用循环。正文要过闸门，步数用尽时再要一次不带工具的收尾。 */
-export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState, userText: string, ctx: ToolContext, complete: Complete = chatCompletion, onMemory?: (state: AgentMemoryState) => Promise<void>, onActivity?: (label: string, thought?: string, detail?: string) => void): Promise<AgentTurnResult> {
+export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState, userText: string, ctx: ToolContext, complete: Complete = chatCompletion, onMemory?: (state: AgentMemoryState) => Promise<void>, onActivity?: (label: string, thought?: string, detail?: string) => void, plain = false): Promise<AgentTurnResult> {
   const resolved = resolveSlash(userText)
   if (resolved.kind === 'local' || resolved.kind === 'unknown') {
     return { reply: resolved.message, steps: 0, memory, history: visibleHistory(memory) }
@@ -538,8 +546,8 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
         }
       }
       return complete(active, {
-        messages: toChat(current),
-        ...(withTools ? { tools: agentToolSchemas([
+        messages: toChat(current, plain ? ARBITRATION_SYSTEM : SYSTEM_PROMPT),
+        ...(withTools && !plain ? { tools: agentToolSchemas([
           ...state.turns.filter(turn => turn.role === 'user').map(turn => [turn.content, turn.guidance].filter(Boolean).join('\n')),
           ...plan.map(step => [step.tool, step.args].filter(Boolean).join(' ')),
           ...traces.filter(trace => trace.ok).map(trace => trace.text)
@@ -646,6 +654,14 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
   }
 
   const traces: ToolTrace[] = []
+  if (plain) {
+    onActivity?.('正在仲裁收件人')
+    const outcome = await askOrKeep(false)
+    const choice = outcome.choices[0]
+    if (!choice || choice.toolCalls.length > 0) return finish(choice?.content.trim() || '这批没有裁出收件人。', 1)
+    const settled = await resumeCut(choice)
+    return finish(replyText(settled, config.thinking) || '这批没有裁出收件人。', 1)
+  }
   let unknownStreak = 0
   let candidate = ''
   let nudges = 0

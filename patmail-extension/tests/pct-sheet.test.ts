@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { isCustomerProfile, isPctTask } from '../src/customer/guards'
 import { pctMailTypeFor } from '../src/customer/mail-flow'
 import { resolvePctRuntime } from '../src/workflow/pct-config'
-import { applyPctMailTypes, buildPctTask, matchSheetCtrlProcs, pctRowsFromTable, summarizePctTask } from '../src/customer/pct-sheet'
+import { applyPctMailTypes, buildPctTask, matchSheetCtrlProcs, NATIONAL_PROC_LABEL, pctRowsFromTable, procGapNotes, summarizePctTask } from '../src/customer/pct-sheet'
 import type { CustomerQueryProfile, PctTaskDraft } from '../src/customer/types'
 import { joinCaseVolumes, splitCaseVolumes } from '../src/customer/volume-list'
 import { readXlsxRows, rowsFromSheetXml, sharedStringsFromXml } from '../src/customer/xlsx-table'
@@ -105,6 +105,19 @@ describe('PCT 表格', () => {
     expect(parsed.notice).toContain('沿用了该客户最近一行')
   })
 
+  it('IPR 只沿紧挨着的同客户往下补，隔开后不找最近一行', () => {
+    const parsed = pctRowsFromTable([
+      ['我方文号', '客户文号', '客户名称', '第一客户联系人', '客户联系人(IPR)', '处理事项'],
+      ['PA1', 'WT-1', '鹏城国家实验室', '姜颖', '牛乐宏', '提醒申请PCT'],
+      ['PB1', 'WA-1', '另一客户', '王一', '李二', '提醒申请PCT'],
+      ['PA2', 'WT-2', '鹏城国家实验室', '', '', '提醒申请PCT']
+    ])
+    expect(parsed.rows[2]?.contactName).toBe('姜颖')
+    expect(parsed.rows[2]?.contactCarried).toBe(true)
+    expect(parsed.rows[2]?.iprName).toBe('')
+    expect(parsed.rows[2]?.iprCarried).toBeUndefined()
+  })
+
   it('套上发文类型后，补出来的联系人仍带着备注', () => {
     const nodes = [
       { id: '71d067a3-d1a3-4d4b-87f9-38ea9d96bf70', name: '提醒申请PCT（贵方案号）-深圳市' },
@@ -137,6 +150,17 @@ describe('PCT 表格', () => {
       ['肖锋', '', '', ''],
       ['肖锋', true, '雷群安', '']
     ])
+  })
+
+  it('进国家行不按提醒申请PCT来算偏了', () => {
+    const notes = procGapNotes([
+      { ourVolume: 'PA1', customerVolume: '', customerName: '甲', contactName: '', iprName: '', procLabel: '提醒申请PCT', mailTypeLabel: '', letterKind: 'remind' },
+      { ourVolume: 'WO1', customerVolume: 'W-1', customerName: '甲', contactName: '', iprName: '', procLabel: NATIONAL_PROC_LABEL, mailTypeLabel: '', letterKind: 'national' }
+    ], '提醒申请PCT')
+    expect(notes).toEqual([])
+    expect(procGapNotes([
+      { ourVolume: 'PA2', customerVolume: '', customerName: '甲', contactName: '', iprName: '', procLabel: '别的事项', mailTypeLabel: '', letterKind: 'remind' }
+    ], '提醒申请PCT')).toEqual(['提醒申请 PCT 表有 1 行的处理事项不是「提醒申请PCT」。'])
   })
 
   it('处理事项按名称对上具体项，分类和重名都不选用', () => {

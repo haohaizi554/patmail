@@ -5,7 +5,6 @@ import ThemeSelect from '../../shell/components/ThemeSelect.vue'
 import { bg } from '../../shell/assets'
 import { AVATAR_PRESET_IDS, presetAvatarUrl } from '../../settings/avatar'
 import { useAccountAvatar } from '../../settings/use-account-avatar'
-import { AGENT_CONFIG_DEFAULT } from '../../agent/config'
 import { useAgentConfig } from '../../settings/use-agent-config'
 import { confirmDialog } from '../dialog'
 import { useMailConcurrency } from '../../settings/use-mail-concurrency'
@@ -16,7 +15,7 @@ import { MessageType } from '../../shared/message'
 const { open, ready, setOpen } = useWriteSwitch()
 const { concurrency, ready: concurrencyReady, setConcurrency } = useMailConcurrency()
 const { src, presetId, uploadId, uploads, custom, note, signedIn, choosePreset, chooseUpload, upload, removeUpload, clear, openZoom } = useAccountAvatar()
-const { config: agentConfig, ready: agentReady, save: saveAgentConfig, setThinking } = useAgentConfig()
+const { config: agentConfig, ready: agentReady, setThinking } = useAgentConfig()
 const file = ref<HTMLInputElement | null>(null)
 const presets = AVATAR_PRESET_IDS.map(id => ({ id, src: presetAvatarUrl(id) }))
 const concurrencyOptions = [1, 2, 3, 4].map(count => ({ value: count, label: String(count) }))
@@ -27,8 +26,6 @@ interface ProbeMark { ok: boolean; at: string; detail: string }
 
 const agentNote = ref('')
 const agentBusy = ref(false)
-const showKey = ref(false)
-const builtinKey = computed(() => agentConfig.value?.apiKey === AGENT_CONFIG_DEFAULT.apiKey)
 const probe = ref<ProbeMark | null>(null)
 
 function readProbe(value: unknown): ProbeMark | null {
@@ -56,7 +53,7 @@ const probeText = computed(() => {
   if (agentBusy.value) return '正在检测…'
   if (!probe.value) return '还没检测过'
   const when = `上次检测 ${formatProbeTime(probe.value.at)}`
-  return probe.value.ok || !probe.value.detail ? when : `${when}，${probe.value.detail}`
+  return probe.value.detail ? `${when}，${probe.value.detail}` : when
 })
 
 const lampKind = computed(() => {
@@ -78,16 +75,6 @@ function onThinking(event: Event): void {
   })
 }
 
-async function onAgentSave(): Promise<void> {
-  if (!agentConfig.value) return
-  try {
-    await saveAgentConfig(agentConfig.value)
-    agentNote.value = 'AI 助手配置已保存。'
-  } catch (error) {
-    agentNote.value = error instanceof Error ? error.message : '配置没有保存。'
-  }
-}
-
 async function onAgentTest(): Promise<void> {
   if (agentBusy.value) return
   agentBusy.value = true
@@ -98,8 +85,10 @@ async function onAgentTest(): Promise<void> {
       await rememberProbe({ ok: false, at, detail: response?.type === MessageType.Error ? response.payload.message : '后台没有响应。' })
       return
     }
-    if (response.payload.ok) await rememberProbe({ ok: true, at, detail: '' })
-    else await rememberProbe({ ok: false, at, detail: response.payload.error.message })
+    if (response.payload.ok) {
+      const model = response.payload.data.model.trim()
+      await rememberProbe({ ok: true, at, detail: model ? `接通 ${model}` : '' })
+    } else await rememberProbe({ ok: false, at, detail: response.payload.error.message })
   } catch (error) {
     await rememberProbe({ ok: false, at, detail: error instanceof Error ? error.message : '检测没有完成。' })
   } finally {
@@ -191,23 +180,10 @@ async function run(action: () => Promise<void>): Promise<void> {
   <section class="card agent-settings">
     <div class="agent-settings-head">
       <h2>AI 助手</h2>
-      <p>顶栏助手用这里的模型。地址和密钥只留在这台浏览器。下面的测试只检查连不连得上，不查案件。</p>
+      <p>顶栏助手使用内置模型。主模型连不上时自动改用备用模型。检测只看连不连得上，并写上这次接通的模型，不查案件。</p>
     </div>
     <form v-if="agentConfig" @submit.prevent>
-      <label>接口地址
-        <input v-model.trim="agentConfig.baseUrl" type="text" placeholder="http://43.138.138.200:8588/v1" spellcheck="false" />
-      </label>
-      <div class="agent-field-grid">
-        <label>模型
-          <input v-model.trim="agentConfig.model" type="text" placeholder="模型名称" spellcheck="false" />
-        </label>
-        <label class="agent-key" :class="{ locked: builtinKey }">API Key
-          <input v-model.trim="agentConfig.apiKey" :type="showKey && !builtinKey ? 'text' : 'password'" autocomplete="off" spellcheck="false" v-hint="builtinKey ? '内置密钥不在这里显示' : ''" />
-          <button v-if="!builtinKey" type="button" @click="showKey = !showKey">{{ showKey ? '隐藏' : '显示' }}</button>
-        </label>
-      </div>
       <div class="agent-settings-bar">
-        <button type="button" class="primary" @click="onAgentSave">保存配置</button>
         <label class="agent-think" v-hint="'打开后模型先思考再回答，等待时显示「正在思考」，勾选立即生效。关掉则直接回答，显示「正在回复」。'">
           <input :checked="agentConfig.thinking" type="checkbox" @change="onThinking" />
           思考模式
@@ -219,6 +195,6 @@ async function run(action: () => Promise<void>): Promise<void> {
       <p v-if="agentNote" class="hint">{{ agentNote }}</p>
     </form>
     <p v-else-if="!agentReady" class="hint">正在读取 AI 助手配置。</p>
-    <p v-else class="hint">配置无效，保存一次正确配置即可恢复。</p>
+    <p v-else class="hint">AI 助手配置没有读到。重新打开这一页再试。</p>
   </section>
 </template>

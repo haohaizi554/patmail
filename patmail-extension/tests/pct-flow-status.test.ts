@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifyProcSendGate, gateForProcLabel } from '../src/customer/pct-flow-status'
+import { classifyProcSendGate, finishedWithoutFlow, gateForProcLabel, mailedWithoutFinishDate, suffixVariant } from '../src/customer/pct-flow-status'
 
 const procId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 
@@ -61,5 +61,54 @@ describe('PCT 发文审核状态', () => {
       ]
     }
     expect(gateForProcLabel(finished, '提醒申请PCT')).toBe('done')
+  })
+
+  it('子流程都结束且没有完成日时，标成已发文但事项未管制', () => {
+    const ended = {
+      ProcInfo: [{ proc_id: procId, ctrl_proc: '提醒申请PCT', finish_date: '' }],
+      Eflow: [node({ order_by: 2, node_code: 'END' })]
+    }
+    expect(mailedWithoutFinishDate(ended, '提醒申请PCT')).toBe(true)
+    expect(mailedWithoutFinishDate({
+      ProcInfo: [{ proc_id: procId, ctrl_proc: '提醒申请PCT', finish_date: '2026-09-01' }],
+      Eflow: [node({ order_by: 2, node_code: 'END' })]
+    }, '提醒申请PCT')).toBe(false)
+    expect(mailedWithoutFinishDate({
+      ProcInfo: [{ proc_id: procId, ctrl_proc: '提醒申请PCT', finish_date: '' }],
+      Eflow: [node({ order_by: 2, node_code: 'AUDIT' })]
+    }, '提醒申请PCT')).toBe(false)
+    expect(mailedWithoutFinishDate({
+      ProcInfo: [{ proc_id: procId, ctrl_proc: 'PCT进国家阶段官方绝限', finish_date: '' }],
+      Eflow: [
+        node({ id: 'mail', eflow_name: '发文', order_by: 2, node_code: 'END' }),
+        node({ id: 'draft', eflow_name: '核稿', order_by: 2, node_code: 'END' })
+      ]
+    }, 'PCT进国家阶段官方绝限')).toBe(true)
+  })
+
+  it('没有子流程且事项已完成时不用发，还有子流程或没完成就不是', () => {
+    expect(finishedWithoutFlow({
+      ProcInfo: [{ proc_id: procId, ctrl_proc: '提醒申请PCT', finish_date: '2026-09-01', proc_status: '' }],
+      Eflow: []
+    }, '提醒申请PCT')).toBe(true)
+    expect(finishedWithoutFlow({
+      ProcInfo: [{ proc_id: procId, ctrl_proc: '提醒申请PCT', finish_date: '', proc_status: '完成' }],
+      Eflow: []
+    }, '提醒申请PCT')).toBe(true)
+    expect(finishedWithoutFlow({
+      ProcInfo: [{ proc_id: procId, ctrl_proc: '提醒申请PCT', finish_date: '', proc_status: '' }],
+      Eflow: []
+    }, '提醒申请PCT')).toBe(false)
+    expect(finishedWithoutFlow({
+      ProcInfo: [{ proc_id: procId, ctrl_proc: '提醒申请PCT', finish_date: '2026-09-01' }],
+      Eflow: [node({ order_by: 2, node_code: 'END' })]
+    }, '提醒申请PCT')).toBe(false)
+  })
+
+  it('只差一段减号后缀才算同一文号的两种写法', () => {
+    expect(suffixVariant('PA2519196CND-YS-放弃复审', 'PA2519196CND-YS')).toBe(true)
+    expect(suffixVariant('PA2519196CND-YS', 'pa2519196cnd-ys')).toBe(false)
+    expect(suffixVariant('PA2519196CND', 'PA2519196CND-YS')).toBe(true)
+    expect(suffixVariant('PA2519196CNDYS', 'PA2519196CND')).toBe(false)
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildLimitMailCustomerParams, buildLimitMonitorParams, LIMIT_MONITOR_FIELDS, LIMIT_MONITOR_TYPES } from '../src/api/limit-monitor-params'
+import { buildLimitMailCustomerParams, buildLimitMonitorParams, LIMIT_MONITOR_FIELDS, LIMIT_MONITOR_TYPES, splitCtrlProcIds } from '../src/api/limit-monitor-params'
 import { normalizeLimitMonitor } from '../src/api/limit-monitor-normalizer'
 import { isMessage, MessageType } from '../src/shared/message'
 
@@ -52,6 +52,9 @@ describe('期限监控', () => {
     expect(withBusiness.get('business_type_other')).toBe('05E75F37-60F5-44E1-8B57-456AC8B4CFF7')
     const procs = '945c4477-80b5-4423-bdec-b2391351c681,31D1A147-2931-43B5-94AE-B72B1525BA8A'
     expect(paramsOf(buildLimitMonitorParams({ ...query, fields: { ctrl_proc: procs } }, () => 1000)).get('ctrl_proc')).toBe(procs)
+    expect(splitCtrlProcIds(procs)).toEqual(['945c4477-80b5-4423-bdec-b2391351c681', '31D1A147-2931-43B5-94AE-B72B1525BA8A'])
+    expect(splitCtrlProcIds('新申请')).toEqual([])
+    expect(paramsOf(buildLimitMonitorParams({ ...query, ctrlProcId: '945c4477-80b5-4423-bdec-b2391351c681', fields: { customer_name: '宁德' } }, () => 1000)).get('ctrl_proc')).toBe('945c4477-80b5-4423-bdec-b2391351c681')
     expect(buildLimitMonitorParams({ ...query, fields: { ctrl_proc: '新申请' } }).ok).toBe(false)
     expect(withFields.get('is_fuzzy_query_app_no_other')).toBe('true')
     expect(withFields.get('case_volume')).toBe('')

@@ -69,6 +69,11 @@ function guidList(value: string): boolean {
   return parts.length > 0 && parts.every(item => GUID.test(item))
 }
 
+/** 表单可以同时选多项处理事项。真正查询时一次只带一个，因为一行最多命中其中一项。 */
+export function splitCtrlProcIds(value: string): string[] {
+  return value.split(',').map(item => item.trim()).filter(item => GUID.test(item))
+}
+
 export function isLimitMonitorType(value: string): value is LimitMonitorType {
   return (LIMIT_MONITOR_TYPES as readonly string[]).includes(value)
 }

@@ -50,6 +50,14 @@ export function formatCaseFields(input: {
   return lines.filter(Boolean).join('\n').slice(0, 8000)
 }
 
+/** 著录项目至少读到案件要求、发明人或案件页里的一栏，才允许拿去仲裁。 */
+export function caseTextUsable(text: string): boolean {
+  if (!text.trim() || /我方文号无效|登录已失效|库里没有这个文号/.test(text)) return false
+  if (/案件要求：\n\d/.test(text)) return true
+  if (/发明人：(?!没有读到)/.test(text)) return true
+  return /案件页：\n/.test(text)
+}
+
 function pageFields(data: unknown): Array<{ label: string; value: string }> {
   if (!isRecord(data) || !Array.isArray(data.CaseInfo)) return []
   const row = data.CaseInfo.find(isRecord)

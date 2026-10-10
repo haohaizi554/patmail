@@ -147,9 +147,9 @@ export function noteForBlankIpr(customerName: string, lines: readonly string[]):
   const hits = key.length >= 2 ? lines.filter(line => line.includes(key)).slice(0, 2) : []
   if (!hits.length) return '上一行也没有 IPR。要到案件要求里核对，拿不准交给助手仲裁。'
   const text = hits.join(' ')
-  const clip = text.length > 80 ? `${text.slice(0, 80)}…` : text
-  if (text.includes('发明人')) return `处理细节要看发明人。表格里没有，到案件页发明人里核对。${clip}`.slice(0, 200)
-  return `处理细节：${clip}`.slice(0, 200)
+  const clip = text.length > 600 ? `${text.slice(0, 600)}…` : text
+  if (text.includes('发明人')) return `处理细节要看发明人。表格里没有，到案件页发明人里核对。${clip}`.slice(0, 800)
+  return `处理细节：${clip}`.slice(0, 800)
 }
 
 function withDetailNotes(rows: PctTaskRow[], lines: readonly string[]): PctTaskRow[] {
@@ -209,10 +209,36 @@ export function arbitrationBatchSize(notes: readonly string[]): number {
 
 interface ArbitrationUnit {
   customer: string
-  volumes: string[]
-  extra: number
-  proc: string
+  rows: PctTaskRow[]
   note: string
+}
+
+function sheetFieldLine(row: PctTaskRow): string {
+  const fields = [
+    `我方文号 ${row.ourVolume.trim() || '空'}`,
+    `客户文号 ${row.customerVolume.trim() || '空'}`,
+    `客户名称 ${row.customerName.trim() || '空'}`,
+    `第一客户联系人 ${row.contactName.trim() || '空'}`,
+    `IPR ${row.iprName.trim() || '空'}`,
+    ...(row.leadName?.trim() ? [`技术负责人 ${row.leadName.trim()}`] : []),
+    `处理事项 ${row.procLabel.trim() || '空'}`,
+    `发文类型 ${row.mailTypeLabel.trim() || '空'}`,
+    `处理细节 ${row.iprNote?.trim() || '没有'}`
+  ]
+  return fields.join('，')
+}
+
+function clipDemand(text: string | undefined): string {
+  const clean = text?.trim() ?? ''
+  if (!clean) return '插件没有读到这位客户的客户信息。'
+  return clean.length > 2000 ? `${clean.slice(0, 2000)}…` : clean
+}
+
+function clipCase(text: string | undefined): string {
+  const clean = text?.trim() ?? ''
+  if (!clean) return '著录项目：这一文号没有读到。'
+  const body = clean.length > 1500 ? `${clean.slice(0, 1500)}…` : clean
+  return `著录项目：\n${body}`
 }
 
 function arbitrationUnits(rows: readonly PctTaskRow[]): ArbitrationUnit[] {
@@ -224,20 +250,12 @@ function arbitrationUnits(rows: readonly PctTaskRow[]): ArbitrationUnit[] {
     const key = customer || `行:${row.ourVolume}`
     const found = grouped.get(key)
     if (found) {
-      if (found.volumes.length < 8) found.volumes.push(row.ourVolume)
-      else found.extra += 1
-      if (row.procLabel && !found.proc.split('、').includes(row.procLabel)) found.proc = `${found.proc}、${row.procLabel}`
+      found.rows.push(row)
       if (!found.note && row.iprNote?.trim()) found.note = row.iprNote.trim()
       continue
     }
     order.push(key)
-    grouped.set(key, {
-      customer: customer || '未写',
-      volumes: [row.ourVolume],
-      extra: 0,
-      proc: row.procLabel,
-      note: row.iprNote?.trim() || ''
-    })
+    grouped.set(key, { customer: customer || '未写', rows: [row], note: row.iprNote?.trim() || '' })
   }
   return order.flatMap(key => {
     const unit = grouped.get(key)
@@ -245,23 +263,53 @@ function arbitrationUnits(rows: readonly PctTaskRow[]): ArbitrationUnit[] {
   })
 }
 
-function waveMessage(units: readonly ArbitrationUnit[], index: number, total: number): string {
-  const lines = units.map(unit => {
-    const more = unit.extra ? `，另有 ${unit.extra} 件同一客户` : ''
-    const note = unit.note || '处理细节里没有这一客户的原话。'
-    return `- 客户 ${unit.customer}，先查我方文号 ${unit.volumes[0]}，同批文号 ${unit.volumes.join('、')}${more}。事项 ${unit.proc}。${note}`
+function unitBlock(unit: ArbitrationUnit, demands: Readonly<Record<string, string>>, cases: Readonly<Record<string, string>>): string {
+  const lines = unit.rows.map(row => {
+    const volume = row.ourVolume.trim() || row.customerVolume.trim()
+    return `- ${sheetFieldLine(row)}\n${clipCase(cases[volume])}`
   })
-  return [
-    `请仲裁收件人。这是第 ${index}/${total} 批，同一客户已经合并，只裁这一批。不要提交发文，不要创建发文任务，不要自己拼接口。`,
-    '每一条只对给出的第一个我方文号调用一次 review_case_fields。结论覆盖这一条里的全部文号。只在返回的案件要求、发明人和案件页栏位里选定收件人和抄送。',
-    '拿不准就 ask_user，把依据和你的判断一起给出来。裁完这一批就停，下一批会另外送来。',
-    ...lines
-  ].join('\n')
+  return [`客户 ${unit.customer}`, `客户信息：\n${clipDemand(demands[unit.customer])}`, '表格字段：', ...lines].join('\n')
 }
 
-/** 空 IPR 按客户合并后再分批。一批一次交给本地模型，避免并发把模型打满。 */
-export function iprArbitrationWaves(rows: readonly PctTaskRow[]): string[] {
-  const units = arbitrationUnits(rows)
+function splitOversized(unit: ArbitrationUnit, demands: Readonly<Record<string, string>>, cases: Readonly<Record<string, string>>): ArbitrationUnit[] {
+  if (unitBlock(unit, demands, cases).length <= 9000) return [unit]
+  const pieces: ArbitrationUnit[] = []
+  let bucket: PctTaskRow[] = []
+  for (const row of unit.rows) {
+    const next = unitBlock({ ...unit, rows: [...bucket, row] }, demands, cases)
+    if (bucket.length && next.length > 9000) {
+      pieces.push({ ...unit, rows: bucket })
+      bucket = [row]
+    } else {
+      bucket.push(row)
+    }
+  }
+  if (bucket.length) pieces.push({ ...unit, rows: bucket })
+  return pieces
+}
+
+function waveMessage(units: readonly ArbitrationUnit[], index: number, total: number, demands: Readonly<Record<string, string>>, cases: Readonly<Record<string, string>>): string {
+  const blocks = units.map(unit => unitBlock(unit, demands, cases))
+  const text = [
+    `请仲裁收件人。这是第 ${index}/${total} 批。材料只有下面这些文字：每一行的表格字段，以及插件自己接口读到的客户要求和著录项目。`,
+    '每一行单独裁。第一客户联系人不同的，不能收成同一个人，也不能用一条结论盖住同客户的全部文号。',
+    '收件人、抄送都要写清是谁，以及身份。身份只能是：发明人、客户联系人、IPR、技术负责人、商务、不用发。多人用顿号，身份与人名一一对应。',
+    '每一行只写一行，用竖线分开，文号原样照抄：',
+    '文号 <我方文号>｜收件人 <人名，多人顿号>｜身份 <身份，多人顿号>｜抄送 <人名或无>｜抄送身份 <身份或无>｜依据 <一句话>',
+    '拿不准的行写成：文号 <我方文号>｜拿不准｜依据 <一句话>。不要把身份写进人名括号。',
+    '不要调用工具，不要构造接口，不要自己去查，不要创建任务，不要让用户挑选。裁完这一批就停。',
+    ...blocks
+  ].join('\n\n')
+  return text.length > 18000 ? `${text.slice(0, 18000)}\n（后面的原文被截断了。）` : text
+}
+
+/** 空 IPR 按客户合并后再分批。一批一次交给本地模型。客户信息和著录项目由插件先读好，写进原文。 */
+export function iprArbitrationWaves(
+  rows: readonly PctTaskRow[],
+  demands: Readonly<Record<string, string>> = {},
+  cases: Readonly<Record<string, string>> = {}
+): string[] {
+  const units = arbitrationUnits(rows).flatMap(unit => splitOversized(unit, demands, cases))
   const waves: ArbitrationUnit[][] = []
   let rest = units
   while (rest.length) {
@@ -269,12 +317,105 @@ export function iprArbitrationWaves(rows: readonly PctTaskRow[]): string[] {
     waves.push(rest.slice(0, size))
     rest = rest.slice(size)
   }
-  return waves.map((wave, index) => waveMessage(wave, index + 1, waves.length))
+  return waves.map((wave, index) => waveMessage(wave, index + 1, waves.length, demands, cases))
 }
 
-/** 上传给助手的仲裁说明。只带 IPR 仍空着的行，不带整张表。 */
-export function iprArbitrationBrief(rows: readonly PctTaskRow[]): string {
-  return iprArbitrationWaves(rows)[0] ?? ''
+/** 上传给助手的仲裁说明。只带 IPR 仍空着、并且接口已经读到材料的行。 */
+export function iprArbitrationBrief(
+  rows: readonly PctTaskRow[],
+  demands: Readonly<Record<string, string>> = {},
+  cases: Readonly<Record<string, string>> = {}
+): string {
+  return iprArbitrationWaves(rows, demands, cases)[0] ?? ''
+}
+
+function volumeKey(value: string): string {
+  return value.replace(/\s/g, '').toUpperCase()
+}
+
+export interface ArbitrationDecision {
+  volume: string
+  recipient: string
+  role: string
+  cc: string
+  ccRole: string
+  reason: string
+  unsure: boolean
+}
+
+const ROLE_WORDS = ['发明人', '客户联系人', 'IPR', '技术负责人', '商务', '不用发']
+
+function blankParty(value: string): boolean {
+  return !value || /^(无|空|没有|不抄送|拿不准)/.test(value)
+}
+
+function partyText(value: string): string {
+  const names = value.split(/[、,，]/).map(part => part.replace(/[（(][^）)]{1,12}[）)]/g, '').trim()).filter(part => part && !blankParty(part))
+  return names.join('、').slice(0, 80)
+}
+
+function roleText(value: string, fallback: string): string {
+  const picked = value.split(/[、,，]/).map(part => part.trim()).filter(part => ROLE_WORDS.includes(part))
+  if (picked.length) return picked.join('、')
+  const marked = fallback.match(/[（(]([^）)]+)[）)]/g)?.map(part => part.replace(/[（()）]/g, '').trim()).filter(part => ROLE_WORDS.includes(part)) ?? []
+  return marked.join('、')
+}
+
+function fieldOf(parts: string[], label: string): string {
+  const found = parts.find(part => part === label || part.startsWith(`${label} `) || part.startsWith(`${label}：`) || part.startsWith(`${label}:`))
+  if (!found || found === label) return ''
+  return found.slice(label.length).replace(/^[：:\s]+/, '').trim()
+}
+
+/** 从助手回复里取出每一行的收件人、身份和抄送。拿不准的也留下，但不写进表格。 */
+export function readArbitrationDecisions(text: string): ArbitrationDecision[] {
+  const decisions: ArbitrationDecision[] = []
+  for (const raw of text.split(/\n+/)) {
+    const line = raw.trim()
+    const volume = line.match(/文号\s*[｜|:：]?\s*([A-Za-z0-9][A-Za-z0-9\u4e00-\u9fff._-]{1,80})/)
+    if (!volume?.[1]) continue
+    const parts = line.split(/[｜|]/).map(part => part.trim())
+    const unsure = parts.some(part => part === '拿不准' || part.startsWith('拿不准')) || /[：:]\s*拿不准/.test(line)
+    const reason = fieldOf(parts, '依据').slice(0, 120)
+    if (unsure) {
+      decisions.push({ volume: volume[1], recipient: '', role: '', cc: '', ccRole: '', reason, unsure: true })
+      continue
+    }
+    const recipientRaw = fieldOf(parts, '收件人') || line.match(/收件人\s*[：:\-]?\s*([^，,；;｜|\n]+)/)?.[1]?.trim() || ''
+    const ccRaw = fieldOf(parts, '抄送') || line.match(/抄送\s*[：:\-]?\s*([^，,；;｜|\n]+)/)?.[1]?.trim() || ''
+    const recipient = partyText(recipientRaw)
+    if (!recipient) continue
+    decisions.push({
+      volume: volume[1],
+      recipient,
+      role: roleText(fieldOf(parts, '身份'), recipientRaw),
+      cc: partyText(ccRaw),
+      ccRole: roleText(fieldOf(parts, '抄送身份'), ccRaw),
+      reason,
+      unsure: false
+    })
+  }
+  return decisions
+}
+
+/** 按文号把收件人写回表格。拿不准的不填。 */
+export function applyArbitrationReply(rows: readonly PctTaskRow[], text: string): { rows: PctTaskRow[]; written: number; unsure: number; decisions: ArbitrationDecision[] } {
+  const decisions = readArbitrationDecisions(text)
+  const byVolume = new Map(decisions.filter(item => !item.unsure).map(item => [volumeKey(item.volume), item]))
+  let written = 0
+  const next = rows.map(row => {
+    const write = byVolume.get(volumeKey(row.ourVolume)) || (row.customerVolume ? byVolume.get(volumeKey(row.customerVolume)) : undefined)
+    if (!write) return row
+    written += 1
+    const { iprCarried: _carried, ...rest } = row
+    return {
+      ...rest,
+      iprName: write.recipient,
+      iprArbitrated: true as const,
+      ...(write.cc ? { mailCc: write.cc } : {})
+    }
+  })
+  return { rows: next, written, unsure: decisions.filter(item => item.unsure).length, decisions }
 }
 
 /** 查不到的行，按源表的列拆回两张表。沿用上一行或仲裁填上的称呼不写回去。 */
@@ -307,6 +448,44 @@ export function missedSourceSheets(
       ...(columns.leadName ? [row.leadCarried ? '' : (row.leadName ?? '')] : []),
       row.procLabel,
       result
+    ]
+    const target = row.letterKind === 'national' || row.letterKind === 'design' ? national : remind
+    target.push(line)
+  }
+  return [
+    remind.length > 1 ? { name: '提醒申请PCT', rows: remind } : null,
+    national.length > 1 ? { name: 'PCT进国家阶段官方绝限', rows: national } : null
+  ].filter((item): item is { name: string; rows: string[][] } => item !== null)
+}
+
+/** 核对完的整张表。列跟上传的一样，末尾多一列审核状态。 */
+export function checkedSourceSheets(
+  rows: readonly PctTaskRow[],
+  statusOf: (row: PctTaskRow) => string,
+  columns: PctRuntimeConfig['columns']
+): Array<{ name: string; rows: string[][] }> {
+  const header = [
+    columns.ourVolume,
+    columns.customerVolume,
+    columns.customerName,
+    columns.contactName,
+    columns.iprName,
+    ...(columns.leadName ? [columns.leadName] : []),
+    columns.procLabel,
+    '审核状态'
+  ]
+  const remind: string[][] = [header]
+  const national: string[][] = [header]
+  for (const row of rows) {
+    const line = [
+      row.ourVolume,
+      row.customerVolume,
+      row.customerName,
+      row.contactName,
+      row.iprName,
+      ...(columns.leadName ? [row.leadName ?? ''] : []),
+      row.procLabel,
+      statusOf(row)
     ]
     const target = row.letterKind === 'national' || row.letterKind === 'design' ? national : remind
     target.push(line)

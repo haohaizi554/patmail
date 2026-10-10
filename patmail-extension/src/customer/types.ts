@@ -7,6 +7,9 @@ export type ReviewTarget = 'self'
 export interface PctTaskRow {
   ourVolume: string
   customerVolume: string
+  /** 表格文号和库里文号只差一段后缀，已改成库里的文号。 */
+  ourVolumeCorrected?: true
+  customerVolumeCorrected?: true
   customerName: string
   contactName: string
   iprName: string
@@ -16,7 +19,7 @@ export interface PctTaskRow {
   leadCarried?: true
   /** 第一发明人是从同客户上一行补上的。页面标（补），对联系人仍用原名。 */
   contactCarried?: true
-  /** IPR 是从同客户上一行补上的。页面标（补），对联系人仍用原名。 */
+  /** IPR 是从紧挨着的上一行同客户补上的。页面标（补），对联系人仍用原名。 */
   iprCarried?: true
   /** 处理细节里裁出来的收件人。页面标（仲），发给原站时仍用原名。不用发和发明人只显示，不写入收件人。 */
   iprArbitrated?: true

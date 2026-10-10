@@ -7,7 +7,12 @@ import { IC_SEARCH_COLSEL, IC_SEARCH_ELEMENT_FIELDS, IC_SEARCH_NULL_FIELDS } fro
 export interface IcCaseHit {
   caseId: string
   caseVolume: string
+  /** 列表列 case_volume_customer。按客户文号查时用来对上这一行。 */
+  customerVolume?: string
 }
+
+/** 文号写进哪个查询栏。补查客户文号时不能再塞进我方文号。 */
+export type IcSearchField = 'case_volume' | 'case_volume_customer'
 
 function xmlText(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -18,11 +23,17 @@ function tag(name: string, value = ''): string {
 }
 
 /** 案件查询 ICSearchList。表单和期限监控一样先交空条件，但结束的事项也不会被这张表丢掉。 */
-export function buildIcSearchParams(caseVolume: string, now: () => number = Date.now): ApiResult<URLSearchParams> {
+export function buildIcSearchParams(
+  caseVolume: string,
+  now: () => number = Date.now,
+  field: IcSearchField = 'case_volume'
+): ApiResult<URLSearchParams> {
   const volume = caseVolume.trim()
-  if (!volume || volume.length > 80) return apiError('INVALID_QUERY', '我方文号无效。')
+  if (!volume || volume.length > 80) {
+    return apiError('INVALID_QUERY', field === 'case_volume_customer' ? '客户文号无效。' : '我方文号无效。')
+  }
   const element = IC_SEARCH_ELEMENT_FIELDS.map(name => {
-    if (name === 'case_volume') return tag(name, volume)
+    if (name === field) return tag(name, volume)
     if (name === 'case_type') return tag(name, CURRENT_ENVIRONMENT.caseTypeId)
     if (IC_SEARCH_NULL_FIELDS.has(name)) return tag(name, 'null')
     return tag(name)
@@ -57,8 +68,9 @@ export function icCasesFromBody(body: unknown): IcCaseHit[] {
     if (!isRecord(row)) continue
     const caseId = typeof row.case_id === 'string' ? row.case_id.trim() : ''
     const caseVolume = typeof row.case_volume === 'string' ? row.case_volume.trim() : ''
+    const customerVolume = typeof row.case_volume_customer === 'string' ? row.case_volume_customer.trim() : ''
     if (!isQueryGuid(caseId) || !caseVolume || caseVolume.length > 80) continue
-    hits.push({ caseId, caseVolume })
+    hits.push(customerVolume && customerVolume.length <= 80 ? { caseId, caseVolume, customerVolume } : { caseId, caseVolume })
   }
   return hits
 }

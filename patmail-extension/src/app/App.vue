@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, provide, ref } from 'vue'
+import { customerMode, hydrateCustomerMode, setCustomerMode, watchCustomerMode, type CustomerMode } from '../settings/customer-mode'
 import { createFullPageBridge } from './services/full-page-bridge'
 import { useWorkspace } from './composables/useWorkspace'
 import { useAccountAvatar } from '../settings/use-account-avatar'
 import AgentDock from './components/AgentDock.vue'
+import CheckRainbow from './components/CheckRainbow.vue'
 import HomePage from './pages/HomePage.vue'
 import FilesPage from './pages/FilesPage.vue'
 import CustomersPage from './pages/CustomersPage.vue'
@@ -52,8 +54,12 @@ const search = ref('')
 const pageName = computed(() => route.value === '/settings' ? '系统设置' : route.value === '/contacts' ? CASE_CONTACT_CUSTOMER_NAME : nav.find(item => item.hash === route.value)?.name ?? '首页')
 const page = computed(() => pages[route.value as keyof typeof pages] ?? HomePage)
 const profileName = computed(() => workspace.connection.value.displayName || '未登录')
+const mode = ref<CustomerMode>(customerMode())
+const modeBusy = ref(false)
 const profileDept = computed(() => workspace.connection.value.sessionStatus === 'authenticated' ? 'EASY 已连接' : '尚未连接')
+watchCustomerMode(() => { mode.value = customerMode() })
 const { src: avatarSrc, zoomed, zoomSrc, openZoom, closeZoom } = useAccountAvatar()
+const taskPageOn = computed(() => route.value === '/tasks')
 
 function go(name: string): void {
   const item = nav.find(entry => entry.name === name)
@@ -62,6 +68,19 @@ function go(name: string): void {
 
 function onShellSettings(name: string): void {
   if (name === '系统设置' || name === '个人资料') location.hash = '/settings'
+}
+
+async function onMode(next: string): Promise<void> {
+  if ((next !== 'large' && next !== 'sme') || next === mode.value || modeBusy.value) return
+  modeBusy.value = true
+  mode.value = next
+  try {
+    await setCustomerMode(next)
+    await workspace.call({ action: 'setCustomerMode', mode: next })
+  } finally {
+    mode.value = customerMode()
+    modeBusy.value = false
+  }
 }
 provide('bridge', createFullPageBridge())
 
@@ -77,14 +96,16 @@ function onHash(): void {
 }
 onMounted(() => {
   window.addEventListener('hashchange', onHash)
+  void hydrateCustomerMode().then(() => { mode.value = customerMode() })
   void workspace.call({ action: 'load' })
 })
 onUnmounted(() => window.removeEventListener('hashchange', onHash))
 </script>
 
 <template>
-  <Shell :page="pageName" :search="search" placeholder="搜索我方文号、客户或申请号..." :items="nav" :profile-name="profileName" :profile-dept="profileDept" :avatar-src="avatarSrc" :show-demo="false" :show-settings="true" @navigate="go" @settings="onShellSettings" @preview="openZoom()" @update:search="search = $event">
+  <Shell :page="pageName" :search="search" placeholder="搜索我方文号、客户或申请号..." :items="nav" :profile-name="profileName" :profile-dept="profileDept" :avatar-src="avatarSrc" :show-demo="false" :show-settings="true" :show-mode="true" :mode="mode" :mode-busy="modeBusy" @navigate="go" @settings="onShellSettings" @mode="onMode" @preview="openZoom()" @update:search="search = $event">
     <template #top-actions>
+      <CheckRainbow :page-on="taskPageOn" />
       <AgentDock />
     </template>
     <KeepAlive>

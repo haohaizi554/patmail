@@ -11,10 +11,12 @@ import { prepareForwardedSearch } from '../api/message-guards'
 import { isMessage, MessageType, type AppMessage, type BackgroundResponse } from '../shared/message'
 import { prepareApiDocs } from '../agent/rag-store'
 import { hydrateWriteSwitch, watchWriteSwitch } from '../settings/write-switch'
+import { customerMode, hydrateCustomerMode, modeOrigin, originMatchesMode } from '../settings/customer-mode'
 
 watchWriteSwitch()
 // 扩展 Service Worker 不能用顶层 await，否则 Chrome 直接拒绝启动，工具栏点击没有监听。
 void hydrateWriteSwitch()
+void hydrateCustomerMode()
 void prepareApiDocs()
 
 const CALL_CHANNEL = 'patmail-call'
@@ -91,8 +93,14 @@ function warmEasySession(): Promise<void> {
 /** 先把上次的标签页捡回来，再向页面重读登录。这条完成前不回答工作台，避免把空连接当成没登录。 */
 const connectionReady = (async () => {
   try {
+    await hydrateCustomerMode()
     const stored = await chrome.storage.local.get(CONNECTION_SNAPSHOT)
     connection.restoreCandidate(stored[CONNECTION_SNAPSHOT])
+    connection.retarget(modeOrigin(customerMode()))
+    const restoredTab = connection.context.easyTabId
+    if (restoredTab != null && !originMatchesMode(connection.context.easyOrigin)) {
+      connection.detach(restoredTab)
+    }
     persistedSnapshot = connection.snapshot()
   } catch { /* 没有存过连接 */ }
   await warmEasySession()
@@ -117,6 +125,10 @@ function scheduleSessionRead(tabId: number): void {
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (info.url || info.status === 'loading') {
     connection.observeNavigation(tabId, info.url ?? tab.url)
+    if (connection.context.easyTabId === tabId && !originMatchesMode(connection.context.easyOrigin)) {
+      connection.detach(tabId)
+      connection.context = { ...connection.context, message: '这个页面不属于当前客户系统。' }
+    }
     persistConnection()
   }
   if (connection.context.easyTabId === tabId && connection.context.sessionStatus === 'pending') {

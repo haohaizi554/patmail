@@ -14,7 +14,7 @@ function supportedUrl(value: string | undefined): boolean {
   if (!value) return false
   const url = new URL(value)
   return url.protocol === 'http:' && (
-    url.host === '183.36.43.66:88' || url.hostname === '127.0.0.1' || url.hostname === 'localhost'
+    url.host === '183.36.43.66:88' || url.host === '183.36.43.44:88' || url.hostname === '127.0.0.1' || url.hostname === 'localhost'
   )
 }
 

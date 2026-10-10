@@ -9,7 +9,7 @@ import { activateOptionFallback, hydrateOptionFallback, optionFallbackEpoch, rem
 import type { NormalizedDictionary } from '../api/dictionaries'
 import { choicesFromDictionary, describePickerReceipt, LIMIT_PICKER_FIELDS } from '../api/dictionaries/picker-catalog'
 import { hasOptionTree } from '../query/option-tree'
-import { isLimitMonitorInputField, type LimitMonitorQuery } from '../api/limit-monitor-params'
+import { isLimitMonitorInputField, splitCtrlProcIds, type LimitMonitorQuery } from '../api/limit-monitor-params'
 import { isQueryGuid } from '../query/query-validator'
 import { joinCaseVolumes, splitCaseVolumes } from '../customer/volume-list'
 import { TemplateLoadCoordinator } from '../query/load-coordinator'
@@ -394,6 +394,7 @@ watch(() => [valueOf('case_type'), valueOf('proc_type'), valueOf('country')].joi
               <TreeOptionSelect v-if="treeChoices(cell.key).length" :model-value="valueOf(cell.key)" :options="treeChoices(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
               <ThemeSelect v-else-if="choices(cell.key).length" :model-value="valueOf(cell.key)" :options="optionsFor(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
               <span v-else class="hint">先校对字段，再选择处理事项</span>
+              <span v-if="splitCtrlProcIds(valueOf(cell.key)).length > 1" class="hint">选中的事项会一起放进同一次查询。一行只会命中其中一项。</span>
             </label>
             <label v-else-if="cell.kind === 'named'" class="query-cell">
               <span>{{ cell.label }}</span>

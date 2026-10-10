@@ -227,7 +227,7 @@ function stopWait(): void {
 
 async function ask(action: AgentRequest): Promise<AskResult> {
   try {
-    const response = await sendToBackground(action, 180_000)
+    const response = await sendToBackground(action, 180_000, { paused: () => pendingAsk.value !== null })
     if (!response || response.type !== MessageType.AgentChatResult) {
       return { ok: false, message: response?.type === MessageType.Error ? response.payload.message : '后台没有响应。' }
     }
@@ -394,6 +394,7 @@ function takeArbitration(): Job | null {
 
 async function finishJob(): Promise<void> {
   busy.value = false
+  liveThoughtOpen.value = false
   clearLiveThought()
   stopWait()
   await nextTick()
@@ -500,7 +501,10 @@ async function runJob(job: Job): Promise<void> {
       }
       return
     }
-    const result = await ask({ type: MessageType.AgentChat, payload: { action: 'turn', message: job.message } })
+    const result = await ask({
+      type: MessageType.AgentChat,
+      payload: job.arbitration ? { action: 'turn', message: job.message, plain: true } : { action: 'turn', message: job.message }
+    })
     if (stopped) {
       arbitrationLeft.value = []
       note.value = '已停下。'
@@ -514,6 +518,9 @@ async function runJob(job: Job): Promise<void> {
     } else {
       retryJob.value = null
       applyTurn(result)
+      if (job.arbitration && result.reply.trim()) {
+        window.dispatchEvent(new CustomEvent('patmail-arbitration-result', { detail: result.reply }))
+      }
     }
   } finally {
     await finishJob()
@@ -945,8 +952,15 @@ onUnmounted(() => {
           </div>
         </div>
         <div v-for="(item, index) in history" :key="index" class="agent-row" :class="[item.role, { skill: item.role === 'user' && item.content.startsWith('/') }]">
-          <AgentAnswer v-if="item.role === 'assistant'" :content="item.content" :copied="copied === index" :start-open="index === history.length - 1" @copy="copyAnswer($event, index)" />
-          <p v-else>{{ item.content }}</p>
+          <AgentAnswer v-if="item.role === 'assistant'" :content="item.content" :copied="copied === index" @copy="copyAnswer($event, index)" />
+          <div v-else class="agent-mine">
+            <p>{{ item.content }}</p>
+            <button type="button" class="agent-copy" :class="{ done: copied === index }" :aria-label="copied === index ? '已复制' : '复制'" @click="copyAnswer(item.content, index)">
+              <svg v-if="copied === index" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8.4 6.3 11.5 12.8 4.6" /></svg>
+              <svg v-else viewBox="0 0 16 16" aria-hidden="true"><rect x="5.2" y="5.2" width="8" height="8" rx="1.4" /><path d="M10.6 5.1V3.6A1.4 1.4 0 0 0 9.2 2.2H3.6A1.4 1.4 0 0 0 2.2 3.6v5.6A1.4 1.4 0 0 0 3.6 10.6H5" /></svg>
+              <span>{{ copied === index ? '已复制' : '复制' }}</span>
+            </button>
+          </div>
         </div>
         <div v-for="(item, index) in aside" :key="`aside-${index}`" class="agent-row assistant">
           <p>{{ item }}</p>

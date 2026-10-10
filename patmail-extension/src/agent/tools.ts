@@ -172,7 +172,7 @@ const SCHEMAS: ToolSchema[] = [
     type: 'function',
     function: {
       name: 'call_easy',
-      description: '用当前登录会话按顺序调用不会改数据的原站接口。固定组合用 recipe 加 case_id：biology、case-info、case-flow、case-demand。单步给 handler 和 call。要组合时给 steps，后面字段用 @{1.路径} 取第 1 步响应里的值，例如 @{1.TableRows.0.case_id}。先用 lookup_api 核对入口和参数。会改数据的 Call 不会发出。仲裁收件人不要用这个，用 review_case_fields。',
+      description: '用当前登录会话按顺序调用不会改数据的原站接口。固定组合用 recipe 加 case_id：biology、case-info、case-flow、case-demand。单步给 handler 和 call。要组合时给 steps，后面字段用 @{1.路径} 取第 1 步响应里的值，例如 @{1.TableRows.0.case_id}。先用 lookup_api 核对入口和参数。会改数据的 Call 不会发出。仲裁收件人不要用这个，页面会把表格和客户要求直接写成文字。',
       parameters: {
         type: 'object',
         properties: {

@@ -21,6 +21,26 @@ export const AGENT_CONFIG_DEFAULT: AgentConfig = {
   thinking: false
 }
 
+/** 主模型连不上时用的小米 MiMo。地址和密钥不进设置页。 */
+export const AGENT_FALLBACK: Pick<AgentConfig, 'baseUrl' | 'apiKey' | 'model'> = {
+  baseUrl: 'https://api.xiaomimimo.com/v1',
+  apiKey: 'sk-cxujw51hcxsdsjbrszgcfczs8hm07g6ldr0qujr6n7na5cs7',
+  model: 'mimo-v2.6-pro'
+}
+
+export function endpointOrigin(baseUrl: string): string {
+  return baseUrl.trim().replace(/\/+$/, '')
+}
+
+export function usesFallbackEndpoint(config: Pick<AgentConfig, 'baseUrl'>): boolean {
+  return endpointOrigin(config.baseUrl) === endpointOrigin(AGENT_FALLBACK.baseUrl)
+}
+
+/** 保留这一轮的思考开关和长度上限，只换备用地址、密钥和模型。 */
+export function fallbackAgentConfig(primary: AgentConfig): AgentConfig {
+  return { ...primary, ...AGENT_FALLBACK }
+}
+
 /** 配置由后台自己读取，不信任页面消息里的地址和密钥。 */
 export function isAgentConfig(value: unknown): value is AgentConfig {
   if (typeof value !== 'object' || value === null) return false

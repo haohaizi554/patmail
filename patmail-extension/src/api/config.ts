@@ -1,11 +1,17 @@
 import type { FileSearchEnvironment } from './file-search-params'
 
-export const EASY_ORIGINS = ['http://183.36.43.66:88', 'https://ip.pcl.ac.cn:81'] as const
+/** 大客户系统。 */
+export const LARGE_CUSTOMER_ORIGIN = 'http://183.36.43.66:88'
 
-export const EASY_ORIGIN = EASY_ORIGINS[0]
+/** 中小客户系统。业务先和大客户共用同一套能力，只换这个地址。 */
+export const SME_CUSTOMER_ORIGIN = 'http://183.36.43.44:88'
 
 /** 鹏城实验室这一家客户的 EASY。案件联系人导出只对这个地址开放。 */
 export const PCL_ORIGIN = 'https://ip.pcl.ac.cn:81'
+
+export const EASY_ORIGINS = [LARGE_CUSTOMER_ORIGIN, SME_CUSTOMER_ORIGIN, PCL_ORIGIN] as const
+
+export const EASY_ORIGIN = LARGE_CUSTOMER_ORIGIN
 
 export function isEasyOrigin(origin: string): boolean {
   return (EASY_ORIGINS as readonly string[]).includes(origin)

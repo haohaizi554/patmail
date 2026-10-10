@@ -49,6 +49,8 @@ function isPctRow(value: unknown): value is PctTaskRow {
   const row = value as Record<string, unknown>
   if (!shortText(row.ourVolume, 80) || !row.ourVolume.trim()) return false
   if (!shortText(row.customerVolume, 80) || !shortText(row.customerName, 80)) return false
+  if (row.ourVolumeCorrected !== undefined && row.ourVolumeCorrected !== true) return false
+  if (row.customerVolumeCorrected !== undefined && row.customerVolumeCorrected !== true) return false
   if (!shortText(row.contactName, 80) || !shortText(row.iprName, 80) || !shortText(row.procLabel, 80)) return false
   if (row.contactCarried !== undefined && row.contactCarried !== true) return false
   if (row.iprCarried !== undefined && row.iprCarried !== true) return false

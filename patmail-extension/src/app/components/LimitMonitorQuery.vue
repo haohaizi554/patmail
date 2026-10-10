@@ -4,6 +4,7 @@ import LimitPage from '../../shell/pages/LimitPage.vue'
 import LimitQuerySection from '../../floating/LimitQuerySection.vue'
 import type { LimitMonitorResult, LimitMonitorRow } from '../../api/limit-monitor-types'
 import { isLimitMonitorType, type LimitMonitorQuery } from '../../api/limit-monitor-params'
+import { MAILED_UNFINISHED_REVIEW, SKIP_SEND_REVIEW } from '../../customer/pct-flow-status'
 import { clonePctTask, readWorkflowTask, writeWorkflowTask } from '../../customer/pct-sheet'
 import { limitMailItems, limitMailLetterLabel, limitMailProcIds, limitMailSubmitShouldHalt, runLimitMailSubmit, runMailLetterPool } from '../../customer/limit-mail-submit'
 import { beginProgress, classifySubmitText, endProgress, logProgress, progressSummaryLine, tallyProgress } from '../dialog'
@@ -326,7 +327,8 @@ function goPage(page: number): void {
 }
 
 function rowCanConfirm(procId: string): boolean {
-  if (flowByProc.value[procId] === '已提交审核') return false
+  const flow = flowByProc.value[procId]
+  if (flow === '已提交审核' || flow === MAILED_UNFINISHED_REVIEW || flow === SKIP_SEND_REVIEW) return false
   const gate = gates.value[procId]
   if (gate === 'pending') return false
   return true
@@ -335,7 +337,15 @@ function rowCanConfirm(procId: string): boolean {
 function onConfirm(ids: string[]): void {
   const procIds = ids.filter(item => isQueryGuid(item) && rowCanConfirm(item))
   if (!procIds.length && ids.length) {
-    message.value = checkingGates.value ? '还在核对发文审核状态，先不能确认。' : '已提交审核的不能勾选。'
+    const mailed = ids.some(item => flowByProc.value[item] === MAILED_UNFINISHED_REVIEW)
+    const skipped = ids.some(item => flowByProc.value[item] === SKIP_SEND_REVIEW)
+    message.value = checkingGates.value
+      ? '还在核对发文审核状态，先不能确认。'
+      : mailed
+        ? '已发文、事项还没写完成日的不能勾选。'
+        : skipped
+          ? '不用发的不能勾选。'
+          : '已提交审核的不能勾选。'
     return
   }
   confirmedIds.value = procIds
@@ -462,18 +472,16 @@ async function searchProcGroups(groups: Array<{ id: string; volumes: string }>):
   let lastError = ''
   publish()
   try {
-    for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
-      const group = groups[groupIndex]
-      if (!group || token !== procSearchToken) return
-      const lists = volumeChunks(group.volumes)
-      for (let chunkIndex = 0; chunkIndex < lists.length; chunkIndex += 1) {
-        if (token !== procSearchToken) return
-        const volume = lists[chunkIndex] ?? ''
-        const sheetCount = props.sheetRows?.length ?? 0
-        message.value = `正在查第 ${groupIndex + 1}/${groups.length} 种处理事项，文号第 ${chunkIndex + 1}/${lists.length} 段。已经对上 ${rows.value.length} 件${sheetCount ? `，表格一共 ${sheetCount} 行` : ''}。`
-        publish()
-        const fields: Record<string, string> = { ctrl_proc: group.id, case_volume: volume }
-        const query = { type: 'all' as const, caseVolume: volume, ctrlProcId: group.id, fields, pageIndex: 1, pageSize: 100 }
+    const procIds = [...new Set(groups.map(group => group.id))]
+    const lists = volumeChunks(groups.flatMap(group => splitCaseVolumes(group.volumes)).join(';'))
+    for (let chunkIndex = 0; chunkIndex < lists.length; chunkIndex += 1) {
+      if (token !== procSearchToken) return
+      const volume = lists[chunkIndex] ?? ''
+      const sheetCount = props.sheetRows?.length ?? 0
+      message.value = `正在查 ${procIds.length} 种处理事项，文号第 ${chunkIndex + 1}/${lists.length} 段。已经对上 ${rows.value.length} 件${sheetCount ? `，表格一共 ${sheetCount} 行` : ''}。`
+      publish()
+      const fields: Record<string, string> = { ctrl_proc: procIds.join(','), case_volume: volume }
+      const query = { type: 'all' as const, caseVolume: volume, ctrlProcId: procIds.join(','), fields, pageIndex: 1, pageSize: 100 }
         let items: LimitMonitorRow[] | null = null
         for (let attempt = 0; attempt < 2 && !items; attempt += 1) {
           try {
@@ -498,17 +506,16 @@ async function searchProcGroups(groups: Array<{ id: string; volumes: string }>):
             }
           }
         }
-        if (token !== procSearchToken) return
-        const fresh: LimitMonitorRow[] = []
-        for (const row of items ?? []) {
-          if (merged.has(row.procId)) continue
-          merged.set(row.procId, row)
-          fresh.push(row)
-        }
-        if (fresh.length) rows.value.push(...fresh)
-        total.value = rows.value.length
-        publish()
+      if (token !== procSearchToken) return
+      const fresh: LimitMonitorRow[] = []
+      for (const row of items ?? []) {
+        if (merged.has(row.procId)) continue
+        merged.set(row.procId, row)
+        fresh.push(row)
       }
+      if (fresh.length) rows.value.push(...fresh)
+      total.value = rows.value.length
+      publish()
     }
     if (token !== procSearchToken) return
     checkingGates.value = false

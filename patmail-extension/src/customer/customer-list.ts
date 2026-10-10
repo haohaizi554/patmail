@@ -10,6 +10,26 @@ export interface EasyCustomerOption {
 
 const NAME_LIMIT = 200
 
+function compactName(name: string): string {
+  return name.trim().replace(/\s+/g, '')
+}
+
+/** 用表格里的客户名对客户名单。对上多家或一家都对不上时，不猜。 */
+export function matchListedCustomer(name: string, list: readonly EasyCustomerOption[]): EasyCustomerOption | 'many' | null {
+  const key = compactName(name)
+  if (!key) return null
+  const exact = list.filter(item => compactName(item.name) === key)
+  if (exact.length === 1) return exact[0] ?? null
+  if (exact.length > 1) return 'many'
+  const loose = list.filter(item => {
+    const other = compactName(item.name)
+    return other.length >= 2 && key.length >= 2 && (other.includes(key) || key.includes(other))
+  })
+  if (loose.length === 1) return loose[0] ?? null
+  if (loose.length > 1) return 'many'
+  return null
+}
+
 /** 与客户列表页一次取全量的请求一致。空筛选项保持页面默认值。 */
 export function customerListParams(): URLSearchParams {
   const params = new URLSearchParams()

@@ -1,7 +1,7 @@
 import { apiError, type ApiResult } from '../api/types'
 import type { AgentQuestion } from '../agent/ask'
-import { loadAgentConfig, type AgentConfig } from '../agent/config'
-import { LlmError, chatCompletion } from '../agent/llm'
+import { fallbackAgentConfig, loadAgentConfig, type AgentConfig } from '../agent/config'
+import { LlmError, bindModelFallback, servedModel } from '../agent/llm'
 import { compactAgentMemory, runAgentTurn } from '../agent/loop'
 import { AGENT_DEADLINE_KEEP, AGENT_FILE_KEEP, createAgentSession, loadMemory, openAgentSession, readAgentSessions, removeAgentSession, renameAgentSession, saveMemory, visibleHistory, type AgentMemoryState, type AgentSessionInfo } from '../agent/memory'
 import { helpText, resolveSlash } from '../agent/slash'
@@ -583,7 +583,7 @@ async function createTaskFromSearch(
 }
 
 /** 工作台的助手请求。probe 只测连通；turn 走工具循环并写入记忆。 */
-export async function handleAgentChat(payload: { action?: unknown; message?: unknown; id?: unknown; title?: unknown }, host: WorkspaceHost): Promise<ApiResult<AgentTurnView>> {
+export async function handleAgentChat(payload: { action?: unknown; message?: unknown; id?: unknown; title?: unknown; plain?: unknown }, host: WorkspaceHost): Promise<ApiResult<AgentTurnView>> {
   const area = host.area as LocalArea
   const config = await loadAgentConfig(area)
   const action = payload.action
@@ -624,8 +624,11 @@ export async function handleAgentChat(payload: { action?: unknown; message?: unk
   }
   const message = typeof payload.message === 'string' ? payload.message.trim() : ''
   if (action === 'probe') {
+    let requested = { ...config, thinking: false }
     try {
-      const outcome = await chatCompletion({ ...config, thinking: false }, {
+      const outcome = await bindModelFallback({
+        onSwitch: () => { requested = fallbackAgentConfig(requested) }
+      })(requested, {
         messages: [
           { role: 'system', content: '你是 PatMail 的 AI 助手。用一两句简体中文介绍自己。' },
           { role: 'user', content: message }
@@ -633,11 +636,12 @@ export async function handleAgentChat(payload: { action?: unknown; message?: unk
         temperature: 0.2
       })
       const reply = outcome.choices[0]?.content?.trim() ?? ''
-      if (!reply) return apiError('INVALID_RESPONSE', '模型没有返回内容。')
-      return { ok: true, data: await viewOf(area, reply, config.model, 1) }
+      if (!reply) return apiError('INVALID_RESPONSE', `${requested.model} 没有返回内容。`)
+      return { ok: true, data: await viewOf(area, reply, servedModel(outcome, requested.model), 1) }
     } catch (error) {
-      if (error instanceof LlmError) return apiError(error.code, error.message, error.status)
-      return apiError('NETWORK_ERROR', 'AI 助手调用没有完成。')
+      const name = requested.model
+      if (error instanceof LlmError) return apiError(error.code, `${name}：${error.message}`, error.status)
+      return apiError('NETWORK_ERROR', `${name}：AI 助手调用没有完成。`)
     }
   }
   const resolved = resolveSlash(message)
@@ -658,10 +662,11 @@ export async function handleAgentChat(payload: { action?: unknown; message?: unk
   turnAbort = abort
   try {
     const loaded = await loadMemory(area)
-    const turn = await runAgentTurn(config, loaded, message, toolContext(host, loaded, abort.signal), (next, options) => chatCompletion(next, { ...options, signal: abort.signal }), async state => {
+    const chat = bindModelFallback({ onSwitch: () => publishActivity('主模型暂时没接上，改用备用模型') })
+    const turn = await runAgentTurn(config, loaded, message, toolContext(host, loaded, abort.signal), (next, options) => chat(next, { ...options, signal: abort.signal }), async state => {
       if (abort.signal.aborted) return
       await saveMemory(area, state)
-    }, publishActivity)
+    }, publishActivity, action === 'turn' && payload.plain === true)
     return { ok: true, data: await viewOf(area, turn.reply, config.model, turn.steps, turn.memory) }
   } catch (error) {
     if (error instanceof LlmError) return apiError(error.code, error.message, error.status)

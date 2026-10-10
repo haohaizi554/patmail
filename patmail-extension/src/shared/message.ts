@@ -1,6 +1,7 @@
 import type { PageInfo, PageSnapshot } from './types'
 import { isPageInfo, isPageSnapshot, isRecord } from './guards'
 import { isEasyOrigin } from '../api/config'
+import { isCustomerMode, type CustomerMode } from '../settings/customer-mode'
 import { isCustomerProfile } from '../customer/guards'
 import type { CustomerQueryProfile } from '../customer/types'
 import type { MailRuleBundle } from '../mail/types'
@@ -22,6 +23,7 @@ import type { FileSearchResult } from '../api/file-search-types'
 import type { HistoryQueryDetail, HistoryQueryOption } from '../api/query-history'
 import type { SessionSummary } from '../api/session'
 import type { ApiResult } from '../api/types'
+import type { IcFlowAsk, IcFlowHit } from '../customer/pct-flow-status'
 import { isMailDraftPreview, isMailExecutionView, isSelectionClaim } from '../mail/easy/guards'
 import type { SelectionClaim } from '../mail/easy/runtime'
 import type { MailDraftPreview, SelectedPatentFile } from '../mail/types'
@@ -157,7 +159,7 @@ export type ContentRequest =
   | Request<'LIST_FLOW_REVIEWERS'>
   | Response<'READ_CASE_DEMANDS', { caseId: string }>
   | Response<'READ_CASE_BUS_FLOW', { caseId: string; procId: string }>
-  | Response<'LOOKUP_IC_FLOW', { rows: Array<{ caseVolume: string; procLabel: string }> }>
+  | Response<'LOOKUP_IC_FLOW', { rows: IcFlowAsk[] }>
   | Response<'READ_CASE_FIELDS', { caseVolume: string }>
   | Response<'READ_CUSTOMER_DEMANDS', { customerId: string }>
   | Response<'READ_CUSTOMER_DIRECTORY', { customerId: string }>
@@ -215,7 +217,7 @@ export type BackgroundRequest =
   | Response<'SAVE_EVIDENCE', { record: Record<string, unknown> }>
   | Response<'LIST_EVIDENCE', { origin: string; call: string }>
   | Response<'WORKSPACE', WorkspaceAction>
-  | Response<'AGENT_CHAT', { action: 'probe' | 'turn'; message: string } | { action: 'answer'; message: string } | { action: 'history' | 'reset' | 'facts' | 'compact' | 'stop' | 'create' } | { action: 'create'; title: string } | { action: 'open' | 'remove'; id: string } | { action: 'rename'; id: string; title: string }>
+  | Response<'AGENT_CHAT', { action: 'probe' | 'turn'; message: string } | { action: 'turn'; message: string; plain: true } | { action: 'answer'; message: string } | { action: 'history' | 'reset' | 'facts' | 'compact' | 'stop' | 'create' } | { action: 'create'; title: string } | { action: 'open' | 'remove'; id: string } | { action: 'rename'; id: string; title: string }>
 export type BackgroundResponse =
   | Response<'PONG', { ok: true }>
   | Response<'EXECUTION_LEASE', ExecutionLeasePayload>
@@ -237,6 +239,7 @@ export interface LeaseCommand {
 
 export type WorkspaceAction =
   | { action: 'focus' } | { action: 'listTabs' } | { action: 'refreshSession' } | { action: 'openLogin' } | { action: 'load' }
+  | { action: 'setCustomerMode'; mode: CustomerMode }
   | { action: 'bind'; tabId: number }
   | { action: 'saveCustomer'; profile: CustomerQueryProfile; expectedScope: ExpectedAccountScope; expectedRevision?: number }
   | { action: 'deleteCustomer'; id: string; expectedScope: ExpectedAccountScope; expectedRevision: number }
@@ -327,7 +330,7 @@ export type ContentResponse =
   | Response<'LIST_FLOW_REVIEWERS_RESULT', ApiResult<AccountReviewerList>>
   | Response<'CASE_DEMAND_RESULT', ApiResult<CaseDemandAsset>>
   | Response<'CASE_BUS_FLOW_RESULT', ApiResult<{ gate: 'open' | 'pending' | 'done' }>>
-  | Response<'LOOKUP_IC_FLOW_RESULT', ApiResult<{ items: Array<{ caseVolume: string; procLabel: string; found: boolean; gate: '' | 'open' | 'pending' | 'done'; unread?: true; statusUnread?: true }> }>>
+  | Response<'LOOKUP_IC_FLOW_RESULT', ApiResult<{ items: IcFlowHit[] }>>
   | Response<'READ_CASE_FIELDS_RESULT', { text: string }>
   | Response<'CUSTOMER_DEMAND_RESULT', ApiResult<CustomerDemandAsset>>
   | Response<'CUSTOMER_DIRECTORY_RESULT', ApiResult<CustomerDirectoryAsset>>
@@ -379,24 +382,40 @@ function isCaseBusFlowResult(value: unknown): value is ApiResult<{ gate: 'open' 
   return value.ok === true && isRecord(value.data) && (value.data.gate === 'open' || value.data.gate === 'pending' || value.data.gate === 'done') && Object.keys(value.data).length === 1
 }
 
-function isIcFlowAsk(value: unknown): value is { caseVolume: string; procLabel: string } {
-  return isRecord(value) && typeof value.caseVolume === 'string' && value.caseVolume.trim().length > 0 && value.caseVolume.length <= 80 &&
-    typeof value.procLabel === 'string' && value.procLabel.trim().length > 0 && value.procLabel.length <= 80 &&
-    Object.keys(value).length === 2
+function isIcFlowAsk(value: unknown): value is IcFlowAsk {
+  if (!isRecord(value)) return false
+  if (!isShortText(value.caseVolume, 80) || !value.caseVolume.trim()) return false
+  if (!isShortText(value.procLabel, 80) || !value.procLabel.trim()) return false
+  if (value.customerVolume !== undefined && (!isShortText(value.customerVolume, 80) || !value.customerVolume.trim())) return false
+  return Object.keys(value).every(key => key === 'caseVolume' || key === 'procLabel' || key === 'customerVolume')
 }
 
-function isIcFlowResult(value: unknown): value is ApiResult<{ items: Array<{ caseVolume: string; procLabel: string; found: boolean; gate: '' | 'open' | 'pending' | 'done' }> }> {
+function isLibraryVolume(value: unknown): value is string {
+  return isShortText(value, 80) && value.trim().length > 0
+}
+
+function isIcFlowResult(value: unknown): value is ApiResult<{ items: IcFlowHit[] }> {
   if (!isRecord(value)) return false
   if (value.ok === false) return isRecord(value.error) && typeof value.error.code === 'string' && typeof value.error.message === 'string'
   if (value.ok !== true || !isRecord(value.data) || !Array.isArray(value.data.items) || value.data.items.length > 300 || Object.keys(value.data).length !== 1) return false
   return value.data.items.every(item => {
-    if (!isRecord(item) || typeof item.caseVolume !== 'string' || item.caseVolume.length > 80) return false
-    if (typeof item.procLabel !== 'string' || item.procLabel.length > 80 || typeof item.found !== 'boolean') return false
+    if (!isRecord(item) || !isShortText(item.caseVolume, 80) || !isShortText(item.procLabel, 80) || typeof item.found !== 'boolean') return false
     if (item.gate !== '' && item.gate !== 'open' && item.gate !== 'pending' && item.gate !== 'done') return false
-    const keys = Object.keys(item)
-    if (item.unread === true) return item.found === false && item.statusUnread === undefined && keys.length === 5
-    if (item.statusUnread === true) return item.found === true && item.unread === undefined && item.gate === '' && keys.length === 5
-    return item.unread === undefined && item.statusUnread === undefined && keys.length === 4
+    if (item.uncontrolled !== undefined && item.uncontrolled !== true) return false
+    if (item.unread !== undefined && item.unread !== true) return false
+    if (item.statusUnread !== undefined && item.statusUnread !== true) return false
+    if (item.skipSend !== undefined && item.skipSend !== true) return false
+    if (item.correctedOur !== undefined && !isLibraryVolume(item.correctedOur)) return false
+    if (item.correctedCustomer !== undefined && !isLibraryVolume(item.correctedCustomer)) return false
+    const allowed = ['caseVolume', 'procLabel', 'found', 'gate', 'uncontrolled', 'unread', 'statusUnread', 'skipSend', 'correctedOur', 'correctedCustomer']
+    if (!Object.keys(item).every(key => allowed.includes(key))) return false
+    if (item.unread === true) {
+      return item.found === false && item.gate === '' && item.statusUnread === undefined && item.uncontrolled === undefined && item.skipSend === undefined && item.correctedOur === undefined && item.correctedCustomer === undefined
+    }
+    if (item.statusUnread === true) return item.found === true && item.unread === undefined && item.uncontrolled === undefined && item.skipSend === undefined && item.gate === ''
+    if (item.uncontrolled === true) return item.found === true && item.gate === 'done' && item.unread === undefined && item.statusUnread === undefined && item.skipSend === undefined
+    if (item.skipSend === true) return item.found === true && item.gate === 'open' && item.unread === undefined && item.statusUnread === undefined && item.uncontrolled === undefined
+    return item.unread === undefined && item.statusUnread === undefined && item.uncontrolled === undefined && item.skipSend === undefined
   })
 }
 
@@ -790,7 +809,10 @@ function isAgentChatRequest(value: unknown): boolean {
   if (value.action === 'open' || value.action === 'remove') return isAgentSessionId(value.id) && Object.keys(value).length === 2
   if (value.action === 'answer') return typeof value.message === 'string' && value.message.trim().length > 0 && value.message.length <= 4_000 && Object.keys(value).length === 2
   if (value.action !== 'probe' && value.action !== 'turn') return false
-  return typeof value.message === 'string' && value.message.trim().length > 0 && value.message.length <= 20_000 && Object.keys(value).length === 2
+  if (typeof value.message !== 'string' || value.message.trim().length === 0 || value.message.length > 20_000) return false
+  const keys = Object.keys(value)
+  if (value.action === 'turn' && value.plain === true) return keys.length === 3 && keys.includes('plain')
+  return keys.length === 2
 }
 
 function isAgentSessionCard(value: unknown): boolean {
@@ -888,6 +910,7 @@ function isWorkspaceAction(value: unknown): value is WorkspaceAction {
   if (value.action === 'focus' || value.action === 'listTabs' || value.action === 'refreshSession' || value.action === 'openLogin' || value.action === 'load') {
     return Object.keys(value).length === 1
   }
+  if (value.action === 'setCustomerMode') return isCustomerMode(value.mode) && Object.keys(value).length === 2
   if (value.action === 'bind') return typeof value.tabId === 'number' && Number.isInteger(value.tabId) && Object.keys(value).length === 2
   if (value.action === 'saveCustomer') {
     const keys = Object.keys(value)

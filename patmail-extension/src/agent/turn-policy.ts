@@ -55,7 +55,6 @@ export function requiredTools(userText: string): string[] {
   if (/查询记录|历史查询|记录页/.test(userText)) tools.push('list_history')
   if (/客户资料|这位客户|客户配置/.test(userText)) tools.push('read_customer')
   if (asksToSubmit(userText) || /提交到 EASY|执行这个任务|执行任务/.test(userText)) tools.push('submit_easy')
-  if (/仲裁收件人/.test(userText)) tools.push('review_case_fields')
   return tools
 }
 

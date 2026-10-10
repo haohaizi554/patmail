@@ -12,6 +12,7 @@ function cell(row: string[], index: number): string {
   return (row[index] ?? '').trim().slice(0, 80)
 }
 
+export const NATIONAL_PROC_LABEL = 'PCT进国家阶段官方绝限'
 export const NATIONAL_OUR_TYPE = '提醒PCT申请进入国家案件（我方案号）'
 export const NATIONAL_CUSTOMER_TYPE = '提醒PCT申请进入国家案件（贵方案号）'
 export const DESIGN_CUSTOMER_TYPE = '提醒涉外外观申请（贵方案号）'
@@ -80,21 +81,30 @@ export function pctRowsFromTable(table: string[][], mailTypes: Array<{ id: strin
   return { rows: carried.rows, notice }
 }
 
-/** 同一客户的联系人常常只写在第一行。空行沿用该客户往上最近一行里已经写过的称呼。 */
+/** 联系人沿用该客户往上最近一行。IPR 只补紧挨着的同客户空行，中间隔了别的客户就断开。 */
 function carryCustomerContacts(rows: PctTaskRow[]): { rows: PctTaskRow[]; filled: number } {
-  const remembered = new Map<string, { contactName: string; iprName: string; leadName: string }>()
+  const remembered = new Map<string, { contactName: string; leadName: string }>()
   let filled = 0
+  let previousKey = ''
+  let streakIpr = ''
   const next = rows.map(row => {
     const key = normalizeCustomerName(row.customerName)
-    if (!key) return row
+    if (!key) {
+      previousKey = ''
+      streakIpr = ''
+      return row
+    }
     const previous = remembered.get(key)
     const contactName = row.contactName.trim() || previous?.contactName || ''
-    const iprName = row.iprName.trim() || previous?.iprName || ''
     const leadName = (row.leadName ?? '').trim() || previous?.leadName || ''
+    const ownIpr = row.iprName.trim()
+    const iprName = ownIpr || (key === previousKey ? streakIpr : '')
+    previousKey = key
+    streakIpr = iprName
     const contactCarried = !row.contactName.trim() && Boolean(contactName)
-    const iprCarried = !row.iprName.trim() && Boolean(iprName)
+    const iprCarried = !ownIpr && Boolean(iprName)
     const leadCarried = row.leadName !== undefined && !(row.leadName ?? '').trim() && Boolean(leadName)
-    remembered.set(key, { contactName, iprName, leadName })
+    remembered.set(key, { contactName, leadName })
     if (!contactCarried && !iprCarried && !leadCarried) return row
     filled += 1
     return {
@@ -158,6 +168,17 @@ export function applyPctMailTypes(rows: PctTaskRow[], mailTypes: Array<{ id: str
     if (!picked) return row
     return { ...row, mailTypeLabel: picked.name, mailTypeId: picked.id, mailTypeRadioIndex: picked.radioIndex }
   })
+}
+
+/** 两张表各看各的事项。进国家行不是「提醒申请PCT」的例外。 */
+export function procGapNotes(rows: readonly PctTaskRow[], remindLabel: string): string[] {
+  const remind = remindLabel.trim()
+  const remindOff = rows.filter(row => (row.letterKind ?? 'remind') === 'remind' && row.procLabel.trim() && row.procLabel.trim() !== remind).length
+  const nationalOff = rows.filter(row => row.letterKind === 'national' && row.procLabel.trim() && row.procLabel.trim() !== NATIONAL_PROC_LABEL).length
+  const notes: string[] = []
+  if (remindOff) notes.push(`提醒申请 PCT 表有 ${remindOff} 行的处理事项不是「${remind}」。`)
+  if (nationalOff) notes.push(`进国家表有 ${nationalOff} 行的处理事项不是「${NATIONAL_PROC_LABEL}」。`)
+  return notes
 }
 
 /** 表格里的处理事项名称，对原站处理事项列表里的具体项。分类节点和重名都不选用。 */

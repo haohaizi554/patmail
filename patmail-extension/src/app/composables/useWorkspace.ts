@@ -14,7 +14,7 @@ const notice = ref('尚未连接 EASY。')
 const accountEpoch = ref(0)
 const demo = import.meta.env.DEV && location.protocol !== 'chrome-extension:'
 
-const keepsData = new Set(['load', 'bind', 'refreshSession', 'saveCustomer', 'deleteCustomer', 'saveQueryTemplate', 'deleteQueryTemplate', 'saveRules', 'createTaskPlan', 'recordFileManageRun'])
+const keepsData = new Set(['load', 'bind', 'refreshSession', 'setCustomerMode', 'saveCustomer', 'deleteCustomer', 'saveQueryTemplate', 'deleteQueryTemplate', 'saveRules', 'createTaskPlan', 'recordFileManageRun'])
 const mutations = new Set(['saveCustomer', 'deleteCustomer', 'saveQueryTemplate', 'deleteQueryTemplate', 'saveRules', 'createTaskPlan', 'recordFileManageRun'])
 let listening = false
 let requestSerial = 0
@@ -129,10 +129,12 @@ export function useWorkspace() {
       notice.value = 'DEMO：这是开发预览，没有扩展后台，也不会写入真实数据。'
       return null
     }
+    const switchesSystem = action.action === 'setCustomerMode'
+    if (switchesSystem) connectionEpoch += 1
     const kind = mutations.has(action.action) ? 'mutation' : action.action === 'bind' || action.action === 'refreshSession' ? 'account' : 'read'
     const epoch = connectionEpoch
     const requestId = kind === 'mutation' ? ++mutationSerial : ++requestSerial
-    const expectedOrigin = connection.value.easyOrigin
+    const expectedOrigin = switchesSystem ? '' : connection.value.easyOrigin
     inflight += 1
     try {
       const response = await sendToBackground({ type: MessageType.Workspace, payload: action }, 30_000)
