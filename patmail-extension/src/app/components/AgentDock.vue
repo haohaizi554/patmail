@@ -5,7 +5,7 @@ import { AGENT_ASK_SESSION_NAME_KEY } from '../../agent/memory'
 import { foldActivity, type AgentTraceStep } from '../../agent/trace'
 import { AGENT_CONFIG_KEY, normalizeAgentConfig } from '../../agent/config'
 import AgentAnswer from './AgentAnswer.vue'
-import { thoughtLead } from '../../agent/loop'
+import { splitAgentReply, thoughtLead } from '../../agent/loop'
 import { formatAgentAnswer, isAgentQuestion, type AgentQuestion } from '../../agent/ask'
 import { filterCommands, resolveSlash, slashToken, type SlashCommand } from '../../agent/slash'
 import { MessageType, type BackgroundRequest } from '../../shared/message'
@@ -13,7 +13,7 @@ import { sendToBackground } from '../../utils/runtime'
 
 interface Bubble { role: 'user' | 'assistant'; content: string }
 interface SessionCard { id: string; title: string; updatedAt: string; active: boolean }
-interface Job { kind: 'turn' | 'facts' | 'compact' | 'reset'; display: string; message: string; label: string; arbitration?: true }
+interface Job { kind: 'turn' | 'facts' | 'compact' | 'reset'; display: string; message: string; label: string; arbitration?: true; progress?: string }
 type AgentRequest = Extract<BackgroundRequest, { type: typeof MessageType.AgentChat }>
 type AskOk = { ok: true; reply: string; history: Bubble[]; sessions: SessionCard[]; activeId: string }
 type AskResult = AskOk | { ok: false; message: string }
@@ -36,6 +36,8 @@ const aside = ref<string[]>([])
 const QUEUE_HEAD = 3
 const queue = ref<Job[]>([])
 const arbitrationLeft = ref<string[]>([])
+const arbitrationTotal = ref(0)
+const batchProgress = ref('')
 const queueOpen = ref(false)
 const queueHead = computed(() => queue.value.slice(0, QUEUE_HEAD))
 const queueRest = computed(() => queue.value.slice(QUEUE_HEAD))
@@ -192,6 +194,17 @@ function applyTurn(result: AskOk): void {
   activeId.value = result.activeId
 }
 
+function historyCovers(server: Bubble[], local: Bubble[]): boolean {
+  return local.every(item => server.some(other => other.role === item.role && other.content === item.content))
+}
+
+function arbitrationAnswer(reply: string): string {
+  const split = splitAgentReply(reply)
+  if (/文号/.test(split.answer)) return split.answer
+  if (/文号/.test(reply)) return reply
+  return split.answer || reply
+}
+
 function nearBottom(): boolean {
   const el = scroller.value
   if (!el) return true
@@ -253,6 +266,11 @@ async function ensureHistory(): Promise<void> {
   }
   loaded.value = true
   note.value = ''
+  if (busy.value || (history.value.length > 0 && !historyCovers(result.history, history.value))) {
+    sessions.value = result.sessions
+    activeId.value = result.activeId
+    return
+  }
   applyTurn(result)
 }
 
@@ -367,6 +385,7 @@ function removeSession(id: string): Promise<void> {
 async function reset(): Promise<void> {
   queue.value = []
   arbitrationLeft.value = []
+  arbitrationTotal.value = 0
   queueOpen.value = false
   if (busy.value) {
     pendingReset = true
@@ -375,21 +394,25 @@ async function reset(): Promise<void> {
   await runJob({ kind: 'reset', display: '', message: '', label: '正在清空' })
 }
 
-function arbitrationJob(message: string, left: number): Job {
+function arbitrationJob(message: string, index: number, total: number): Job {
+  const progress = `${index}/${total}`
   return {
     kind: 'turn',
     arbitration: true,
-    display: left ? `仲裁没有 IPR 的收件人，后面还有 ${left} 批` : '仲裁没有 IPR 的收件人',
+    display: `仲裁收件人和抄送 ${progress}`,
     message,
-    label: '正在仲裁收件人'
+    label: `正在仲裁收件人和抄送 ${progress}`,
+    progress
   }
 }
 
 function takeArbitration(): Job | null {
   const message = arbitrationLeft.value[0]
   if (!message) return null
+  const total = Math.max(arbitrationTotal.value, arbitrationLeft.value.length)
+  const index = total - arbitrationLeft.value.length + 1
   arbitrationLeft.value = arbitrationLeft.value.slice(1)
-  return arbitrationJob(message, arbitrationLeft.value.length)
+  return arbitrationJob(message, index, total)
 }
 
 async function finishJob(): Promise<void> {
@@ -403,6 +426,7 @@ async function finishJob(): Promise<void> {
     pendingReset = false
     queue.value = []
     arbitrationLeft.value = []
+    arbitrationTotal.value = 0
     queueOpen.value = false
     await runJob({ kind: 'reset', display: '', message: '', label: '正在清空' })
     return
@@ -416,6 +440,7 @@ async function finishJob(): Promise<void> {
   }
   const wave = takeArbitration()
   if (!wave) {
+    batchProgress.value = ''
     queueOpen.value = false
     await scrollDown()
     return
@@ -427,6 +452,7 @@ function halt(): void {
   if (!busy.value) return
   stopped = true
   arbitrationLeft.value = []
+  arbitrationTotal.value = 0
   pendingAsk.value = null
   askText.value = ''
   askPicked.value = []
@@ -460,18 +486,24 @@ async function retry(): Promise<void> {
 
 async function runJob(job: Job): Promise<void> {
   stopped = false
+  note.value = ''
+  if (job.kind === 'turn') {
+    aside.value = []
+    const shown = job.arbitration ? job.message : job.display
+    const last = history.value.at(-1)
+    if (!(last?.role === 'user' && last.content === shown)) {
+      history.value = [...history.value, { role: 'user', content: shown }]
+    }
+  }
+  batchProgress.value = job.arbitration ? (job.progress ?? '') : ''
+  if (job.arbitration) {
+    stick.value = true
+    await scrollDown(true)
+  }
   busy.value = true
   liveSteps.value = []
   clearLiveThought()
   liveThoughtOpen.value = true
-  note.value = ''
-  if (job.kind === 'turn') {
-    aside.value = []
-    const last = history.value.at(-1)
-    if (!(last?.role === 'user' && last.content === job.display)) {
-      history.value = [...history.value, { role: 'user', content: job.display }]
-    }
-  }
   startWait(job.label)
   stick.value = true
   await scrollDown(true)
@@ -507,19 +539,36 @@ async function runJob(job: Job): Promise<void> {
     })
     if (stopped) {
       arbitrationLeft.value = []
+      arbitrationTotal.value = 0
       note.value = '已停下。'
       retryJob.value = job
       return
     }
     if (!result.ok) {
-      if (job.arbitration) arbitrationLeft.value = []
+      if (job.arbitration) {
+        arbitrationLeft.value = []
+        arbitrationTotal.value = 0
+      }
       note.value = result.message
       retryJob.value = job
     } else {
       retryJob.value = null
-      applyTurn(result)
-      if (job.arbitration && result.reply.trim()) {
-        window.dispatchEvent(new CustomEvent('patmail-arbitration-result', { detail: result.reply }))
+      if (job.arbitration) {
+        const reply = result.reply.trim()
+        const last = history.value.at(-1)
+        if (reply && !(last?.role === 'assistant' && last.content === reply)) {
+          history.value = [...history.value, { role: 'assistant', content: reply }]
+        }
+        sessions.value = result.sessions
+        activeId.value = result.activeId
+        const text = arbitrationAnswer(result.reply)
+        if (text.trim()) {
+          const lastBatch = arbitrationLeft.value.length === 0
+          window.dispatchEvent(new CustomEvent('patmail-arbitration-result', { detail: { text, open: lastBatch } }))
+        }
+        await scrollDown(true)
+      } else {
+        applyTurn(result)
       }
     }
   } finally {
@@ -799,6 +848,7 @@ function onActivity(message: unknown): boolean {
   if (!busy.value) return false
   if (record.channel !== ACTIVITY_CHANNEL || typeof record.label !== 'string') return false
   if (stopped) return false
+  if (batchProgress.value && record.label.startsWith('正在仲裁')) return false
   if (record.label === '正在写' && typeof record.thought === 'string' && record.thought.trim()) {
     liveDraft.value = record.thought
     waitLabel.value = '正在写'
@@ -835,7 +885,9 @@ function onActivity(message: unknown): boolean {
     phase,
     ...(detail ? { detail } : {})
   })
-  waitLabel.value = record.label.slice(0, 40)
+  waitLabel.value = waitLabel.value.startsWith('正在仲裁') && record.label.startsWith('正在仲裁')
+    ? waitLabel.value
+    : record.label.slice(0, 40)
   if (stick.value) void scrollDown()
   return false
 }
@@ -866,12 +918,13 @@ function onArbitrate(event: Event): void {
   open.value = true
   const [first, ...rest] = incoming
   if (!first) return
+  arbitrationTotal.value = incoming.length
   if (busy.value) {
     arbitrationLeft.value = incoming
     return
   }
   arbitrationLeft.value = rest
-  void runJob(arbitrationJob(first, rest.length))
+  void runJob(arbitrationJob(first, 1, incoming.length))
 }
 
 holdAgentPort()
@@ -970,7 +1023,7 @@ onUnmounted(() => {
             <div v-if="liveThought || liveLog.some(item => item.kind === 'thought')" class="think">
               <button type="button" class="think-bar" :aria-expanded="liveThoughtOpen" @click="liveThoughtOpen = !liveThoughtOpen">
                 <span class="think-chevron" :class="{ open: liveThoughtOpen }" aria-hidden="true"></span>
-                <span class="think-label">{{ liveLog.some(item => item.kind === 'step') ? '过程' : '正在思考' }}</span>
+                <span class="think-label">{{ batchProgress ? `正在仲裁收件人和抄送 ${batchProgress}` : (liveLog.some(item => item.kind === 'step') ? '过程' : '正在思考') }}</span>
                 <span v-if="!liveThoughtOpen" class="think-lead">{{ liveLead }}</span>
               </button>
               <template v-if="liveThoughtOpen">
@@ -994,7 +1047,8 @@ onUnmounted(() => {
             </ol>
             <p v-if="liveDraft" class="agent-step-label">正在写</p>
             <pre v-if="liveDraft" class="think-body live">{{ liveDraft }}</pre>
-            <p v-if="!liveSteps.length && !liveDraft"><span class="agent-dots" aria-hidden="true"><i></i><i></i><i></i></span>{{ waitLabel }}</p>
+            <p v-if="batchProgress && !(liveThought || liveLog.some(item => item.kind === 'thought'))"><span class="agent-dots" aria-hidden="true"><i></i><i></i><i></i></span>正在仲裁收件人和抄送 {{ batchProgress }}</p>
+            <p v-else-if="!liveSteps.length && !liveDraft"><span class="agent-dots" aria-hidden="true"><i></i><i></i><i></i></span>{{ waitLabel }}</p>
           </div>
         </div>
         <div v-if="!busy && note" class="agent-row assistant" :class="{ failed: !calmNote(note) }">

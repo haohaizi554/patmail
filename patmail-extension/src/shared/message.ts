@@ -24,6 +24,7 @@ import type { FileSearchResult } from '../api/file-search-types'
 import type { HistoryQueryDetail, HistoryQueryOption } from '../api/query-history'
 import type { SessionSummary } from '../api/session'
 import type { ApiResult } from '../api/types'
+import { AGENT_HISTORY_LIMIT, AGENT_TURN_CHARS } from '../agent/memory'
 import type { IcFlowAsk, IcFlowHit } from '../customer/pct-flow-status'
 import { isMailDraftPreview, isMailExecutionView, isSelectionClaim } from '../mail/easy/guards'
 import type { SelectionClaim } from '../mail/easy/runtime'
@@ -407,7 +408,8 @@ function isIcFlowAsk(value: unknown): value is IcFlowAsk {
   if (!isShortText(value.caseVolume, 80) || !value.caseVolume.trim()) return false
   if (!isShortText(value.procLabel, 80) || !value.procLabel.trim()) return false
   if (value.customerVolume !== undefined && (!isShortText(value.customerVolume, 80) || !value.customerVolume.trim())) return false
-  return Object.keys(value).every(key => key === 'caseVolume' || key === 'procLabel' || key === 'customerVolume')
+  if (value.withRecord !== undefined && value.withRecord !== true) return false
+  return Object.keys(value).every(key => key === 'caseVolume' || key === 'procLabel' || key === 'customerVolume' || key === 'withRecord')
 }
 
 function isLibraryVolume(value: unknown): value is string {
@@ -427,10 +429,12 @@ function isIcFlowResult(value: unknown): value is ApiResult<{ items: IcFlowHit[]
     if (item.skipSend !== undefined && item.skipSend !== true) return false
     if (item.correctedOur !== undefined && !isLibraryVolume(item.correctedOur)) return false
     if (item.correctedCustomer !== undefined && !isLibraryVolume(item.correctedCustomer)) return false
-    const allowed = ['caseVolume', 'procLabel', 'found', 'gate', 'uncontrolled', 'unread', 'statusUnread', 'skipSend', 'correctedOur', 'correctedCustomer']
+    if (item.customerInfo !== undefined && (!isShortText(item.customerInfo, 1600) || !item.customerInfo.trim())) return false
+    if (item.recordInfo !== undefined && (!isShortText(item.recordInfo, 1600) || !item.recordInfo.trim())) return false
+    const allowed = ['caseVolume', 'procLabel', 'found', 'gate', 'uncontrolled', 'unread', 'statusUnread', 'skipSend', 'correctedOur', 'correctedCustomer', 'customerInfo', 'recordInfo']
     if (!Object.keys(item).every(key => allowed.includes(key))) return false
     if (item.unread === true) {
-      return item.found === false && item.gate === '' && item.statusUnread === undefined && item.uncontrolled === undefined && item.skipSend === undefined && item.correctedOur === undefined && item.correctedCustomer === undefined
+      return item.found === false && item.gate === '' && item.statusUnread === undefined && item.uncontrolled === undefined && item.skipSend === undefined && item.correctedOur === undefined && item.correctedCustomer === undefined && item.customerInfo === undefined && item.recordInfo === undefined
     }
     if (item.statusUnread === true) return item.found === true && item.unread === undefined && item.uncontrolled === undefined && item.skipSend === undefined && item.gate === ''
     if (item.uncontrolled === true) return item.found === true && item.gate === 'done' && item.unread === undefined && item.statusUnread === undefined && item.skipSend === undefined
@@ -526,14 +530,17 @@ function isAccountReviewerResult(value: unknown): value is ApiResult<AccountRevi
 function isLimitMailSubmitItem(value: unknown): boolean {
   if (!isRecord(value)) return false
   const keys = Object.keys(value)
-  const allowed = ['procId', 'procIds', 'mailTypeId', 'mailStyle', 'mailId', 'mode', 'inventor', 'customerName', 'contactName', 'iprName', 'leadName']
+  const allowed = ['procId', 'procIds', 'mailTypeId', 'mailStyle', 'mailId', 'mode', 'inventor', 'customerName', 'contactName', 'iprName', 'leadName', 'contacts', 'ccName', 'arbitrated']
   if (!keys.every(key => allowed.includes(key))) return false
   if (!keys.includes('mode') || !keys.includes('customerName') || !keys.includes('contactName') || !keys.includes('iprName') || !keys.includes('leadName')) return false
   if (value.mode !== 'ipr' && value.mode !== 'lead') return false
   if (value.inventor !== undefined && value.inventor !== true && value.inventor !== false) return false
-  if (!isShortText(value.customerName, 120) || !isShortText(value.contactName, 80) || !isShortText(value.iprName, 80) || !isShortText(value.leadName, 80)) return false
-  if (!value.iprName.trim()) return false
-  if (value.mode === 'lead' && !value.leadName.trim()) return false
+  if (value.contacts !== undefined && value.contacts !== 'all') return false
+  if (value.arbitrated !== undefined && value.arbitrated !== true) return false
+  if (!isShortText(value.customerName, 120) || !isShortText(value.contactName, 80) || !isShortText(value.iprName, 200) || !isShortText(value.leadName, 80)) return false
+  if (value.ccName !== undefined && !isShortText(value.ccName, 200)) return false
+  if (value.contacts !== 'all' && !value.iprName.trim()) return false
+  if (value.contacts !== 'all' && value.mode === 'lead' && !value.leadName.trim()) return false
   if (!isQueryGuid(String(value.procId)) || !isQueryGuid(String(value.mailTypeId)) || value.mailStyle !== '1') return false
   if (value.mailId !== undefined && !isQueryGuid(String(value.mailId))) return false
   if (value.procIds === undefined) return true
@@ -833,7 +840,7 @@ function isAgentChatRequest(value: unknown): boolean {
   if (value.action === 'open' || value.action === 'remove') return isAgentSessionId(value.id) && Object.keys(value).length === 2
   if (value.action === 'answer') return typeof value.message === 'string' && value.message.trim().length > 0 && value.message.length <= 4_000 && Object.keys(value).length === 2
   if (value.action !== 'probe' && value.action !== 'turn') return false
-  if (typeof value.message !== 'string' || value.message.trim().length === 0 || value.message.length > 20_000) return false
+  if (typeof value.message !== 'string' || value.message.trim().length === 0 || value.message.length > AGENT_TURN_CHARS) return false
   const keys = Object.keys(value)
   if (value.action === 'turn' && value.plain === true) return keys.length === 3 && keys.includes('plain')
   return keys.length === 2
@@ -852,11 +859,11 @@ function isAgentChatResult(value: unknown): value is ApiResult<{ reply: string; 
   if (value.ok !== true || !isRecord(value.data)) return false
   const history = value.data.history
   const sessions = value.data.sessions
-  return typeof value.data.reply === 'string' && value.data.reply.length <= 100_000 &&
+  return typeof value.data.reply === 'string' && value.data.reply.length <= AGENT_TURN_CHARS &&
     typeof value.data.model === 'string' && value.data.model.length <= 200 &&
     typeof value.data.steps === 'number' && Number.isSafeInteger(value.data.steps) && value.data.steps >= 0 && value.data.steps <= 20 &&
-    Array.isArray(history) && history.length <= 80 && history.every(item => isRecord(item) &&
-      (item.role === 'user' || item.role === 'assistant') && typeof item.content === 'string' && item.content.length <= 20_000) &&
+    Array.isArray(history) && history.length <= AGENT_HISTORY_LIMIT && history.every(item => isRecord(item) &&
+      (item.role === 'user' || item.role === 'assistant') && typeof item.content === 'string' && item.content.length <= AGENT_TURN_CHARS) &&
     isAgentSessionId(value.data.activeId) &&
     Array.isArray(sessions) && sessions.length > 0 && sessions.length <= 30 && sessions.every(isAgentSessionCard)
 }

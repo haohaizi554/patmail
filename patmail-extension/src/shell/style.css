@@ -441,9 +441,12 @@ img { max-width: 100%; }
 .sheet-pick .name { color: var(--sub); font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sheet-pick input { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
 .dialog { width: 440px; background: #fff; border-radius: 16px; padding: 16px 18px; }
-.arbitration-board { width: min(960px, calc(100vw - 48px)); }
-.arbitration-scroll { max-height: min(520px, calc(100vh - 180px)); overflow: auto; margin-top: 8px; }
-.arbitration-board .grid { font-size: 13px; }
+.dialog.arbitration-board { width: min(1440px, calc(100vw - 24px)); }
+.arbitration-scroll { max-height: min(72vh, 760px); overflow: auto; margin-top: 8px; }
+.arbitration-board .grid { width: 100%; font-size: 13px; }
+.arbitration-board .grid th,
+.arbitration-board .grid td { white-space: normal; height: auto; vertical-align: top; }
+.arbitration-board .grid td:last-child { min-width: 220px; }
 .arbitration-board .is-unsure td { color: #9a6700; }
 .dialog header, .dialog footer { display: flex; justify-content: space-between; align-items: center; }
 .dialog h3 { margin: 0; }

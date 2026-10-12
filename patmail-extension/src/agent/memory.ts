@@ -3,6 +3,11 @@ import type { SelectedPatentFile } from '../mail/types'
 
 export const AGENT_MEMORY_KEY = 'patmail.agent.memory.v1'
 
+/** 一轮原话上限。默认 8192 token 的回复，加上思考，会超过 2 万字。 */
+export const AGENT_TURN_CHARS = 100_000
+/** 一次结果里带回的可见对话。更早的仍留在记忆里。 */
+export const AGENT_HISTORY_LIMIT = 120
+
 /** 近期原话。超长后旧的几轮收成原文摘录，不整段丢掉。 */
 export interface MemoryTurn {
   role: 'user' | 'assistant' | 'tool'
@@ -183,7 +188,7 @@ function isTurn(value: unknown): value is MemoryTurn {
   if (typeof value !== 'object' || value === null) return false
   const turn = value as Record<string, unknown>
   if (turn.role !== 'user' && turn.role !== 'assistant' && turn.role !== 'tool') return false
-  if (typeof turn.content !== 'string' || turn.content.length > 20_000) return false
+  if (typeof turn.content !== 'string' || turn.content.length > AGENT_TURN_CHARS) return false
   if (turn.toolCallId !== undefined && typeof turn.toolCallId !== 'string') return false
   if (turn.toolCalls !== undefined && !(Array.isArray(turn.toolCalls) && turn.toolCalls.every(isToolCall))) return false
   if (turn.guidance !== undefined && (typeof turn.guidance !== 'string' || turn.guidance.length > 8_000)) return false
@@ -609,7 +614,7 @@ export function visibleHistory(state: AgentMemoryState): Array<{ role: 'user' | 
     if (turn.hidden) return []
     if ((turn.role !== 'user' && turn.role !== 'assistant') || !turn.content.trim()) return []
     if (turn.role === 'assistant' && turn.toolCalls && turn.toolCalls.length > 0 && !turn.content.trim()) return []
-    return [{ role: turn.role, content: turn.content }]
-  }).slice(-160)
+    return [{ role: turn.role, content: turn.content.length > AGENT_TURN_CHARS ? turn.content.slice(0, AGENT_TURN_CHARS) : turn.content }]
+  }).slice(-AGENT_HISTORY_LIMIT)
 }
 
