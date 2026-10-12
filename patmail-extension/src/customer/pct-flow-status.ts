@@ -7,6 +7,13 @@ export const MAILED_UNFINISHED_REVIEW = '已发文，事项未管制完成日'
 /** 这项事项已经完成，下面没有子流程。 */
 export const SKIP_SEND_REVIEW = '不用发'
 
+/** 已经提交、审核通过，或发文已结束但事项未管制完成日。这些行不用再仲裁收件人。 */
+export function reviewNeedsArbitration(review: string): boolean {
+  const text = review.trim()
+  if (text === '已提交审核' || text === '已经审核通过' || text === MAILED_UNFINISHED_REVIEW) return false
+  return true
+}
+
 /** 一边是另一边再加一段「-后缀」。用来认出库里文号和表格文号只差放弃复审这类尾巴。 */
 export function suffixVariant(left: string, right: string): boolean {
   const a = left.replace(/\s/g, '').toUpperCase()
@@ -204,6 +211,8 @@ export interface IcFlowAsk {
    * 两栏本来就是同一个文号时不要填，仍先查我方文号。
    */
   customerVolume?: string
+  /** IPR 空着。核对时用已经找到的案件编号把客户要求和著录项目一并读回来。 */
+  withRecord?: true
 }
 
 export interface IcFlowHit {
@@ -223,6 +232,10 @@ export interface IcFlowHit {
   unread?: true
   /** 案子查到了，发文流程这一下没有读成。 */
   statusUnread?: true
+  /** 案件页客户要求。只在 IPR 空着时读取。 */
+  customerInfo?: string
+  /** 著录项目里的发明人和客户联系人。 */
+  recordInfo?: string
 }
 
 export function caseBusFlowParams(caseId: string): URLSearchParams {

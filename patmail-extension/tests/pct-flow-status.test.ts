@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifyProcSendGate, finishedWithoutFlow, gateForProcLabel, mailedWithoutFinishDate, suffixVariant } from '../src/customer/pct-flow-status'
+import { classifyProcSendGate, finishedWithoutFlow, gateForProcLabel, mailedWithoutFinishDate, MAILED_UNFINISHED_REVIEW, reviewNeedsArbitration, suffixVariant } from '../src/customer/pct-flow-status'
 
 const procId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 
@@ -110,5 +110,13 @@ describe('PCT 发文审核状态', () => {
     expect(suffixVariant('PA2519196CND-YS', 'pa2519196cnd-ys')).toBe(false)
     expect(suffixVariant('PA2519196CND', 'PA2519196CND-YS')).toBe(true)
     expect(suffixVariant('PA2519196CNDYS', 'PA2519196CND')).toBe(false)
+  })
+
+  it('已经提交、审核通过或未管制的行不再仲裁', () => {
+    expect(reviewNeedsArbitration('已提交审核')).toBe(false)
+    expect(reviewNeedsArbitration('已经审核通过')).toBe(false)
+    expect(reviewNeedsArbitration(MAILED_UNFINISHED_REVIEW)).toBe(false)
+    expect(reviewNeedsArbitration('还没提交审核')).toBe(true)
+    expect(reviewNeedsArbitration('—')).toBe(true)
   })
 })

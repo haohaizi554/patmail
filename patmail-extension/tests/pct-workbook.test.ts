@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { lookupIcFlow } from '../src/customer/ic-flow-lookup'
-import { NATIONAL_OUR_TYPE, pctRowsFromTable } from '../src/customer/pct-sheet'
-import { applyArbitrationReply, arbitrateDetail, arbitrationBatchSize, checkedSourceSheets, detailLines, iprArbitrationBrief, iprArbitrationWaves, isPctWorkbookSheet, missedSourceSheets, noteForBlankIpr, pctRowsFromWorkbook } from '../src/customer/pct-workbook'
+import { NATIONAL_CUSTOMER_TYPE, NATIONAL_OUR_TYPE, pctRowsFromTable } from '../src/customer/pct-sheet'
+import { applyArbitrationReply, arbitrateDetail, arbitrationAllowed, arbitrationBatchSize, checkedSourceSheets, detailLines, iprArbitrationBrief, iprArbitrationWaves, isPctWorkbookSheet, missedSourceSheets, noteForBlankIpr, pctRowsFromWorkbook, shouldAutoArbitrate } from '../src/customer/pct-workbook'
 import { matchListedCustomer } from '../src/customer/customer-list'
 import { caseTextUsable } from '../src/customer/case-arbitration'
 import { readXlsxSheets, xlsxBookBytes } from '../src/customer/xlsx-table'
@@ -24,20 +24,22 @@ function elementTag(element: string, name: string): string {
 }
 
 describe('两张表一起读', () => {
-  it('进国家有我方文号就用我方案号，没有再用贵方，外观单独一种', () => {
+  it('进国家有客户文号就用贵方案号，没有客户文号就用我方案号，外观单独一种', () => {
     const parsed = pctRowsFromTable([
       header,
       ['PA1', 'CS-1', '歌尔股份有限公司', '李聪', '', 'PCT进国家阶段官方绝限'],
       ['', 'CS-2', '歌尔股份有限公司', '', '李薇', 'PCT进国家阶段官方绝限'],
+      ['PA0', '', '歌尔股份有限公司', '', '', 'PCT进国家阶段官方绝限'],
       ['PA3', 'CS-3', '歌尔股份有限公司', '', '', '提醒涉外外观申请']
     ], nodes, undefined, 'national')
     expect(parsed.rows.map(row => row.mailTypeLabel)).toEqual([
+      NATIONAL_CUSTOMER_TYPE,
+      NATIONAL_CUSTOMER_TYPE,
       NATIONAL_OUR_TYPE,
-      '提醒PCT申请进入国家案件（贵方案号）',
       '提醒涉外外观申请（贵方案号）'
     ])
-    expect(parsed.rows[1]?.letterKind).toBe('national')
-    expect(parsed.rows[2]?.letterKind).toBe('design')
+    expect(parsed.rows[2]?.letterKind).toBe('national')
+    expect(parsed.rows[3]?.letterKind).toBe('design')
   })
 
   it('提醒表仍是有客户文号走贵方，连续空 IPR 沿用上一行', () => {
@@ -67,7 +69,7 @@ describe('两张表一起读', () => {
     expect(parsed.rows[1]?.iprName).toBe('邹学军')
     expect(parsed.rows[1]?.iprCarried).toBe(true)
     expect(parsed.rows[0]?.mailTypeLabel).toContain('贵方案号')
-    expect(parsed.rows[2]?.mailTypeId).toBe('aaaaaaaa-1111-4111-8111-111111111111')
+    expect(parsed.rows[2]?.mailTypeId).toBe('bbbbbbbb-1111-4111-8111-111111111111')
     expect(parsed.rows[2]?.iprNote).toContain('处理细节')
     expect(parsed.notice).toContain('进国家 1 行')
     expect(noteForBlankIpr('季华实验室', detailLines([['季华实验室，发给发明人']]))).toContain('发明人')
@@ -337,6 +339,8 @@ describe('仲裁交给本地模型时分批', () => {
     expect(short[0]).toContain('每一行单独裁')
     expect(short[0]).toContain('身份')
     expect(short[0]).toContain('抄送身份')
+    expect(short[0]).toContain('技术联系人')
+    expect(short[0]).not.toContain('技术负责人、商务')
     expect(short[0]).not.toContain('结论覆盖')
     expect(short[0]).not.toContain('D1')
     expect(short[0]).not.toContain('review_case_fields')
@@ -365,11 +369,52 @@ describe('仲裁交给本地模型时分批', () => {
     expect(applied.rows[0]?.mailCc).toBeUndefined()
     expect(applied.decisions[0]?.role).toBe('客户联系人')
     expect(applied.rows[1]?.iprName).toBe('李聪、郭旭')
-    expect(applied.rows[1]?.mailCc).toBe('王五')
+    expect(applied.rows[1]?.mailCc).toBeUndefined()
     expect(applied.decisions[1]?.role).toBe('IPR、IPR')
-    expect(applied.decisions[1]?.ccRole).toBe('商务')
+    expect(applied.decisions[1]?.cc).toBe('')
+    expect(applied.decisions[1]?.ccRole).toBe('')
     expect(applied.rows[2]?.iprName).toBe('')
     expect(applied.decisions[2]?.unsure).toBe(true)
+    const bracketed = applyArbitrationReply(rows, [
+      '文号 <PA2519006CND>｜收件人 <李英>｜身份 <客户联系人>｜抄送 <无>｜抄送身份 <无>｜依据 <第一客户联系人>'
+    ].join('\n'))
+    expect(bracketed.written).toBe(1)
+    expect(bracketed.rows[0]?.iprName).toBe('李英')
+    expect(bracketed.rows[1]?.iprName).toBe('')
+  })
+
+  it('核对没结束不能仲裁，整表结束后才按开关自动开始', () => {
+    expect(arbitrationAllowed('idle')).toBe(false)
+    expect(arbitrationAllowed('run')).toBe(false)
+    expect(arbitrationAllowed('fail')).toBe(false)
+    expect(arbitrationAllowed('done')).toBe(true)
+    expect(shouldAutoArbitrate({ fullCheck: true, phase: 'done', enabled: true, gaps: 2, asking: false })).toBe(true)
+    expect(shouldAutoArbitrate({ fullCheck: true, phase: 'run', enabled: true, gaps: 2, asking: false })).toBe(false)
+    expect(shouldAutoArbitrate({ fullCheck: false, phase: 'done', enabled: true, gaps: 2, asking: false })).toBe(false)
+    expect(shouldAutoArbitrate({ fullCheck: true, phase: 'done', enabled: false, gaps: 2, asking: false })).toBe(false)
+    expect(shouldAutoArbitrate({ fullCheck: true, phase: 'done', enabled: true, gaps: 0, asking: false })).toBe(false)
+    expect(shouldAutoArbitrate({ fullCheck: true, phase: 'done', enabled: true, gaps: 2, asking: true })).toBe(false)
+  })
+
+  it('商务和登录人不写回收件人，没有技术联系人就留空', () => {
+    const rows = [gap('PA1', '海目星'), gap('PA2', '北理'), gap('PA3', '澳大'), gap('PA4', '安易')]
+    const applied = applyArbitrationReply(rows, [
+      '文号 PA1｜收件人 杨智银、李小艳｜身份 客户联系人｜抄送 无｜抄送身份 无｜依据 客户要求主送这两位客户联系人',
+      '文号 PA2｜收件人 郑建波｜身份 技术负责人｜抄送 无｜抄送身份 无｜依据 著录项目指定郑建波为技术联系人',
+      '文号 PA3｜收件人 陈冠宇｜身份 商务｜抄送 无｜抄送身份 无｜依据 客户要求邮件只发业务',
+      '文号 PA4｜收件人 余祖｜身份 客户联系人｜抄送 黄萱燕、登录人｜抄送身份 客户联系人、登录人｜依据 客户要求主送余祖并抄送黄萱燕'
+    ].join('\n'))
+    expect(applied.rows[0]?.iprName).toBe('杨智银、李小艳')
+    expect(applied.rows[0]?.iprArbitrated).toBe(true)
+    expect(applied.rows[0]?.mailCc).toBeUndefined()
+    expect(applied.rows[1]?.iprName).toBe('郑建波')
+    expect(applied.decisions.find(item => item.volume === 'PA2')?.role).toBe('IPR')
+    expect(applied.rows[2]?.iprName).toBe('')
+    expect(applied.rows[2]?.iprArbitrated).toBeUndefined()
+    expect(applied.decisions.find(item => item.volume === 'PA3')?.unsure).toBe(true)
+    expect(applied.rows[3]?.iprName).toBe('余祖')
+    expect(applied.rows[3]?.mailCc).toBe('黄萱燕')
+    expect(applied.decisions.find(item => item.volume === 'PA4')?.ccRole).toBe('客户联系人')
   })
 
   it('客户名单对不上多家时不猜，著录项目空文不拿去仲裁', () => {

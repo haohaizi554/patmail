@@ -8,18 +8,15 @@ import type { MailSender } from '../../customer/mailset'
 import { PCT_RESUME_KEY, PENDING_CUSTOMER_KEY } from '../../customer/mail-flow'
 import { fillSheetEmails } from '../../customer/customer-page'
 import { IC_LOOKUP_WIDTH } from '../../customer/ic-flow-lookup'
-import { MAILED_UNFINISHED_REVIEW, SKIP_SEND_REVIEW, type IcFlowHit } from '../../customer/pct-flow-status'
+import { MAILED_UNFINISHED_REVIEW, SKIP_SEND_REVIEW, reviewNeedsArbitration, type IcFlowHit } from '../../customer/pct-flow-status'
 import { paintTaskCheckProgress, resetTaskCheckProgress } from '../check-progress'
-import { applyArbitrationReply, checkedSourceSheets, iprArbitrationWaves, isPctWorkbookSheet, missedSourceSheets, pctRowsFromWorkbook, type ArbitrationDecision } from '../../customer/pct-workbook'
+import { applyArbitrationReply, arbitrationAllowed, checkedSourceSheets, iprArbitrationWaves, isPctWorkbookSheet, missedSourceSheets, pctRowsFromWorkbook, shouldAutoArbitrate, type ArbitrationDecision } from '../../customer/pct-workbook'
 import { applyPctMailTypes, buildPctTask, clonePctTask, matchSheetCtrlProcs, PCT_WORKFLOW_TASK_KEY, procGapNotes, readWorkflowTask, summarizePctTask, volumesOf, writeWorkflowTask } from '../../customer/pct-sheet'
 import type { CustomerQueryProfile, PctTaskRow } from '../../customer/types'
 import { groupWorkflowRows } from '../../customer/workflow-mail'
 import { arbitratedMark, carriedMark, sheetDisplayName, sheetRecipientNames, usesInventorSheet } from '../../customer/pct-recipients'
 import { inventorCustomerNames, isRunnableWorkflow, recipientModeOf } from '../../workflow/catalog'
 import { downloadXlsxSheets, readXlsxSheets } from '../../customer/xlsx-table'
-import { fetchCustomerList } from '../../customer/customer-list-load'
-import { matchListedCustomer } from '../../customer/customer-list'
-import { caseTextUsable } from '../../customer/case-arbitration'
 import { assembleMail, fillFromRules } from '../../mail'
 import type { AssembledMail } from '../../mail/assemble'
 import type { MailRuleBundle, SelectedPatentFile } from '../../mail/types'
@@ -67,15 +64,22 @@ const limitNote = ref('')
 const icPhase = ref<'idle' | 'run' | 'done' | 'fail'>('idle')
 const icNote = ref('')
 type IcHit = { found: boolean; gate: '' | 'open' | 'pending' | 'done'; uncontrolled?: true; skipSend?: true; unread?: true; statusUnread?: true }
-type FlowAsk = { caseVolume: string; procLabel: string; customerVolume?: string }
+type FlowAsk = { caseVolume: string; procLabel: string; customerVolume?: string; withRecord?: true }
 let icHits: Record<string, IcHit> = Object.create(null)
+let recordByVolume: Record<string, { customer: string; record: string }> = Object.create(null)
 const icEpoch = ref(0)
 const PUBLISH_MS = 800
 let publishTimer = 0
 const limitByKey = reactive<Record<string, string>>({})
 const gapWaves = ref<string[]>([])
 const sheetPage = ref(1)
+const AUTO_ARBITRATE_KEY = 'patmail.autoArbitrate.v1'
 const askingGap = ref(false)
+const autoArbitrate = ref(true)
+const arbitrationReady = computed(() => arbitrationAllowed(icPhase.value))
+const arbitrationHint = computed(() => arbitrationReady.value
+  ? '用核对时暂存的客户要求和著录项目仲裁。已经提交、审核通过或未管制的行不交。不再另查接口。'
+  : '核对还没结束。客户要求和著录项目是跟着核对带回来的，齐了才能仲裁。')
 const arbitrationOpen = ref(false)
 const arbitrationBoard = ref<Array<ArbitrationDecision & { customer: string }>>([])
 const abnormalKeys = ref(new Set<string>())
@@ -285,7 +289,7 @@ async function onSheet(event: Event): Promise<void> {
     if (generation !== sheetImportToken) return
     rows.value = applyPctMailTypes(parsed.rows, props.mailTypes, runtime.value)
     resetSheetPages()
-    gapWaves.value = iprArbitrationWaves(rows.value)
+    gapWaves.value = iprArbitrationWaves(rowsForArbitration())
     sheetNotice.value = parsed.notice
     await new Promise(resolve => window.setTimeout(resolve, 0))
     if (generation !== sheetImportToken) return
@@ -329,23 +333,26 @@ function filesOf(group: PctTaskRow[]): SelectedPatentFile[] {
 function shownTo(row: PctTaskRow): string {
   const written = row.mailTo?.trim()
   if (written) return written
+  if (row.iprArbitrated && row.iprName.trim() && recipientMode.value !== 'lead') return arbitratedMark(row.iprName, true)
   if (recipientMode.value === 'lead') return carriedMark(sheetDisplayName(row.leadName ?? ''), row.leadCarried) || '表格里没有'
   const inventor = usesInventorSheet(row.customerName, specials.value)
-  if (!inventor && row.iprArbitrated && row.iprName.trim()) return arbitratedMark(row.iprName, true)
   const marked = carriedMark(inventor ? row.contactName : row.iprName, inventor ? row.contactCarried : row.iprCarried)
   return marked || '表格里没有'
 }
 
 function shownCc(row: PctTaskRow): string {
-  const written = row.mailCc?.trim()
-  if (written) return written
+  const written = row.mailCc?.trim() ?? ''
   if (recipientMode.value === 'lead') {
     const ipr = row.iprArbitrated ? arbitratedMark(row.iprName, true) : carriedMark(row.iprName, row.iprCarried)
-    return ipr ? `${ipr}、商务` : '商务'
+    const base = ipr ? `${ipr}、商务` : '商务'
+    if (!written) return base
+    return written.includes('商务') ? written : `${written}、${base}`
   }
-  if (!usesInventorSheet(row.customerName, specials.value)) return '商务'
-  if (row.iprArbitrated && row.iprName.trim()) return arbitratedMark(row.iprName, true)
-  return carriedMark(row.iprName, row.iprCarried) || '表格里没有'
+  if (row.iprArbitrated || !usesInventorSheet(row.customerName, specials.value)) {
+    if (!written || written === '商务') return '商务'
+    return written.includes('商务') ? written : `${written}、商务`
+  }
+  return written || carriedMark(row.iprName, row.iprCarried) || '表格里没有'
 }
 
 function carriedContactNote(row: PctTaskRow): string {
@@ -363,6 +370,7 @@ function releasePublish(): void {
 function clearHits(): void {
   releasePublish()
   icHits = Object.create(null)
+  recordByVolume = Object.create(null)
   icEpoch.value += 1
   for (const key of Object.keys(limitByKey)) delete limitByKey[key]
 }
@@ -453,6 +461,10 @@ function sheetStatus(row: PctTaskRow): { found: string; review: string } {
   return base
 }
 
+function rowsForArbitration(): PctTaskRow[] {
+  return rows.value.filter(row => reviewNeedsArbitration(sheetStatus(row).review))
+}
+
 function sheetReview(row: PctTaskRow): { found: string; review: string } {
   const published = icEpoch.value
   const fromLimit = limitReview(row)
@@ -492,7 +504,7 @@ const flowByKey = computed(() => {
   return out
 })
 
-function flowAsk(our: string, proc: string, customer = ''): FlowAsk | null {
+function flowAsk(our: string, proc: string, customer = '', withRecord = false): FlowAsk | null {
   const ours = our.trim()
   const theirs = customer.trim()
   const caseVolume = ours || theirs
@@ -501,6 +513,7 @@ function flowAsk(our: string, proc: string, customer = ''): FlowAsk | null {
   const ask: FlowAsk = { caseVolume, procLabel }
   if (!ours && theirs) ask.customerVolume = theirs
   else if (ours && theirs && volumeKey(ours) !== volumeKey(theirs)) ask.customerVolume = theirs
+  if (withRecord) ask.withRecord = true
   return ask
 }
 
@@ -544,13 +557,13 @@ async function lookupCases(token: number, only?: FlowAsk[], kind: 'unread' | 'mi
   }
   const page = bridge
   const seen = new Set<string>()
-  const source = only ?? rows.value.map(row => flowAsk(row.ourVolume, row.procLabel, row.customerVolume)).filter((row): row is FlowAsk => Boolean(row))
+  const source = only ?? rows.value.map(row => flowAsk(row.ourVolume, row.procLabel, row.customerVolume, !row.iprName.trim())).filter((row): row is FlowAsk => Boolean(row))
   const asked: Array<FlowAsk & { tries: number }> = []
   liveAsked = asked
   for (const row of source) {
     const ask = row.customerVolume && volumeKey(row.customerVolume) === volumeKey(row.caseVolume)
       ? row
-      : flowAsk(row.caseVolume, row.procLabel, row.customerVolume ?? '')
+      : flowAsk(row.caseVolume, row.procLabel, row.customerVolume ?? '', Boolean(row.withRecord))
     if (!ask) continue
     const key = icKey(ask.caseVolume, ask.procLabel)
     if (seen.has(key)) continue
@@ -564,7 +577,10 @@ async function lookupCases(token: number, only?: FlowAsk[], kind: 'unread' | 'mi
   if (token !== sheetQueryToken) return
   icPhase.value = 'run'
   icNote.value = !again ? '正在用案件查询核对文号和流程状态…' : kind === 'missing' ? '正在把库里没有的放回队尾…' : '正在把没查成的重新入队…'
-  if (!again) icHits = Object.create(null)
+  if (!again) {
+    icHits = Object.create(null)
+    recordByVolume = Object.create(null)
+  }
   else {
     for (const job of asked) delete icHits[icKey(job.caseVolume, job.procLabel)]
   }
@@ -593,8 +609,27 @@ async function lookupCases(token: number, only?: FlowAsk[], kind: 'unread' | 'mi
     schedulePublish()
   }
 
+  function rememberRecord(item: IcFlowHit): void {
+    if (!item.customerInfo && !item.recordInfo) return
+    const brief = { customer: item.customerInfo ?? '', record: item.recordInfo ?? '' }
+    const keys = [item.caseVolume, item.correctedOur, item.correctedCustomer]
+    for (const key of keys) {
+      if (key?.trim()) recordByVolume[volumeKey(key)] = brief
+    }
+    const sent = volumeKey(item.caseVolume)
+    const corrected = item.correctedOur ? volumeKey(item.correctedOur) : ''
+    for (const row of rows.value) {
+      const ours = volumeKey(row.ourVolume)
+      const theirs = volumeKey(row.customerVolume)
+      if (ours !== sent && theirs !== sent && (!corrected || (ours !== corrected && theirs !== corrected))) continue
+      if (ours) recordByVolume[ours] = brief
+      if (theirs) recordByVolume[theirs] = brief
+    }
+  }
+
   function store(item: IcFlowHit): void {
     applyVolumeFixes(item)
+    rememberRecord(item)
     const hit = hitFromItem(item)
     const key = icKey(item.correctedOur || item.caseVolume, item.procLabel)
     stage(key, hit)
@@ -618,7 +653,7 @@ async function lookupCases(token: number, only?: FlowAsk[], kind: 'unread' | 'mi
       if (!jobs.length) return
       const response = await page.request({
         type: MessageType.LookupIcFlow,
-        payload: { rows: jobs.map(job => ({ caseVolume: job.caseVolume, procLabel: job.procLabel, ...(job.customerVolume ? { customerVolume: job.customerVolume } : {}) })) }
+        payload: { rows: jobs.map(job => ({ caseVolume: job.caseVolume, procLabel: job.procLabel, ...(job.customerVolume ? { customerVolume: job.customerVolume } : {}), ...(job.withRecord ? { withRecord: true as const } : {}) })) }
       })
       if (token !== sheetQueryToken) return
       if (response.type !== MessageType.LookupIcFlowResult || !response.payload.ok) {
@@ -641,7 +676,7 @@ async function lookupCases(token: number, only?: FlowAsk[], kind: 'unread' | 'mi
         const job = jobs.find(entry => icKey(entry.caseVolume, entry.procLabel) === key)
         const tries = job?.tries ?? 0
         if (item.unread && tries < 1) {
-          asked.push({ caseVolume: item.caseVolume, procLabel: item.procLabel, ...(job?.customerVolume ? { customerVolume: job.customerVolume } : {}), tries: tries + 1 })
+          asked.push({ caseVolume: item.caseVolume, procLabel: item.procLabel, ...(job?.customerVolume ? { customerVolume: job.customerVolume } : {}), ...(job?.withRecord ? { withRecord: true as const } : {}), tries: tries + 1 })
           continue
         }
         store(item)
@@ -668,6 +703,10 @@ async function lookupCases(token: number, only?: FlowAsk[], kind: 'unread' | 'mi
     return
   }
   icPhase.value = 'done'
+  gapWaves.value = iprArbitrationWaves(rowsForArbitration())
+  if (shouldAutoArbitrate({ fullCheck: !again, phase: 'done', enabled: autoArbitrate.value, gaps: gapWaves.value.length, asking: askingGap.value })) {
+    void askGaps()
+  }
   let found = 0
   let unreadCount = 0
   for (const key of meter.finished) {
@@ -688,7 +727,7 @@ function jobsByFound(found: string): FlowAsk[] {
   const seen = new Set<string>()
   for (const row of rows.value) {
     if (sheetStatus(row).found !== found) continue
-    const ask = flowAsk(row.ourVolume, row.procLabel, row.customerVolume)
+    const ask = flowAsk(row.ourVolume, row.procLabel, row.customerVolume, !row.iprName.trim())
     if (!ask) continue
     const key = icKey(ask.caseVolume, ask.procLabel)
     if (seen.has(key)) continue
@@ -1080,7 +1119,7 @@ async function onRefreshStatus(payload: { targets: Array<{ caseVolume: string; p
       payload: {
         rows: unique.slice(0, IC_LOOKUP_WIDTH).map(item => {
           const row = rows.value.find(entry => volumeKey(entry.ourVolume) === volumeKey(item.caseVolume) && entry.procLabel.trim() === item.procLabel.trim())
-          return flowAsk(item.caseVolume, item.procLabel, row?.customerVolume ?? '') ?? { caseVolume: item.caseVolume.trim(), procLabel: item.procLabel.trim() }
+          return flowAsk(item.caseVolume, item.procLabel, row?.customerVolume ?? '', !row?.iprName.trim()) ?? { caseVolume: item.caseVolume.trim(), procLabel: item.procLabel.trim() }
         })
       }
     })
@@ -1158,111 +1197,86 @@ function exportChecked(): void {
   downloadXlsxSheets(sheets, `核对结果-${rows.value.length}行.xlsx`)
 }
 
-async function mapPool<T>(items: T[], size: number, run: (item: T) => Promise<void>): Promise<void> {
-  let index = 0
-  async function worker(): Promise<void> {
-    for (;;) {
-      const current = index
-      index += 1
-      const item = items[current]
-      if (item === undefined) return
-      await run(item)
-    }
+function cachedBrief(row: PctTaskRow): { customer: string; record: string } | undefined {
+  for (const key of [row.ourVolume, row.customerVolume]) {
+    const found = key.trim() ? recordByVolume[volumeKey(key)] : undefined
+    if (found) return found
   }
-  const workers = Math.min(size, items.length)
-  if (workers > 0) await Promise.all(Array.from({ length: workers }, () => worker()))
-}
-
-async function readCustomerInfo(customerId: string): Promise<string> {
-  if (!bridge) return ''
-  const demand = await bridge.request({ type: MessageType.ReadCustomerDemands, payload: { customerId } })
-  const directory = await bridge.request({ type: MessageType.ReadCustomerDirectory, payload: { customerId } })
-  const demandText = demand.type === MessageType.CustomerDemandResult && demand.payload.ok ? demand.payload.data.text.trim() : ''
-  const contacts = directory.type === MessageType.CustomerDirectoryResult && directory.payload.ok ? directory.payload.data.rows : []
-  if (!demandText && !contacts.length) return ''
-  const people = contacts.slice(0, 40).map(row => [row.name, row.contactType, row.email].filter(Boolean).join('｜'))
-  return [
-    `客户要求：\n${demandText || '这一页没有客户要求。'}`,
-    people.length ? `客户联系人：\n${people.join('\n')}` : '客户联系人：这一页没有联系人。'
-  ].join('\n')
-}
-
-async function readCaseText(volume: string): Promise<string> {
-  if (!bridge) return ''
-  const response = await bridge.request({ type: MessageType.ReadCaseFields, payload: { caseVolume: volume } })
-  return response.type === MessageType.ReadCaseFieldsResult ? response.payload.text : ''
+  return undefined
 }
 
 function onArbitrationResult(event: Event): void {
-  const text = event instanceof CustomEvent && typeof event.detail === 'string' ? event.detail : ''
+  const detail = event instanceof CustomEvent ? event.detail : null
+  const text = typeof detail === 'string'
+    ? detail
+    : detail && typeof detail === 'object' && 'text' in detail && typeof detail.text === 'string'
+      ? detail.text
+      : ''
+  const open = typeof detail === 'string' || Boolean(detail && typeof detail === 'object' && 'open' in detail && detail.open)
   if (!text.trim()) return
   const applied = applyArbitrationReply(rows.value, text)
   rows.value = applied.rows
-  gapWaves.value = iprArbitrationWaves(rows.value)
+  gapWaves.value = iprArbitrationWaves(rowsForArbitration())
   const known = new Map(arbitrationBoard.value.map(item => [volumeKey(item.volume), item]))
   for (const decision of applied.decisions) {
     const row = rows.value.find(item => volumeKey(item.ourVolume) === volumeKey(decision.volume) || (item.customerVolume && volumeKey(item.customerVolume) === volumeKey(decision.volume)))
     known.set(volumeKey(decision.volume), { ...decision, customer: row?.customerName ?? '' })
   }
   arbitrationBoard.value = [...known.values()]
-  if (applied.decisions.length) arbitrationOpen.value = true
   const note = applied.written ? `仲裁写回 ${applied.written} 行。` : '这批回复没有对上的文号，没有写回表格。'
   const unsure = applied.unsure ? `拿不准 ${applied.unsure} 行，没有填收件人。` : ''
   sheetNotice.value = [note, unsure].filter(Boolean).join('')
-  buildPreview()
+  if (open && arbitrationBoard.value.length) arbitrationOpen.value = true
+  try { buildPreview() } catch { /* 预览失败不撤回已经写回的行，也不挡住结果浮窗 */ }
 }
 
-onMounted(() => window.addEventListener('patmail-arbitration-result', onArbitrationResult))
+function setAutoArbitrate(event: Event): void {
+  autoArbitrate.value = (event.target as HTMLInputElement).checked
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) return
+  void chrome.storage.local.set({ [AUTO_ARBITRATE_KEY]: autoArbitrate.value })
+}
+
+onMounted(() => {
+  window.addEventListener('patmail-arbitration-result', onArbitrationResult)
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) return
+  void chrome.storage.local.get(AUTO_ARBITRATE_KEY).then(stored => {
+    if (stored[AUTO_ARBITRATE_KEY] === false) autoArbitrate.value = false
+  }).catch(() => { /* 读不到就保持默认勾选 */ })
+})
 onUnmounted(() => window.removeEventListener('patmail-arbitration-result', onArbitrationResult))
 
 async function askGaps(): Promise<void> {
-  const gaps = rows.value.filter(row => !row.iprName.trim())
+  const gaps = rows.value.filter(row => !row.iprName.trim() && reviewNeedsArbitration(sheetStatus(row).review))
+  const settled = rows.value.filter(row => !row.iprName.trim() && !reviewNeedsArbitration(sheetStatus(row).review)).length
   if (!gaps.length || askingGap.value) return
-  if (!bridge) {
-    sheetNotice.value = '还没连上，客户信息和著录项目都没读到，没有交给仲裁。'
+  if (!arbitrationReady.value) {
+    sheetNotice.value = '核对还没结束，客户要求和著录项目还没齐，没有交给仲裁。'
     return
   }
   askingGap.value = true
   try {
-    sheetNotice.value = '正在读客户名单…'
-    const listed = await fetchCustomerList(bridge, false)
-    if (!listed.ok) {
-      sheetNotice.value = `${listed.message}客户信息和著录项目都没读到，没有交给仲裁。`
-      return
-    }
     const customerInfo: Record<string, string> = {}
-    const names = [...new Set(gaps.map(row => row.customerName.trim()).filter(Boolean))]
-    for (const name of names) {
-      const matched = matchListedCustomer(name, listed.customers)
-      if (!matched || matched === 'many') continue
-      const info = await readCustomerInfo(matched.id)
-      if (info) customerInfo[name] = info
-    }
     const caseInfo: Record<string, string> = {}
-    const volumes = [...new Set(gaps.map(row => row.ourVolume.trim() || row.customerVolume.trim()).filter(Boolean))]
-    let done = 0
-    await mapPool(volumes, 4, async volume => {
-      const text = await readCaseText(volume)
-      done += 1
-      if (done % 8 === 0 || done === volumes.length) sheetNotice.value = `正在读著录项目 ${done}/${volumes.length}`
-      if (caseTextUsable(text)) caseInfo[volume] = text
-    })
+    for (const row of gaps) {
+      const volume = row.ourVolume.trim() || row.customerVolume.trim()
+      const cached = cachedBrief(row)
+      const name = row.customerName.trim()
+      if (cached?.customer && name && !customerInfo[name]) customerInfo[name] = cached.customer
+      if (cached?.record && volume) caseInfo[volume] = cached.record
+    }
     const eligible = gaps.filter(row => {
       const volume = row.ourVolume.trim() || row.customerVolume.trim()
       return Boolean(customerInfo[row.customerName.trim()]) || Boolean(caseInfo[volume])
     })
     const held = gaps.length - eligible.length
     const waves = iprArbitrationWaves(eligible, customerInfo, caseInfo).filter(item => item.trim())
-    const missingCustomer = names.filter(name => !customerInfo[name])
-    const heldNote = held ? `${held} 行客户信息和著录项目都没读到，没有交给仲裁。` : ''
-    const partialNote = missingCustomer.length && eligible.length
-      ? `这些客户的客户信息没对上，有著录项目的行仍会仲裁：${missingCustomer.slice(0, 8).join('、')}。`
-      : ''
     if (!waves.length) {
-      sheetNotice.value = [heldNote || '没有读到可以仲裁的客户信息或著录项目，没有交给仲裁。', partialNote].filter(Boolean).join('')
+      sheetNotice.value = '核对时没有带上这些行的客户要求和著录项目。不再另外查客户名单或案件，也没有交给仲裁。'
       return
     }
-    sheetNotice.value = [`已读到 ${eligible.length} 行，分 ${waves.length} 批交给仲裁。`, heldNote, partialNote].filter(Boolean).join('')
+    const heldNote = held ? `${held} 行核对里没带上，没有再查。` : ''
+    const settledNote = settled ? `${settled} 行已经提交、审核通过或未管制，没有交给仲裁。` : ''
+    sheetNotice.value = [`用核对时暂存的材料，${eligible.length} 行分 ${waves.length} 批交给仲裁。助手只看这些文字，不再查接口。`, heldNote, settledNote].filter(Boolean).join('')
     window.dispatchEvent(new CustomEvent('patmail-arbitrate', { detail: waves }))
   } finally {
     askingGap.value = false
@@ -1279,7 +1293,7 @@ function definitionHint(item: WorkflowDefinition | null): string {
   <section class="card">
     <div class="card-head"><h2>按工作流发文</h2></div>
     <p v-if="workflowId === FILE_MANAGE_ID" class="hint">选择已经绑好文件管理的客户。按这位客户保存的查询条件和发文方式查出文件。文件描述按发文映射对上发文类型。收件人是案件联系人，抄送是默认发件人和商务，审核人是默认审核人，标题用标题模板，正文用发文页邮件签名下拉里的格式。所属部门包含研发本部时，在文件描述右侧写入全部发明人，顿号分隔。</p>
-    <p v-else class="hint">一次读「提醒申请PCT」和「PCT进国家」两张表。进国家有我方文号就用我方案号，没有再用贵方。外观用涉外外观那一种。同一客户里连续空着的 IPR 只沿紧挨着的上一行往下补，中间隔了别的客户就不补。完全空着的，先读客户信息和著录项目，读到了才交给助手，按文号把收件人写回这一行。核对完成后可以导出，在原表上加一列审核状态。邮箱那一列不读。</p>
+    <p v-else class="hint">一次读「提醒申请PCT」和「PCT进国家」两张表。进国家有客户文号就用贵方案号，没有客户文号就用我方案号。外观用涉外外观那一种。同一客户里连续空着的 IPR 只沿紧挨着的上一行往下补，中间隔了别的客户就不补。完全空着的，核对时会带上客户要求和著录项目里的发明人、客户联系人。交给助手时只使用这份暂存，不再查客户名单或案件。助手按文号把收件人写回这一行。核对完成后可以导出，在原表上加一列审核状态。邮箱那一列不读。</p>
     <div class="form-grid">
       <div v-if="workflowOptions.length === 0" class="span-all">
         <EmptyGuide text="还没有工作流。去工作流里看 PCT提醒。" action="去工作流" hash="/workflow" />
@@ -1312,9 +1326,17 @@ function definitionHint(item: WorkflowDefinition | null): string {
       </div>
       <p v-for="note in styleNotes" :key="note" class="hint">这张表按同一客户、同一收件人和抄送合成一封。{{ note }}</p>
       <p v-if="sheetNotice" class="hint">{{ sheetNotice }}</p>
-      <button v-if="gapWaves.length" type="button" class="ghost" :disabled="askingGap" @click="askGaps">交给助手仲裁空着的 IPR{{ gapWaves.length > 1 ? `（分 ${gapWaves.length} 批）` : '' }}</button>
-      <button v-if="icPhase === 'done' && rows.length" type="button" class="ghost" @click="exportChecked">导出核对表</button>
-      <button v-if="arbitrationBoard.length" type="button" class="ghost" @click="arbitrationOpen = true">仲裁结果 {{ arbitrationBoard.length }}</button>
+      <div class="arbitrate-bar">
+        <span v-if="gapWaves.length" v-hint="arbitrationHint">
+          <button type="button" class="ghost" :disabled="askingGap || !arbitrationReady" @click="askGaps">交给助手仲裁空着的收件人和抄送{{ gapWaves.length > 1 ? `（分 ${gapWaves.length} 批）` : '' }}</button>
+        </span>
+        <button v-if="icPhase === 'done' && rows.length" type="button" class="ghost" @click="exportChecked">导出核对表</button>
+        <button v-if="arbitrationBoard.length" type="button" class="ghost" @click="arbitrationOpen = true">仲裁结果 {{ arbitrationBoard.length }}</button>
+        <label class="arbitrate-auto">
+          <input type="checkbox" :checked="autoArbitrate" @change="setAutoArbitrate" />
+          核对完状态之后自动开始仲裁（如果有缺失）
+        </label>
+      </div>
       <p v-if="mailTypes.length === 0" class="hint">发文类型还没读到。确认已经连上后，重新打开这一页。</p>
       <p v-if="unmatched.length" class="hint">这 {{ unmatched.length }} 行没有对上发文类型，请点选。</p>
       <p v-for="note in procGaps" :key="note" class="hint">{{ note }}</p>
@@ -1404,7 +1426,7 @@ function definitionHint(item: WorkflowDefinition | null): string {
           <h3 id="arbitration-title">仲裁结果 {{ arbitrationBoard.length }} 行</h3>
           <button type="button" aria-label="关闭" @click="arbitrationOpen = false">×</button>
         </header>
-        <p>收件人和抄送按助手写回的身份列出。拿不准的行没有填进表格。</p>
+        <p>收件人只在 IPR（技术联系人）、发明人和客户联系人里选。商务、登录人、密送登录人仍按默认追加，不在这张表里改。没有要求也没有技术联系人的行留空，提交时用「全选联系人」兜底。拿不准的行没有填进表格。</p>
         <div class="arbitration-scroll">
           <table class="grid">
             <thead>

@@ -293,19 +293,21 @@ function splitOversized(unit: ArbitrationUnit, demands: Readonly<Record<string, 
 function waveMessage(units: readonly ArbitrationUnit[], index: number, total: number, demands: Readonly<Record<string, string>>, cases: Readonly<Record<string, string>>): string {
   const blocks = units.map(unit => unitBlock(unit, demands, cases))
   const text = [
-    `请仲裁收件人。这是第 ${index}/${total} 批。材料只有下面这些文字：每一行的表格字段，以及插件自己接口读到的客户要求和著录项目。`,
+    `请仲裁收件人和抄送。这是第 ${index}/${total} 批。材料只有下面这些文字：每一行的表格字段，以及核对时已经暂存的客户要求和著录项目。`,
     '每一行单独裁。第一客户联系人不同的，不能收成同一个人，也不能用一条结论盖住同客户的全部文号。',
-    '收件人、抄送都要写清是谁，以及身份。身份只能是：发明人、客户联系人、IPR、技术负责人、商务、不用发。多人用顿号，身份与人名一一对应。',
-    '每一行只写一行，用竖线分开，文号原样照抄：',
-    '文号 <我方文号>｜收件人 <人名，多人顿号>｜身份 <身份，多人顿号>｜抄送 <人名或无>｜抄送身份 <身份或无>｜依据 <一句话>',
-    '拿不准的行写成：文号 <我方文号>｜拿不准｜依据 <一句话>。不要把身份写进人名括号。',
+    'IPR 就是技术联系人。身份只能是：发明人、客户联系人、IPR。多人用顿号，身份与人名一一对应。',
+    '不要写商务、登录人、登陆人、密送、技术负责人。抄送商务、抄送登录人、密送登录人由系统在提交时默认追加。仲裁写了也会被丢掉，写抄送无也不会取消这些默认项。',
+    '优先级：1. 客户要求里明确写了发给谁、抄送谁，就按要求。收件人和抄送都可以是 IPR、发明人、客户联系人的任意组合。2. 客户要求没有指定收件人时，收件人只写著录项目或表格里的技术联系人，身份写 IPR。著录项目里仅仅列出来的发明人、客户联系人，不是发信要求。3. 没有明确要求，也没有技术联系人时，这一行写成拿不准，收件人留空。不要用客户联系人名单、技术负责人或商务去顶。抄送只写第 1 条里额外要点名的人，没有就写无。',
+    '每一行只写一行，用竖线分开，文号原样照抄，外面不要加尖括号：',
+    '文号 我方文号｜收件人 人名｜身份 身份｜抄送 人名或无｜抄送身份 身份或无｜依据 一句话',
+    '拿不准的行写成：文号 我方文号｜拿不准｜依据 一句话。不要把身份写进人名括号，文号和人名外面也不要加尖括号。',
     '不要调用工具，不要构造接口，不要自己去查，不要创建任务，不要让用户挑选。裁完这一批就停。',
     ...blocks
   ].join('\n\n')
   return text.length > 18000 ? `${text.slice(0, 18000)}\n（后面的原文被截断了。）` : text
 }
 
-/** 空 IPR 按客户合并后再分批。一批一次交给本地模型。客户信息和著录项目由插件先读好，写进原文。 */
+/** 空 IPR 按客户合并后再分批。一批一次交给本地模型。客户信息和著录项目用核对时暂存的文字，写进原文。 */
 export function iprArbitrationWaves(
   rows: readonly PctTaskRow[],
   demands: Readonly<Record<string, string>> = {},
@@ -322,7 +324,17 @@ export function iprArbitrationWaves(
   return waves.map((wave, index) => waveMessage(wave, index + 1, waves.length, demands, cases))
 }
 
-/** 上传给助手的仲裁说明。只带 IPR 仍空着、并且接口已经读到材料的行。 */
+/** 核对整表结束之后才能仲裁。材料是核对顺带带回来的，没结束就点会用到不完整的原文。 */
+export function arbitrationAllowed(phase: 'idle' | 'run' | 'done' | 'fail'): boolean {
+  return phase === 'done'
+}
+
+/** 整表核对结束、开关开着、还有空着的收件人，并且当前没有在交仲裁。补查没查成的不在这里自动开。 */
+export function shouldAutoArbitrate(input: { fullCheck: boolean; phase: 'idle' | 'run' | 'done' | 'fail'; enabled: boolean; gaps: number; asking: boolean }): boolean {
+  return input.fullCheck && arbitrationAllowed(input.phase) && input.enabled && input.gaps > 0 && !input.asking
+}
+
+/** 上传给助手的仲裁说明。只带 IPR 仍空着、并且核对时已经暂存了材料的行。 */
 export function iprArbitrationBrief(
   rows: readonly PctTaskRow[],
   demands: Readonly<Record<string, string>> = {},
@@ -345,22 +357,47 @@ export interface ArbitrationDecision {
   unsure: boolean
 }
 
-const ROLE_WORDS = ['发明人', '客户联系人', 'IPR', '技术负责人', '商务', '不用发']
+const ROLE_WORDS = ['发明人', '客户联系人', 'IPR', '技术联系人', '技术负责人', '商务', '登录人', '登陆人', '密送', '不用发']
 
 function blankParty(value: string): boolean {
-  return !value || /^(无|空|没有|不抄送|拿不准)/.test(value)
+  return !value || /^(无|空|没有|不抄送|拿不准|不用发)/.test(value)
 }
 
 function partyText(value: string): string {
-  const names = value.split(/[、,，]/).map(part => part.replace(/[（(][^）)]{1,12}[）)]/g, '').trim()).filter(part => part && !blankParty(part))
-  return names.join('、').slice(0, 80)
+  const names = value.split(/[、,，]/).map(part => unwrapToken(part).replace(/[（(][^）)]{1,12}[）)]/g, '').trim()).filter(part => part && !blankParty(part))
+  return names.join('、').slice(0, 200)
+}
+
+function unwrapToken(value: string): string {
+  return value.replace(/^[<《「『"'\u201c*]+|[>》」』"'\u201d*]+$/g, '').trim()
 }
 
 function roleText(value: string, fallback: string): string {
-  const picked = value.split(/[、,，]/).map(part => part.trim()).filter(part => ROLE_WORDS.includes(part))
+  const picked = value.split(/[、,，]/).map(part => unwrapToken(part)).filter(part => ROLE_WORDS.includes(part))
   if (picked.length) return picked.join('、')
   const marked = fallback.match(/[（(]([^）)]+)[）)]/g)?.map(part => part.replace(/[（()）]/g, '').trim()).filter(part => ROLE_WORDS.includes(part)) ?? []
   return marked.join('、')
+}
+
+/** 商务、登录人、密送是提交时的默认项。技术负责人不是技术联系人，除非依据里写明这个人就是技术联系人。 */
+function partySlots(names: string, roles: string, reason: string): { names: string; roles: string } {
+  const nameList = names.split('、').map(item => item.trim()).filter(Boolean)
+  const roleList = roles.split('、').map(item => item.trim()).filter(Boolean)
+  const keptNames: string[] = []
+  const keptRoles: string[] = []
+  nameList.forEach((name, index) => {
+    const role = roleList[index] || (roleList.length === 1 ? roleList[0] : '')
+    if (/^(商务|登录人|登陆人|密送|发件人)$/.test(name) || /^(商务|登录人|登陆人|密送|发件人)$/.test(role)) return
+    if (role === '技术负责人') {
+      if (!/技术联系人|\bIPR\b/i.test(reason)) return
+      keptNames.push(name)
+      keptRoles.push('IPR')
+      return
+    }
+    keptNames.push(name)
+    if (role) keptRoles.push(role === '技术联系人' ? 'IPR' : role)
+  })
+  return { names: keptNames.join('、'), roles: keptRoles.join('、') }
 }
 
 function fieldOf(parts: string[], label: string): string {
@@ -369,30 +406,40 @@ function fieldOf(parts: string[], label: string): string {
   return found.slice(label.length).replace(/^[：:\s]+/, '').trim()
 }
 
+function decisionLines(text: string): string[] {
+  return text.replace(/```[\w-]*\n?/g, '').replace(/<\/?think>/gi, '').split(/\n+/)
+}
+
 /** 从助手回复里取出每一行的收件人、身份和抄送。拿不准的也留下，但不写进表格。 */
 export function readArbitrationDecisions(text: string): ArbitrationDecision[] {
   const decisions: ArbitrationDecision[] = []
-  for (const raw of text.split(/\n+/)) {
-    const line = raw.trim()
-    const volume = line.match(/文号\s*[｜|:：]?\s*([A-Za-z0-9][A-Za-z0-9\u4e00-\u9fff._-]{1,80})/)
+  for (const raw of decisionLines(text)) {
+    const line = raw.trim().replace(/^\d+[.、)\]]\s*/, '')
+    const volume = line.match(/文号\s*[｜|│丨:：]?\s*[<《「『"'\u201c*]*\s*([A-Za-z0-9][A-Za-z0-9\u4e00-\u9fff._-]{1,80})/)
     if (!volume?.[1]) continue
-    const parts = line.split(/[｜|]/).map(part => part.trim())
+    const parts = line.split(/[｜|│丨]/).map(part => part.trim())
     const unsure = parts.some(part => part === '拿不准' || part.startsWith('拿不准')) || /[：:]\s*拿不准/.test(line)
-    const reason = fieldOf(parts, '依据').slice(0, 120)
+    const reason = unwrapToken(fieldOf(parts, '依据')).slice(0, 120)
     if (unsure) {
       decisions.push({ volume: volume[1], recipient: '', role: '', cc: '', ccRole: '', reason, unsure: true })
       continue
     }
     const recipientRaw = fieldOf(parts, '收件人') || line.match(/收件人\s*[：:\-]?\s*([^，,；;｜|\n]+)/)?.[1]?.trim() || ''
     const ccRaw = fieldOf(parts, '抄送') || line.match(/抄送\s*[：:\-]?\s*([^，,；;｜|\n]+)/)?.[1]?.trim() || ''
-    const recipient = partyText(recipientRaw)
-    if (!recipient) continue
+    const keptTo = partySlots(partyText(recipientRaw), roleText(fieldOf(parts, '身份'), recipientRaw), reason)
+    const keptCc = partySlots(partyText(ccRaw), roleText(fieldOf(parts, '抄送身份'), ccRaw), reason)
+    if (!keptTo.names) {
+      if (fieldOf(parts, '收件人') || unsure) {
+        decisions.push({ volume: volume[1], recipient: '', role: '', cc: '', ccRole: '', reason, unsure: true })
+      }
+      continue
+    }
     decisions.push({
       volume: volume[1],
-      recipient,
-      role: roleText(fieldOf(parts, '身份'), recipientRaw),
-      cc: partyText(ccRaw),
-      ccRole: roleText(fieldOf(parts, '抄送身份'), ccRaw),
+      recipient: keptTo.names,
+      role: keptTo.roles,
+      cc: keptCc.names,
+      ccRole: keptCc.roles,
       reason,
       unsure: false
     })

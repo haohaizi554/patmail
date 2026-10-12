@@ -97,8 +97,8 @@
 .agent-row { display: flex; min-width: 0; }
 .agent-row.user { justify-content: flex-end; }
 .agent-row > p { margin: 0; max-width: min(86%, 36em); min-width: 0; white-space: pre-wrap; border-radius: 14px; padding: 8px 12px; font-size: 13px; line-height: 1.55; color: #243056; }
-.agent-mine { position: relative; max-width: min(86%, 36em); min-width: 0; }
-.agent-row.user > .agent-mine > p { max-width: 100%; background: #ffe4ef; border-bottom-right-radius: 4px; padding-bottom: 26px; user-select: text; }
+.agent-mine { position: relative; flex: none; width: fit-content; max-width: min(86%, 36em); }
+.agent-row.user > .agent-mine > p { margin: 0; white-space: pre-wrap; border-radius: 14px; border-bottom-right-radius: 4px; padding: 8px 12px 26px; font-size: 13px; line-height: 1.55; color: #243056; background: #ffe4ef; user-select: text; }
 .agent-row.assistant > p { background: #fff; border: 1px solid #eadff0; border-bottom-left-radius: 4px; }
 .agent-md { max-width: min(86%, 36em); min-width: 0; border: 1px solid #eadff0; border-radius: 14px; border-bottom-left-radius: 4px; background: #fff; padding: 10px 12px; font-size: 13px; line-height: 1.6; color: #243056; overflow-wrap: break-word; }
 .agent-md > :first-child { margin-top: 0; }
@@ -198,10 +198,6 @@
   .agent-row > p, .agent-md, .agent-stack, .agent-mine { max-width: 100%; }
 }
 @container agent (min-width: 620px) {
-  .agent-float form { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
-  .agent-queue, .agent-palette, .agent-ask { grid-column: 1 / -1; }
-  .agent-actions { flex-direction: column; align-items: stretch; align-self: end; }
-  .agent-actions .agent-slash { margin-right: 0; }
   .agent-cmd-desc { white-space: normal; }
 }
 @container agent (max-height: 460px) {
@@ -258,6 +254,12 @@
 }
 .rules-page > form.stack-form { max-width: none; }
 .save-status { margin: 0; font-size: 14px; font-weight: 700; color: #e44586; }
+.arbitrate-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0; }
+.arbitrate-bar > .ghost,
+.arbitrate-bar > span > .ghost { margin: 0; }
+.arbitrate-bar button:disabled { opacity: .45; cursor: not-allowed; }
+.arbitrate-auto { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 650; color: #243056; }
+.arbitrate-auto input { width: 16px; height: 16px; margin: 0; }
 .send-progress { display: grid; gap: 8px; margin-top: 12px; }
 .send-bar { height: 8px; border-radius: 99px; background: #ffe4ef; overflow: hidden; }
 .send-bar span { display: block; height: 100%; background: linear-gradient(90deg, #ff78ae, #ff4f93); }

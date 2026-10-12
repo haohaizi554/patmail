@@ -3,10 +3,10 @@ import { AGENT_CONFIG_DEFAULT } from '../src/agent/config'
 import type { ChatOutcome } from '../src/agent/llm'
 import { LlmError } from '../src/agent/llm'
 import { journalEntries, packJournal, runAgentTurn, splitAgentReply, thoughtLead, type Complete } from '../src/agent/loop'
-import { applySummary, clipToolResult, COMPRESS_AT_CHARS, EMPTY_MEMORY, factsForPrompt, foldDigest, KEEP_RECENT_CHARS, needsCompression, normalizeMemory, projectOldToolText, rememberFact, searchFacts, splitForCompression, contextChars, visibleHistory, saveMemory, loadMemory, type MemoryStorage } from '../src/agent/memory'
+import { applySummary, clipToolResult, COMPRESS_AT_CHARS, EMPTY_MEMORY, factsForPrompt, foldDigest, KEEP_RECENT_CHARS, needsCompression, normalizeMemory, projectOldToolText, rememberFact, searchFacts, splitForCompression, contextChars, visibleHistory, saveMemory, loadMemory, AGENT_TURN_CHARS, type MemoryStorage } from '../src/agent/memory'
+import { isMessage, MessageType } from '../src/shared/message'
 import { agentToolSchemas, emptyPageTools, executeAgentTool, formatDraft, type ToolContext } from '../src/agent/tools'
 import { groupToolCalls } from '../src/agent/turn-policy'
-import { MessageType } from '../src/shared/message'
 
 const config = { ...AGENT_CONFIG_DEFAULT, maxTokens: 64 }
 
@@ -123,6 +123,29 @@ describe('agent memory', () => {
     expect(memory.turns[0]?.hidden).toBe(true)
     expect(memory.digestMisses).toBe(2)
     expect(visibleHistory(memory)).toEqual([])
+  })
+
+  it('keeps an arbitration reply longer than 2 万字', () => {
+    const content = `文号 PA25111283CN｜收件人 韩玉奎｜身份 客户联系人｜抄送 吴文章｜抄送身份 商务｜依据 客户要求。\n`.repeat(500)
+    expect(content.length).toBeGreaterThan(20_000)
+    expect(content.length).toBeLessThan(AGENT_TURN_CHARS)
+    const memory = normalizeMemory({ summary: '', turns: [{ role: 'assistant', content }, { role: 'user', content }], facts: [] })
+    expect(memory.turns).toHaveLength(2)
+    expect(visibleHistory(memory).every(item => item.content === content)).toBe(true)
+    expect(isMessage({
+      type: MessageType.AgentChatResult,
+      payload: {
+        ok: true,
+        data: {
+          reply: content,
+          model: 'test',
+          steps: 1,
+          history: visibleHistory(memory),
+          sessions: [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', title: '仲裁', updatedAt: '2026-10-12T07:00:00.000Z', active: true }],
+          activeId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+        }
+      }
+    })).toBe(true)
   })
 
   it('dedupes long-term facts and can search them', () => {
