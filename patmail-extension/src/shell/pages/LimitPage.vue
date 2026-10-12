@@ -25,7 +25,8 @@ const props = defineProps({
   pageWhileLoading: Boolean,
   cachePages: Boolean,
   plainProcIds: { type: Array, default: () => [] },
-  flowByProc: { type: Object, default: () => ({}) }
+  flowByProc: { type: Object, default: () => ({}) },
+  iprGap: Boolean
 })
 const emit = defineEmits(['search', 'page', 'select', 'confirm', 'submit'])
 const ui = inject('ui', null)
@@ -117,8 +118,8 @@ function confirmSelection() {
   emit('confirm', props.selected.filter(id => !onPage.has(id) || allowed.has(id)))
 }
 
-function askSubmit() {
-  emit('submit')
+function askSubmit(mode) {
+  emit('submit', mode === 'checked' ? 'checked' : 'named')
 }
 
 function goPage(page) {
@@ -201,7 +202,11 @@ function reset() {
         <span>{{ pageIndex }} / {{ totalPages }}</span>
         <button class="ghost tiny" type="button" :disabled="pageIndex >= totalPages || (loading && !pageWhileLoading)" @click="goPage(pageIndex + 1)">下一页</button>
       </div>
-      <button class="ghost tiny" type="button" v-hint="submitTitle" @click="askSubmit">提交到 EASY</button>
+      <button v-if="!iprGap" key="submit-named" class="ghost tiny" type="button" v-hint="submitTitle" @click="askSubmit('named')">提交到 EASY</button>
+      <template v-else>
+        <button key="submit-checked" class="ghost tiny" type="button" v-hint="'空着 IPR 的行，按这封发文规则里要勾选的客户联系人写入收件人，业务人员作为抄送，然后提交到 EASY。邮箱不是真实地址的人不写入。'" @click="askSubmit('checked')">提交到 EASY：全选联系人</button>
+        <button key="submit-trust" class="ghost tiny" type="button" v-hint="'按助手写回的收件人和抄送提交到 EASY。还空着的行不会提交。'" @click="askSubmit('named')">提交到 EASY：信任AI仲裁</button>
+      </template>
     </div>
     <p v-if="checking" class="hint">正在核对发文审核状态。核对完之前不能勾选。</p>
     <p v-if="message" class="hint">{{ message }}</p>

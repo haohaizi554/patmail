@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { appendRecipientField } from '../src/mail/easy/contracts'
-import { planPctRecipients, currentMailId, sheetRowsOnMail, sheetRecipientNames, sheetDisplayName, inventorCustomers } from '../src/customer/pct-recipients'
+import { planPctRecipients, planCheckedRecipients, currentMailId, sheetRowsOnMail, sheetRecipientNames, sheetDisplayName, inventorCustomers } from '../src/customer/pct-recipients'
 import type { PctTaskRow } from '../src/customer/types'
 import type { MailContactRow } from '../src/mail/easy/mail-contacts'
 
@@ -34,6 +34,7 @@ describe('PCT 联系人追加', () => {
     expect(plan.notes).toEqual([])
     expect(sheetRecipientNames(row({ customerName: '特例客户' }), specials)).toEqual({ to: '姜颖', cc: '雷群安' })
     expect(sheetRecipientNames(row({ customerName: '鹏城国家实验室' }), specials)).toEqual({ to: '雷群安', cc: '' })
+    expect(sheetRecipientNames(row({ customerName: '特例客户', iprName: '韩玉奎', iprArbitrated: true, mailCc: '吴文章' }), specials)).toEqual({ to: '韩玉奎', cc: '吴文章' })
   })
 
   it('其他客户：IPR 进收件人，业务人员进抄送', () => {
@@ -110,5 +111,61 @@ describe('PCT 联系人追加', () => {
   it('尖括号和裸邮箱都能接在已有地址后面', () => {
     expect(appendRecipientField('已有 <old@example.com>', '张三(a@example.com);')).toBe('已有(old@example.com);张三(a@example.com);')
     expect(appendRecipientField('', 'a@example.com;')).toBe('a@example.com;')
+  })
+
+  it('仲裁后的收件人按人名写入，商务仍追加，不改成发明人特例', () => {
+    const plan = planPctRecipients(
+      [row({ customerName: '特例客户', iprName: '韩玉奎、姜颖', iprArbitrated: true, mailCc: '吴文章' })],
+      [
+        contact({ name: '姜颖', email: 'liy02@pcl.ac.cn', role: '第一发明人' }),
+        contact({ group: 'customer', name: '韩玉奎', email: 'hanyk@example.com', role: '客户联系人' }),
+        contact({ group: 'sales', name: '林淑敏', email: 'linsm@centips.com', role: '' }),
+        contact({ group: 'customer', name: '吴文章', email: 'wu@example.com', role: '客户联系人' })
+      ],
+      { to: '', cc: '' },
+      inventorCustomers('特例客户')
+    )
+    expect(plan.to).toContain('韩玉奎(hanyk@example.com);')
+    expect(plan.to).toContain('姜颖(liy02@pcl.ac.cn);')
+    expect(plan.to).not.toContain('林淑敏')
+    expect(plan.cc).toContain('林淑敏(linsm@centips.com);')
+    expect(plan.cc).toContain('吴文章(wu@example.com);')
+  })
+
+  it('助手写回的抄送会追加到商务后面', () => {
+    const plan = planPctRecipients(
+      [row({ mailCc: '韩玉奎' })],
+      [
+        contact({ group: 'pics', name: '雷群安', email: 'leiqa@pcl.ac.cn', role: 'IP联系人' }),
+        contact({ group: 'customer', name: '韩玉奎', email: 'hanyk001@cmhk.com', role: '客户联系人' }),
+        contact({ group: 'sales', name: '吴文章', email: 'wuwenzhang@hcipi.com', role: '' })
+      ],
+      { to: '', cc: '' }
+    )
+    expect(plan.to).toContain('雷群安(leiqa@pcl.ac.cn);')
+    expect(plan.cc).toContain('吴文章(wuwenzhang@hcipi.com);')
+    expect(plan.cc).toContain('韩玉奎(hanyk001@cmhk.com);')
+  })
+
+  it('全选联系人只写入发文规则里的收件人，去掉括号，丢掉没有邮箱的人', () => {
+    const plan = planCheckedRecipients(
+      [
+        { type: 'to', name: '杨智银（流程）', email: 'yangzhiyin@hymson.com' },
+        { type: 'to', name: '李小艳', email: 'lixiaoyan@hymson.com' },
+        { type: 'to', name: '黄健宏', email: '/' },
+        { type: 'cc', name: '段芳玉', email: 'duanfangyu@centips.com' }
+      ],
+      [
+        contact({ name: '莫丹磊', email: 'modanlei@stellergy.com', role: 'IPR经办人' }),
+        contact({ name: '主送', email: 'liyuan@centips.com', role: 'IPR经办人' }),
+        contact({ group: 'sales', name: '段芳玉', email: 'duanfangyu@centips.com', role: '' }),
+        contact({ group: 'sales', name: '段芳玉', email: 'duanfangyu@centips.com', role: '' })
+      ],
+      { to: '/;;lixiaoyan@hymson.com;yangzhiyin@hymson.com', cc: '' }
+    )
+    expect(plan.to).toBe('杨智银流程(yangzhiyin@hymson.com);李小艳(lixiaoyan@hymson.com);')
+    expect(plan.cc).toBe('段芳玉(duanfangyu@centips.com);')
+    expect(plan.skipped).toEqual(['黄健宏'])
+    expect(plan.notes).toEqual([])
   })
 })

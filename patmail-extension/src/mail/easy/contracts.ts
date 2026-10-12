@@ -188,6 +188,33 @@ export function ruleParams(input: { mailId: string; customerId: string; mailType
   return params
 }
 
+export interface RuleMailPerson {
+  type: string
+  name: string
+  email: string
+}
+
+/** 发文页收件人勾选来自 GetMailRule.mail。type 为 to 的是「客户联系人」。 */
+export function readRuleMailPeople(data: unknown): { ok: true; people: RuleMailPerson[] } | { ok: false; message: string } {
+  if (!isRecord(data)) return { ok: false, message: '发文规则没有读到，没有提交。' }
+  const client = readClientInfo(data.ClientInfo)
+  if (!client.ok || client.data.IsLogin === false) return { ok: false, message: '读取发文规则时登录已失效。' }
+  if (client.data.Status === false) return { ok: false, message: '发文规则被 EASY 拒绝，没有提交。' }
+  if (!Object.prototype.hasOwnProperty.call(data, 'mail')) return { ok: false, message: '发文规则没有联系人名单，没有提交。' }
+  if (data.mail === null) return { ok: true, people: [] }
+  if (!Array.isArray(data.mail)) return { ok: false, message: '发文规则的联系人名单无法识别，没有提交。' }
+  const people: RuleMailPerson[] = []
+  for (const row of data.mail) {
+    if (!isRecord(row)) return { ok: false, message: '发文规则有一行联系人无法识别，没有提交。' }
+    const type = typeof row.type === 'string' ? row.type.trim() : ''
+    const name = typeof row.name === 'string' ? row.name.trim() : ''
+    const email = typeof row.email === 'string' ? row.email.trim() : ''
+    if (!type) continue
+    people.push({ type, name, email })
+  }
+  return { ok: true, people }
+}
+
 /** 抓包格式是「名称(邮箱);」。没有显示名时不能改成只提交邮箱。 */
 export function formatRecipientList(emails: string[], contacts: Array<{ name: string; email: string }>): { value: string; blocked: boolean; reason: string } {
   if (emails.length === 0) return { value: '', blocked: false, reason: '' }
@@ -343,6 +370,43 @@ export function listParams(call: 'GetMailFile' | 'GetMailCase', mailId: string, 
     params.set('colsel', ';sn;case_volume;ctrl_proc;case_name;case_volume_customer;app_no;issue_no;register_type_code;legal_due_date;customer_id;')
   }
   return params
+}
+
+/** 完成事项只勾本封案件上的处理事项。同一事项只留一次，多个用逗号，和期限查询里多选的写法一样。 */
+export function finishCtrlProcIds(rows: readonly unknown[]): string {
+  const seen = new Set<string>()
+  const ids: string[] = []
+  for (const row of rows) {
+    if (!isRecord(row) || typeof row.ctrl_proc_id !== 'string') continue
+    const id = row.ctrl_proc_id.trim()
+    if (!isQueryGuid(id)) continue
+    const key = id.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    ids.push(id)
+  }
+  return ids.join(',')
+}
+
+/** 读本封 GetMailCase，取出要写入 finish_ctrl_proc 的处理事项。没有案件时是空字符串。 */
+export async function loadFinishCtrlProc(
+  mailId: string,
+  post: (params: URLSearchParams) => Promise<{ ok: boolean; data?: unknown }>
+): Promise<{ ok: true; value: string } | { ok: false; message: string }> {
+  const rows: unknown[] = []
+  let seen = 0
+  for (let page = 1; page <= 5; page += 1) {
+    const loaded = await post(listParams('GetMailCase', mailId, page))
+    if (!loaded.ok) return { ok: false, message: '发文上的处理事项没有读到，没有提交。' }
+    const parsed = readTableRows(loaded.data, 'case_id', 'case_volume')
+    if (parsed.state === 'invalid') return { ok: false, message: '发文上的处理事项没有读到，没有提交。' }
+    if (parsed.state !== 'known') break
+    if (isRecord(loaded.data) && Array.isArray(loaded.data.TableRows)) rows.push(...loaded.data.TableRows)
+    seen += parsed.rows.length
+    const reached = parsed.total !== null && seen >= parsed.total
+    if (reached || parsed.rows.length < 100) break
+  }
+  return { ok: true, value: finishCtrlProcIds(rows) }
 }
 
 export function initParams(mailId: string): URLSearchParams {

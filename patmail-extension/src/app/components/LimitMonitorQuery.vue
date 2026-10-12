@@ -6,7 +6,7 @@ import type { LimitMonitorResult, LimitMonitorRow } from '../../api/limit-monito
 import { isLimitMonitorType, type LimitMonitorQuery } from '../../api/limit-monitor-params'
 import { MAILED_UNFINISHED_REVIEW, SKIP_SEND_REVIEW } from '../../customer/pct-flow-status'
 import { clonePctTask, readWorkflowTask, writeWorkflowTask } from '../../customer/pct-sheet'
-import { limitMailItems, limitMailLetterLabel, limitMailProcIds, limitMailSubmitShouldHalt, runLimitMailSubmit, runMailLetterPool } from '../../customer/limit-mail-submit'
+import { limitMailItems, limitMailLetterLabel, limitMailProcIds, limitMailSubmitShouldHalt, runLimitMailSubmit, runMailLetterPool, selectionNeedsAddressChoice } from '../../customer/limit-mail-submit'
 import { beginProgress, classifySubmitText, endProgress, logProgress, progressSummaryLine, tallyProgress } from '../dialog'
 import { splitCaseVolumes } from '../../customer/volume-list'
 import { isQueryGuid } from '../../query/query-validator'
@@ -51,6 +51,13 @@ const pageIndex = ref(1)
 const pageSize = ref(10)
 const selected = ref<string[]>([])
 const confirmedIds = ref<string[]>([])
+const closedIds = ref(new Set<string>())
+const hasIprGap = computed(() => selectionNeedsAddressChoice(
+  rows.value,
+  props.sheetRows ?? [],
+  selected.value,
+  rows.value.filter(row => rowCanConfirm(row.procId)).map(row => row.procId)
+))
 const sheetMerged = ref(false)
 const lastQuery = ref<Omit<LimitMonitorQuery, 'pageIndex' | 'pageSize'> | null>(null)
 const templateId = ref('')
@@ -329,6 +336,7 @@ function goPage(page: number): void {
 }
 
 function rowCanConfirm(procId: string): boolean {
+  if (closedIds.value.has(procId.toLowerCase())) return false
   const flow = flowByProc.value[procId]
   if (flow === '已提交审核' || flow === MAILED_UNFINISHED_REVIEW || flow === SKIP_SEND_REVIEW) return false
   const gate = gates.value[procId]
@@ -357,7 +365,7 @@ function onConfirm(ids: string[]): void {
   emit('confirm', procIds)
 }
 
-async function onSubmitAsk(): Promise<void> {
+async function onSubmitAsk(address?: string): Promise<void> {
   if (!isWriteSwitchReady()) {
     message.value = '正在读取系统设置里的写开关。'
     return
@@ -372,12 +380,35 @@ async function onSubmitAsk(): Promise<void> {
   }
   const bridge = props.bridge
   const task = readWorkflowTask()
+  const live = selected.value.filter(item => isQueryGuid(item) && rowCanConfirm(item))
+  if (selected.value.length && !live.length) {
+    const mailed = selected.value.some(item => flowByProc.value[item] === MAILED_UNFINISHED_REVIEW)
+    const skipped = selected.value.some(item => flowByProc.value[item] === SKIP_SEND_REVIEW)
+    message.value = checkingGates.value
+      ? '还在核对发文审核状态，先不能提交。'
+      : mailed
+        ? '已发文、事项还没写完成日的不能提交。'
+        : skipped
+          ? '不用发的不能提交。'
+          : '已提交审核的不能提交。'
+    return
+  }
+  const remembered = (confirmedIds.value.length ? confirmedIds.value : (task?.confirmedProcIds ?? [])).filter(id => rowCanConfirm(id))
+  const procIds = live.length ? live : remembered
+  if (live.length || remembered.length !== (confirmedIds.value.length || (task?.confirmedProcIds.length ?? 0))) {
+    const nextIds = live.length ? live : remembered
+    confirmedIds.value = nextIds
+    const stored = readWorkflowTask()
+    if (stored) writeWorkflowTask(clonePctTask({ ...stored, confirmedProcIds: nextIds }))
+    emit('confirm', nextIds)
+  }
   const planned = limitMailItems({
-    procIds: confirmedIds.value.length ? confirmedIds.value : (task?.confirmedProcIds ?? []),
+    procIds,
     rows: rows.value,
     sheetRows: props.sheetRows?.length ? props.sheetRows : (task?.rows ?? []),
     mode: props.recipientMode ?? (task?.recipientMode === 'lead' || task?.recipientMode === 'ipr' ? task.recipientMode : 'ipr'),
-    specials: new Set(props.inventorCustomers ?? [])
+    specials: new Set(props.inventorCustomers ?? []),
+    address: address === 'checked' ? 'checked' : 'named'
   })
   if (!planned.ok) {
     message.value = planned.message
@@ -412,7 +443,14 @@ async function onSubmitAsk(): Promise<void> {
       }
       return limitMailSubmitShouldHalt(text)
     })
-    if (sent.size) confirmedIds.value = confirmedIds.value.filter(id => !sent.has(id.toLowerCase()))
+    if (sent.size) {
+      const keep = (id: string) => !sent.has(id.toLowerCase())
+      confirmedIds.value = confirmedIds.value.filter(keep)
+      selected.value = selected.value.filter(keep)
+      const nextClosed = new Set(closedIds.value)
+      for (const id of sent) nextClosed.add(id)
+      closedIds.value = nextClosed
+    }
     if (halted) tallyProgress('skipped', unstarted.reduce((sum, item) => sum + limitMailProcIds(item).length, 0))
     emit('confirm', confirmedIds.value)
     logProgress('正在回传所涉及案件的审核状态。', planned.items.length)
@@ -608,6 +646,7 @@ watch(() => props.seedToken, () => {
     :page-while-loading="sheetMerged"
     :writes-open="writesOpen"
     :writes-ready="writesReady"
+    :ipr-gap="hasIprGap"
     @page="goPage"
     @select="selected = $event"
     @confirm="onConfirm"

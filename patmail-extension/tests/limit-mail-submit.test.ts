@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { EasyTransport } from '../src/api/transport'
 import {
-  buildMailSubmit, dropPrefilledNoticeRecipient, limitMailItems, nextLimitMailAttempt, pickMailSubmitNodes, readLimitMailCustomer, readMailSubmit, submitLimitMailBatch,
+  buildMailSubmit, dropPrefilledNoticeRecipient, limitMailItems, nextLimitMailAttempt, pickMailSubmitNodes, readLimitMailCustomer, readMailSubmit, selectionNeedsAddressChoice, submitLimitMailBatch,
   type LimitMailSubmitItem
 } from '../src/customer/limit-mail-submit'
 import type { WorkflowNode } from '../src/workflow/types'
@@ -105,11 +105,24 @@ function contacts(sales = [{ cn_name: '商务甲', email: 'sales@example.com' }]
   }
 }
 
+const finishProc = '629cd76f-d7ed-4bf9-944b-a9b2b91b84a2'
+
+function mailCases() {
+  return {
+    ClientInfo: client(),
+    TableRows: [
+      { case_id: customer, case_volume: 'PA1', ctrl_proc: '提醒申请PCT', ctrl_proc_id: finishProc },
+      { case_id: customer, case_volume: 'PA2', ctrl_proc: '提醒申请PCT', ctrl_proc_id: finishProc }
+    ],
+    TableRowsCount: '2'
+  }
+}
+
 function transport(handlers: Record<string, (params: URLSearchParams) => unknown>, calls: string[]) {
   return {
     post: async (operation: string, params: URLSearchParams) => {
       calls.push(`${operation}:${params.get('Call')}`)
-      const body = handlers[operation]?.(params)
+      const body = handlers[operation]?.(params) ?? (operation === 'getMailCase' ? mailCases() : undefined)
       return body === undefined ? { ok: false, error: { code: 'HTTP_ERROR', message: '没有这个响应', status: 500 } } : { ok: true, data: body }
     }
   } as unknown as EasyTransport
@@ -168,6 +181,8 @@ describe('limit mail submit', () => {
     expect(submitAt).toBeGreaterThan(saveAt)
     expect(saved.params?.get('mail_to')).toBe('雷工(ipr@example.com);')
     expect(saved.params?.get('mail_cc')).toBe('商务甲(sales@example.com);')
+    expect(saved.params?.get('finish_ctrl_proc')).toBe(finishProc)
+    expect(result.results[0]?.message).toContain('完成事项已勾上本封的处理事项')
     expect(saved.params?.get('mail_subject')).toBe('主题')
     expect(saved.params?.get('mail_body')).toBe('正文')
     expect(saved.params?.get('is_zip')).toBe('0')
@@ -344,6 +359,15 @@ describe('limit mail submit', () => {
       sheetRows: [{ ourVolume: 'PA1', mailTypeId: mailType, iprName: '雷工' }],
       mode: 'lead'
     }).ok).toBe(false)
+    const checked = limitMailItems({
+      procIds: [proc],
+      rows: [{ procId: proc, caseVolume: 'PA1' }],
+      sheetRows: [{ ourVolume: 'PA1', mailTypeId: mailType, iprName: '', customerName: '客户甲', mailCc: '韩玉奎' }],
+      mode: 'ipr',
+      address: 'checked'
+    })
+    expect(checked.ok && checked.items[0]?.contacts).toBe('all')
+    expect(checked.ok && checked.items[0]?.ccName).toBe('韩玉奎')
     const current: WorkflowNode = { listId: list1, seq: 1, next: '9', nodeId: first, nodeCode: 'FIRST', nodeName: '启动', allowSkip: null, allowEdit: true, userType: '', parallel: false, needAllAudit: false, reviewers: [], reviewerFormat: 'structured' }
     expect(pickMailSubmitNodes([current]).ok).toBe(false)
     expect(buildMailSubmit({
@@ -362,5 +386,41 @@ describe('limit mail submit', () => {
     expect(nextLimitMailAttempt(item, mark, 'open').action).toBe('send')
     expect(nextLimitMailAttempt(item, mark, 'pending')).toEqual({ action: 'skip', reason: 'pending' })
     expect(nextLimitMailAttempt(item, mark, undefined)).toEqual({ action: 'skip', reason: 'remembered' })
+  })
+
+  it('提交按钮跟着当前勾选在一个和两个之间来回变', () => {
+    const limit = [
+      { procId: 'p-plain', caseVolume: 'PA1', ctrlProc: '提醒申请PCT' },
+      { procId: 'p-marked', caseVolume: 'PA2', ctrlProc: '提醒申请PCT' }
+    ]
+    const sheet = [
+      { ourVolume: 'PA1', procLabel: '提醒申请PCT', iprName: '雷群安' },
+      { ourVolume: 'PA2', procLabel: '提醒申请PCT', iprName: '韩玉奎', iprArbitrated: true as const }
+    ]
+    expect(selectionNeedsAddressChoice(limit, sheet, [])).toBe(true)
+    expect(selectionNeedsAddressChoice(limit, sheet, ['p-plain'])).toBe(false)
+    expect(selectionNeedsAddressChoice(limit, sheet, ['p-plain', 'p-marked'])).toBe(true)
+    expect(selectionNeedsAddressChoice(limit, sheet, ['p-marked'])).toBe(true)
+    expect(selectionNeedsAddressChoice(limit, sheet, ['p-marked'], ['p-plain'])).toBe(false)
+    expect(selectionNeedsAddressChoice(limit, sheet, [], ['p-plain'])).toBe(false)
+    expect(selectionNeedsAddressChoice(limit, sheet, [], ['p-marked'])).toBe(true)
+  })
+
+  it('信任仲裁跳过还空着的行，全选联系人仍提交这些行', () => {
+    const rows = [
+      { procId: proc, caseVolume: 'PA1' },
+      { procId: proc2, caseVolume: 'PA2' }
+    ]
+    const sheetRows = [
+      { ourVolume: 'PA1', mailTypeId: mailType, customerName: '甲客户', iprName: '雷工' },
+      { ourVolume: 'PA2', mailTypeId: mailType, customerName: '甲客户', iprName: '' }
+    ]
+    const trusted = limitMailItems({ procIds: [proc, proc2], rows, sheetRows, mode: 'ipr', address: 'named' })
+    expect(trusted.ok && trusted.items.map(item => item.procId)).toEqual([proc])
+    const checked = limitMailItems({ procIds: [proc2], rows, sheetRows, mode: 'ipr', address: 'checked' })
+    expect(checked.ok && checked.items[0]?.contacts).toBe('all')
+    const onlyEmpty = limitMailItems({ procIds: [proc2], rows, sheetRows, mode: 'ipr', address: 'named' })
+    expect(onlyEmpty.ok).toBe(false)
+    if (!onlyEmpty.ok) expect(onlyEmpty.message).toContain('全选联系人')
   })
 })

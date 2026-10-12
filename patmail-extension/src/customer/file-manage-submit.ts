@@ -1,6 +1,7 @@
 import type { EasyTransport } from '../api/transport'
 import { isRecord } from '../api/response-guards'
 import { appendRecipientField, buildMailCustomerParams, readMailCustomer, readMailInfo, readSaveMailInfo, SAVE_KEYS, saveParams, signatureParams } from '../mail/easy/contracts'
+import { mailBccToSave } from '../mail/easy/bcc'
 import { loadMailContactText } from '../mail/easy/mail-contacts'
 import { operatorSignatureHtml, readSignatureHtml } from '../mail/easy/signature-read'
 import type { MailDraftPreview } from '../mail/types'
@@ -225,15 +226,14 @@ function zipText(row: Record<string, unknown>): string | null {
   return null
 }
 
-function saveFields(row: Record<string, unknown>, item: FileManageSubmitItem, mailId: string, to: string, cc: string, signatureHtml: string): Record<(typeof SAVE_KEYS)[number], string> | null {
+function saveFields(row: Record<string, unknown>, item: FileManageSubmitItem, mailId: string, to: string, cc: string, signatureHtml: string, bcc: string): Record<(typeof SAVE_KEYS)[number], string> | null {
   const mailType = cellText(row, 'mail_type_id', true)
   const customerId = cellText(row, 'customer_id', true)
   const mailsetId = cellText(row, 'mailset_id', true)
   const subject = cellText(row, 'mail_subject', true)
   const body = cellText(row, 'mail_body', true)
-  const bcc = cellText(row, 'mail_bcc', true)
   const isZip = zipText(row)
-  if (mailType === null || customerId === null || mailsetId === null || subject === null || body === null || bcc === null || isZip === null) return null
+  if (mailType === null || customerId === null || mailsetId === null || subject === null || body === null || isZip === null) return null
   if (!isQueryGuid(mailType) || !isQueryGuid(customerId) || !isQueryGuid(item.senderId)) return null
   const optional = {
     zip_pwd: cellText(row, 'zip_pwd', false),
@@ -356,7 +356,9 @@ async function writeLetter(transport: EasyTransport, mailId: string, item: FileM
   const withInventors = await bodyWithRndInventors(transport, mailId, rawBody)
   if (!withInventors.ok) return withInventors
   const row = withInventors.html === rawBody ? info.row : { ...info.row, mail_body: withInventors.html }
-  const fields = saveFields(row, item, mailId, to.value, cc, signature.html)
+  const bcc = await mailBccToSave(info.row, mailId, customerId, (operation, params) => transport.post(operation, params))
+  if (bcc === null) return { ok: false, message: '发文草稿的密送读不全，没有改地址。' }
+  const fields = saveFields(row, item, mailId, to.value, cc, signature.html, bcc)
   if (!fields) return { ok: false, message: '发文草稿的主题、正文或发件邮箱读不全，没有改地址。' }
   const saved = await transport.post('saveMailInfo', saveParams(fields))
   if (!saved.ok) return { ok: false, message: '保存收件人的响应无法确认，没有提交。再点一次会沿用这封发文，不会重新创建。' }

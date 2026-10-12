@@ -1,10 +1,11 @@
 import { buildLimitMailCustomerParams } from '../api/limit-monitor-params'
 import { isRecord, readClientInfo } from '../api/response-guards'
 import type { EasyTransport } from '../api/transport'
-import { readMailInfo, readSaveMailInfo, SAVE_KEYS, saveParams } from '../mail/easy/contracts'
+import { loadFinishCtrlProc, readMailInfo, readRuleMailPeople, readSaveMailInfo, ruleParams, SAVE_KEYS, saveParams } from '../mail/easy/contracts'
 import { loadMailContactText } from '../mail/easy/mail-contacts'
 import { normalizeCustomerName } from './skills'
-import { planPctRecipients, sheetDisplayName, usesInventorSheet } from './pct-recipients'
+import { planCheckedRecipients, planPctRecipients, sheetDisplayName, usesInventorSheet } from './pct-recipients'
+import { mailBccToSave } from '../mail/easy/bcc'
 import type { PctTaskRow } from './types'
 import { groupWorkflowRows } from './workflow-mail'
 import { isQueryGuid } from '../query/query-validator'
@@ -39,6 +40,12 @@ export interface LimitMailSubmitItem {
   contactName: string
   iprName: string
   leadName: string
+  /** 缺 IPR 时按发文规则里的客户联系人写收件人，业务人员仍抄送。 */
+  contacts?: 'all'
+  /** 助手写回的抄送人名。多人用顿号。商务、登录人、密送不写在这里。 */
+  ccName?: string
+  /** 这一行的收件人来自仲裁。提交时仍追加商务，不按发明人特例改收件人。 */
+  arbitrated?: true
 }
 
 export interface LimitMailSubmitResult {
@@ -192,9 +199,11 @@ export function limitMailLetterLabel(item: { procId: string; procIds?: string[] 
 export function limitMailItems(input: {
   procIds: string[]
   rows: Array<{ procId: string; caseVolume: string }>
-  sheetRows: Array<{ ourVolume: string; mailTypeId?: string; customerName?: string; contactName?: string; iprName?: string; leadName?: string; mailTo?: string; mailCc?: string }>
+  sheetRows: Array<{ ourVolume: string; mailTypeId?: string; customerName?: string; contactName?: string; iprName?: string; leadName?: string; mailTo?: string; mailCc?: string; iprArbitrated?: true }>
   mode: 'ipr' | 'lead'
   specials?: ReadonlySet<string>
+  /** checked：没有 IPR 的行改为按发文规则勾选客户联系人后提交。 */
+  address?: 'named' | 'checked'
 }): { ok: true; items: LimitMailSubmitItem[] } | { ok: false; message: string } {
   if (!input.procIds.length) return { ok: false, message: '还没有确认勾选。先勾选还没提交审核的事项。' }
   const specials = input.specials ?? new Set<string>()
@@ -219,8 +228,10 @@ export function limitMailItems(input: {
     const customerName = source?.customerName?.trim() ?? ''
     const iprName = lookupName(source?.iprName)
     const leadName = lookupName(source?.leadName)
-    if (input.mode === 'lead' && !leadName) return { ok: false, message: `文号 ${row.caseVolume} 表格里没有技术负责人，没有提交。` }
-    if (!iprName) return { ok: false, message: `文号 ${row.caseVolume} 表格里没有 IPR，没有提交。` }
+    const checked = input.address === 'checked' && !iprName
+    if (input.mode === 'lead' && !leadName && !checked) return { ok: false, message: `文号 ${row.caseVolume} 表格里没有技术负责人，没有提交。` }
+    if (!iprName && !checked) continue
+    const ccName = lookupName(source?.mailCc ?? '')
     const item: LimitMailSubmitItem = {
       procId,
       mailTypeId: types[0],
@@ -230,7 +241,10 @@ export function limitMailItems(input: {
       customerName,
       contactName: source?.contactName?.trim() ?? '',
       iprName,
-      leadName
+      leadName,
+      ...(checked ? { contacts: 'all' as const } : {}),
+      ...(ccName ? { ccName } : {}),
+      ...(source?.iprArbitrated ? { arbitrated: true as const } : {})
     }
     flat.push({
       item,
@@ -244,9 +258,18 @@ export function limitMailItems(input: {
         procLabel: '',
         mailTypeLabel: '',
         mailTo: source?.mailTo,
-        mailCc: source?.mailCc
+        mailCc: source?.mailCc,
+        ...(source?.iprArbitrated ? { iprArbitrated: true as const } : {})
       }
     })
+  }
+  if (!flat.length) {
+    return {
+      ok: false,
+      message: input.address === 'checked'
+        ? '勾选的行还没有可以提交的收件人。'
+        : '勾选的行还没有收件人。信任 AI 仲裁不会提交这些空行，用「全选联系人」兜底。'
+    }
   }
   const byProc = new Map(flat.map(entry => [entry.item.procId.toLowerCase(), entry.item]))
   const items: LimitMailSubmitItem[] = []
@@ -402,6 +425,34 @@ function lookupName(raw: string | undefined): string {
   return sheetDisplayName(raw ?? '').replace(/（补）\s*$/, '').replace(/（仲）\s*$/, '').trim()
 }
 
+function choiceVolume(value: string): string {
+  return value.replace(/\s/g, '').toUpperCase()
+}
+
+/** 当前还能提交的勾选里有仲裁行或仍空着 IPR 时，要给出两种提交。没勾选时只看还能提交的行。已经发过的不参与。 */
+export function selectionNeedsAddressChoice(
+  limitRows: readonly { procId: string; caseVolume: string; ctrlProc?: string }[],
+  sheetRows: readonly { ourVolume: string; customerVolume?: string; procLabel?: string; iprName?: string; iprArbitrated?: true }[],
+  selectedIds: readonly string[],
+  openIds?: readonly string[]
+): boolean {
+  const open = openIds ? new Set(openIds) : null
+  const eligible = open ? limitRows.filter(row => open.has(row.procId)) : limitRows
+  const picked = new Set(selectedIds)
+  const chosen = picked.size ? eligible.filter(row => picked.has(row.procId)) : eligible
+  if (picked.size && !chosen.length) return false
+  return chosen.some(row => {
+    const volume = choiceVolume(row.caseVolume)
+    if (!volume) return false
+    const same = sheetRows.filter(item => choiceVolume(item.ourVolume) === volume || (item.customerVolume ? choiceVolume(item.customerVolume) === volume : false))
+    if (!same.length) return false
+    const proc = (row.ctrlProc ?? '').trim()
+    const exact = proc ? same.filter(item => (item.procLabel ?? '').trim() === proc) : []
+    const matched = exact.length ? exact : same
+    return matched.some(item => item.iprArbitrated || !lookupName(item.iprName))
+  })
+}
+
 function mailInfoParams(mailId: string): URLSearchParams {
   const params = new URLSearchParams()
   params.set('Call', 'GetMailInfo')
@@ -426,15 +477,14 @@ function zipText(row: Record<string, unknown>): string | null {
   return null
 }
 
-function saveFields(row: Record<string, unknown>, mailId: string, to: string, cc: string): Record<(typeof SAVE_KEYS)[number], string> | null {
+function saveFields(row: Record<string, unknown>, mailId: string, to: string, cc: string, bcc: string, finishCtrlProc: string): Record<(typeof SAVE_KEYS)[number], string> | null {
   const mailType = cellText(row, 'mail_type_id', true)
   const customerId = cellText(row, 'customer_id', true)
   const mailsetId = cellText(row, 'mailset_id', true)
   const subject = cellText(row, 'mail_subject', true)
   const body = cellText(row, 'mail_body', true)
-  const bcc = cellText(row, 'mail_bcc', true)
   const isZip = zipText(row)
-  if (mailType === null || customerId === null || mailsetId === null || subject === null || body === null || bcc === null || isZip === null) return null
+  if (mailType === null || customerId === null || mailsetId === null || subject === null || body === null || isZip === null) return null
   if (!isQueryGuid(mailType) || !isQueryGuid(customerId) || !isQueryGuid(mailsetId)) return null
   const optional = {
     zip_pwd: cellText(row, 'zip_pwd', false),
@@ -467,7 +517,7 @@ function saveFields(row: Record<string, unknown>, mailId: string, to: string, cc
     message_id: optional.message_id ?? '',
     subject_desc: optional.subject_desc ?? '',
     mail_tags: optional.mail_tags ?? '',
-    finish_ctrl_proc: optional.finish_ctrl_proc ?? ''
+    finish_ctrl_proc: finishCtrlProc
   }
 }
 
@@ -480,7 +530,9 @@ function hintRow(item: LimitMailSubmitItem): PctTaskRow {
     iprName: item.iprName,
     leadName: item.leadName,
     procLabel: '',
-    mailTypeLabel: ''
+    mailTypeLabel: '',
+    mailCc: item.ccName,
+    ...(item.arbitrated ? { iprArbitrated: true as const } : {})
   }
 }
 
@@ -508,10 +560,26 @@ async function writeRecipients(transport: EasyTransport, mailId: string, item: L
   const existingCc = cellText(info.row, 'mail_cc', true)
   if (existingTo === null || existingCc === null) return { ok: false, message: '发文草稿的收件人字段读不全，没有改地址。' }
   const specials = item.inventor ? new Set([normalizeCustomerName(item.customerName)]) : new Set<string>()
-  const plan = planPctRecipients([hintRow(item)], contacts.data.rows, {
+  const existing = {
     to: dropPrefilledNoticeRecipient(existingTo),
     cc: dropPrefilledNoticeRecipient(existingCc)
-  }, specials, item.mode)
+  }
+  let plan = planPctRecipients([hintRow(item)], contacts.data.rows, existing, specials, item.mode)
+  let skippedRule = ''
+  if (item.contacts === 'all') {
+    const mailTypeId = cellText(info.row, 'mail_type_id', true)
+    const mailTypeName = cellText(info.row, 'mail_type', true)
+    if (!mailTypeId || !mailTypeName) return { ok: false, message: '这封发文的类型没有读到，没有按规则勾选联系人。' }
+    const params = ruleParams({ mailId, customerId, mailTypeId, mailTypeName })
+    if (!params) return { ok: false, message: '这封发文的类型没有读到，没有按规则勾选联系人。' }
+    const rule = await transport.post('getMailRule', params)
+    if (!rule.ok) return { ok: false, message: '发文规则没有读到，没有提交。' }
+    const people = readRuleMailPeople(rule.data)
+    if (!people.ok) return { ok: false, message: people.message }
+    const checked = planCheckedRecipients(people.people, contacts.data.rows, existing)
+    plan = checked
+    if (checked.skipped.length) skippedRule = `没有写入邮箱无效的联系人：${checked.skipped.join('、')}。`
+  }
   plan.to = dropPrefilledNoticeRecipient(plan.to)
   plan.cc = dropPrefilledNoticeRecipient(plan.cc)
   const missing = plan.notes[0] || (!plan.to.includes('@') ? '收件人没有对上邮箱，没有提交。' : '')
@@ -519,13 +587,21 @@ async function writeRecipients(transport: EasyTransport, mailId: string, item: L
   if (missing || !plan.to.includes('@') || !salesInCc) {
     return { ok: false, message: missing || '商务没有写进抄送，没有提交。' }
   }
-  const fields = saveFields(info.row, mailId, plan.to, plan.cc)
+  const bcc = await mailBccToSave(info.row, mailId, customerId, (operation, params) => transport.post(operation, params))
+  if (bcc === null) return { ok: false, message: '发文草稿的密送读不全，没有改地址。' }
+  const finish = await loadFinishCtrlProc(mailId, params => transport.post('getMailCase', params))
+  if (!finish.ok) return finish
+  const draftedFinish = cellText(info.row, 'finish_ctrl_proc', false)
+  if (draftedFinish === null) return { ok: false, message: '发文草稿的完成事项读不全，没有改地址。' }
+  const fields = saveFields(info.row, mailId, plan.to, plan.cc, bcc, finish.value || draftedFinish)
   if (!fields) return { ok: false, message: '发文草稿的主题、正文或发件邮箱读不全，没有改地址。' }
   const saved = await transport.post('saveMailInfo', saveParams(fields))
   if (!saved.ok) return { ok: false, message: '保存收件人的响应无法确认，没有提交。再点一次会沿用这封发文，不会重新创建。' }
   const status = readSaveMailInfo(saved.data)
   if (status.status !== 'ok') return { ok: false, message: status.status === 'failed' ? 'EASY 拒绝了这次保存。发文已创建，没有提交。' : '保存收件人的响应无法确认，没有提交。再点一次会沿用这封发文，不会重新创建。' }
-  return { ok: true, note: item.mode === 'lead' ? '收件人已写入技术负责人，抄送已含 IPR 和商务。' : '收件人已写入 IPR，抄送已含商务。' }
+  const finished = finish.value ? '完成事项已勾上本封的处理事项。' : ''
+  if (item.contacts === 'all') return { ok: true, note: `收件人已按发文规则勾上客户联系人，抄送已含业务人员。${skippedRule}${finished}` }
+  return { ok: true, note: `${item.mode === 'lead' ? '收件人已写入技术负责人，抄送已含 IPR 和商务。' : '收件人已写入 IPR，抄送已含商务。'}${finished}` }
 }
 
 function spread(item: LimitMailSubmitItem, result: LimitMailSubmitResult): LimitMailSubmitResult[] {
