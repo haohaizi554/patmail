@@ -1,6 +1,7 @@
 import type { ApiResult } from '../api/types'
 import { buildIcSearchParams, icCasesFromBody, type IcCaseHit, type IcSearchField } from '../api/ic-search'
 import { isRecord } from '../api/response-guards'
+import { type CaseRecordBrief } from './case-record'
 import { caseBusFlowParams, finishedWithoutFlow, gateForProcLabel, mailedWithoutFinishDate, suffixVariant, type IcFlowAsk, type IcFlowHit } from './pct-flow-status'
 
 function volumeKey(value: string): string {
@@ -32,7 +33,8 @@ type Seek = FoundCase | 'miss' | 'unread' | 'login'
 /** 用案件查询找案子，再按处理事项名称读发文流程。我方文号对上就不再查客户文号；只有库里没有时才补查。 */
 export async function lookupIcFlow(
   rows: IcFlowAsk[],
-  post: (operation: 'icSearch' | 'caseBusFlow', params: URLSearchParams) => Promise<ApiResult<unknown>>
+  post: (operation: 'icSearch' | 'caseBusFlow', params: URLSearchParams) => Promise<ApiResult<unknown>>,
+  readRecord?: (caseId: string) => Promise<CaseRecordBrief | 'login'>
 ): Promise<ApiResult<{ items: IcFlowHit[] }>> {
   const bodies = new Map<string, unknown>()
   const flowFailed = new Set<string>()
@@ -249,6 +251,24 @@ export async function lookupIcFlow(
       if (!failure) await readFlow(caseId)
     })
   }
+  const briefs = new Map<string, CaseRecordBrief>()
+  if (!failure && readRecord) {
+    const wanted = new Set<string>()
+    rows.forEach((row, index) => {
+      const choice = choices[index]
+      if (!row.withRecord || !choice || typeof choice !== 'object') return
+      wanted.add(choice.caseId)
+    })
+    await pool([...wanted], IC_LOOKUP_SOCKETS, async caseId => {
+      if (failure) return
+      const brief = await readRecord(caseId)
+      if (brief === 'login') {
+        failure = { ok: false, error: { code: 'SESSION_EXPIRED', message: '登录已失效。' } }
+        return
+      }
+      briefs.set(caseId, brief)
+    })
+  }
   if (failure) return failure
 
   const items = rows.map((row, index) => {
@@ -257,9 +277,6 @@ export async function lookupIcFlow(
       return { caseVolume: row.caseVolume, procLabel: row.procLabel, found: false, gate: '' as const, unread: true as const }
     }
     if (!choice || choice === 'miss') return { caseVolume: row.caseVolume, procLabel: row.procLabel, found: false, gate: '' as const }
-    if (flowFailed.has(choice.caseId)) {
-      return { caseVolume: row.caseVolume, procLabel: row.procLabel, found: true, gate: '' as const, statusUnread: true as const }
-    }
     const body = bodies.get(choice.caseId)
     const gate = gateForProcLabel(body, row.procLabel)
     const sent = gate === 'missing' ? '' as const : gate
@@ -268,6 +285,20 @@ export async function lookupIcFlow(
     const customer = (row.customerVolume ?? '').trim()
     const correctedOur = customer && suffixVariant(row.caseVolume, choice.libraryVolume) ? choice.libraryVolume : undefined
     const correctedCustomer = customer && suffixVariant(customer, choice.libraryVolume) ? choice.libraryVolume : undefined
+    const brief = row.withRecord ? briefs.get(choice.caseId) : undefined
+    const customerInfo = brief?.customerInfo || undefined
+    const recordInfo = brief?.recordInfo || undefined
+    if (flowFailed.has(choice.caseId)) {
+      return {
+        caseVolume: row.caseVolume,
+        procLabel: row.procLabel,
+        found: true,
+        gate: '' as const,
+        statusUnread: true as const,
+        ...(customerInfo ? { customerInfo } : {}),
+        ...(recordInfo ? { recordInfo } : {})
+      }
+    }
     return {
       caseVolume: row.caseVolume,
       procLabel: row.procLabel,
@@ -276,7 +307,9 @@ export async function lookupIcFlow(
       ...(uncontrolled ? { uncontrolled } : {}),
       ...(skipSend ? { skipSend } : {}),
       ...(correctedOur ? { correctedOur } : {}),
-      ...(correctedCustomer ? { correctedCustomer } : {})
+      ...(correctedCustomer ? { correctedCustomer } : {}),
+      ...(customerInfo ? { customerInfo } : {}),
+      ...(recordInfo ? { recordInfo } : {})
     }
   })
   return { ok: true, data: { items } }

@@ -55,6 +55,7 @@ export function caseTextUsable(text: string): boolean {
   if (!text.trim() || /我方文号无效|登录已失效|库里没有这个文号/.test(text)) return false
   if (/案件要求：\n\d/.test(text)) return true
   if (/发明人：(?!没有读到)/.test(text)) return true
+  if (/客户联系人：(?!没有读到)/.test(text)) return true
   return /案件页：\n/.test(text)
 }
 
