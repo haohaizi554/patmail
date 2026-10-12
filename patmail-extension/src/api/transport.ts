@@ -11,7 +11,7 @@ export type EasyOperation =
   | 'getFlowInfo' | 'getFlowHistory' | 'getUrgencyList' | 'getFlowSubmit' | 'getFlowLastStatus' | 'caseBusFlow'
   | 'limitMonitor' | 'limitMailCustomer' | 'mailSubmit' | 'mailProcess' | 'processAP' | 'processEF' | 'getIsNewCpc'
   | 'agencySearchCase' | 'agencyCaseInfo' | 'patentCaseData' | 'icSearch' | 'customerList'
-  | 'caseManageInfo' | 'caseCustomField' | 'caseInventor' | 'getFileName'
+  | 'caseManageInfo' | 'caseCustomField' | 'caseInventor' | 'caseRecordContact' | 'casePageDemand' | 'getFileName'
 
 export interface TransportOptions {
   fetcher?: typeof fetch
@@ -77,6 +77,8 @@ const ROUTES: Record<EasyOperation, { path: string; call: string }> = {
   caseManageInfo: { path: '/AjaxServers/CaseInfo.ashx', call: 'GetCaseInfo' },
   caseCustomField: { path: '/AjaxServers/BaseInfo.ashx', call: 'GetCustomField' },
   caseInventor: { path: '/AjaxServers/PatentAction.ashx', call: 'GetCaseInventor' },
+  caseRecordContact: { path: '/AjaxServers/PatentAction.ashx', call: 'GetCaseContact' },
+  casePageDemand: { path: '/AjaxServers/CaseInfo.ashx', call: 'GetCaseDemand' },
   patentCaseData: { path: '/AjaxServers/PatentAction.ashx', call: 'GetPatentData' },
   icSearch: { path: '/AjaxServers/CaseInfo.ashx', call: 'ICSearchList' },
   customerList: { path: '/AjaxServers/Customer.ashx', call: 'GetCustomerlist' },
@@ -131,7 +133,7 @@ export class EasyTransport {
   /** 文件查询和期限监控在这套原网站上经常超过 15 秒。测试传入的短超时仍然生效。 */
   private waitMs(operation: EasyOperation): number {
     if (this.timeoutMs < 15_000) return this.timeoutMs
-    if (operation === 'fileSearch' || operation === 'limitMonitor' || operation === 'limitMailCustomer' || operation === 'mailProcess' || operation === 'processAP' || operation === 'processEF' || operation === 'agencySearchCase' || operation === 'icSearch' || operation === 'caseBusFlow' || operation === 'customerList') return 60_000
+    if (operation === 'fileSearch' || operation === 'limitMonitor' || operation === 'limitMailCustomer' || operation === 'mailProcess' || operation === 'processAP' || operation === 'processEF' || operation === 'agencySearchCase' || operation === 'icSearch' || operation === 'caseBusFlow' || operation === 'casePageDemand' || operation === 'caseInventor' || operation === 'caseRecordContact' || operation === 'customerList') return 60_000
     return this.timeoutMs
   }
 

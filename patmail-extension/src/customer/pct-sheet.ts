@@ -17,11 +17,11 @@ export const NATIONAL_OUR_TYPE = '提醒PCT申请进入国家案件（我方案�
 export const NATIONAL_CUSTOMER_TYPE = '提醒PCT申请进入国家案件（贵方案号）'
 export const DESIGN_CUSTOMER_TYPE = '提醒涉外外观申请（贵方案号）'
 
-/** 进国家：有我方文号就用我方案号，没有再用贵方。外观只用贵方案号那一种。 */
+/** 进国家绝限和提醒一样：有客户文号用贵方案号，没有客户文号用我方案号。外观只用贵方案号那一种。专案和普通提醒共用。 */
 export function nationalTypeName(input: { ourVolume?: string; customerVolume?: string; procLabel?: string; letterKind?: PctTaskRow['letterKind'] }): string {
   if (input.letterKind === 'design' || /外观/.test(input.procLabel ?? '')) return DESIGN_CUSTOMER_TYPE
-  if (input.ourVolume?.trim()) return NATIONAL_OUR_TYPE
-  return NATIONAL_CUSTOMER_TYPE
+  if (input.customerVolume?.trim()) return NATIONAL_CUSTOMER_TYPE
+  return NATIONAL_OUR_TYPE
 }
 
 export function pctRowsFromTable(table: string[][], mailTypes: Array<{ id: string; name: string }> = [], config?: PctRuntimeConfig, sheetKind: 'remind' | 'national' = 'remind'): { rows: PctTaskRow[]; notice: string } {

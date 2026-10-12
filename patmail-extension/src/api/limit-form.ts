@@ -176,29 +176,55 @@ function escapeLimitXml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-/** 按原网站期限模板的控件名写回去。读入时再映回查询字段。 */
-export function buildLimitQueryXml(fields: Record<string, string>): string {
+const UNSAFE_NODE = new Set(['__proto__', 'prototype', 'constructor'])
+
+export interface LimitParsedQuery {
+  fields: Record<string, string>
+  /** 树形框、下拉框的中文名。对应控件节点的 `_text` 后缀，不进入查询参数。 */
+  displayValues: Record<string, string>
+  /** 原网站模板里认识不了的节点。再保存时原样写回，避免把已绑定的条件弄丢。 */
+  unknownFields: Record<string, string>
+}
+
+function pushLimitNode(parts: string[], used: Set<string>, name: string, value: string): void {
+  const text = value.trim()
+  if (!text || !LIMIT_NODE.test(name) || used.has(name) || UNSAFE_NODE.has(name)) return
+  used.add(name)
+  parts.push(`<${name}>${escapeLimitXml(text)}</${name}>`)
+}
+
+/**
+ * 按原网站期限模板的控件名写回去。
+ * 树形框和下拉框另写 `{控件}_text`，和文件查询模板一样，原网站靠这个后缀把选项绑回去。
+ */
+export function buildLimitQueryXml(
+  fields: Record<string, string>,
+  displayValues: Record<string, string> = {},
+  unknownFields: Record<string, string> = {}
+): string {
   const parts: string[] = []
   const used = new Set<string>()
   for (const key of Object.keys(fields).sort()) {
     if (!isLimitMonitorInputField(key)) continue
-    const text = fields[key]?.trim() ?? ''
-    if (!text) continue
     const node = FIELD_TO_LIMIT_XML[key] ?? key
-    if (!LIMIT_NODE.test(node) || used.has(node)) continue
-    used.add(node)
-    parts.push(`<${node}>${escapeLimitXml(text)}</${node}>`)
+    pushLimitNode(parts, used, node, fields[key] ?? '')
+    const label = displayValues[key]?.trim() ?? ''
+    if (label && label !== (fields[key] ?? '').trim()) pushLimitNode(parts, used, `${node}_text`, label)
+  }
+  for (const key of Object.keys(unknownFields).sort()) {
+    pushLimitNode(parts, used, key, unknownFields[key] ?? '')
   }
   return `<xmlRoot>${parts.join('')}</xmlRoot>`
 }
 
 function limitField(nodeName: string): string | null {
+  if (UNSAFE_NODE.has(nodeName)) return null
   if (DISPLAY_ONLY.has(nodeName)) return nodeName
   const mapped = LIMIT_XML_TO_FIELD[nodeName] ?? nodeName
   return isLimitMonitorInputField(mapped) ? mapped : null
 }
 
-export function readLimitQueryXml(xml: string): ApiResult<Record<string, string>> {
+export function readLimitQueryXml(xml: string): ApiResult<LimitParsedQuery> {
   if (typeof xml !== 'string' || !xml.trim()) return apiError('INVALID_RESPONSE', '期限模板为空。')
   if (xml.length > MAX_QUERY_XML_CHARS) return apiError('INVALID_RESPONSE', '期限模板超出大小限制。')
   if (/<!DOCTYPE|<!ENTITY|<!ELEMENT|<!ATTLIST/i.test(xml)) return apiError('INVALID_RESPONSE', '期限模板包含不允许的文档类型声明。')
@@ -210,10 +236,21 @@ export function readLimitQueryXml(xml: string): ApiResult<Record<string, string>
   const nodes = Array.from(root.children)
   if (nodes.length > MAX_QUERY_XML_NODES) return apiError('INVALID_RESPONSE', '期限模板节点过多。')
   const fields: Record<string, string> = {}
+  const displayValues: Record<string, string> = {}
+  const unknownFields: Record<string, string> = {}
   for (const node of nodes) {
-    const key = limitField(node.nodeName)
-    if (!key || key === '__proto__' || key === 'prototype' || key === 'constructor') continue
-    fields[key] = node.textContent ?? ''
+    const name = node.nodeName
+    if (UNSAFE_NODE.has(name)) continue
+    const value = node.textContent ?? ''
+    if (name.endsWith('_text')) {
+      const key = limitField(name.slice(0, -'_text'.length))
+      if (key) displayValues[key] = value
+      else if (LIMIT_NODE.test(name)) unknownFields[name] = value
+      continue
+    }
+    const key = limitField(name)
+    if (key) fields[key] = value
+    else if (LIMIT_NODE.test(name)) unknownFields[name] = value
   }
-  return { ok: true, data: fields }
+  return { ok: true, data: { fields, displayValues, unknownFields } }
 }

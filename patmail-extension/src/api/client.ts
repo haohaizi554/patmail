@@ -33,6 +33,7 @@ import { loadCaseDemandText, type CaseDemandAsset } from '../mail/easy/case-dema
 import { loadPctSendGate, type IcFlowAsk, type IcFlowHit, type PctSendGate } from '../customer/pct-flow-status'
 import { loadCaseFields } from '../customer/case-arbitration'
 import { lookupIcFlow } from '../customer/ic-flow-lookup'
+import { loadCaseRecord } from '../customer/case-record'
 import { loadCustomerDemands, loadCustomerDirectory, type CustomerDemandAsset, type CustomerDirectoryAsset } from '../customer/customer-page'
 import { listParams, readMailInfo } from '../mail/easy/contracts'
 import { loadMailContactText, type MailContactAsset } from '../mail/easy/mail-contacts'
@@ -451,7 +452,11 @@ export class EasyRuntime {
       if (!(await this.confirmAccountRead())) {
         return apiError('SESSION_EXPIRED', '请先在 EASY 原网站登录并检测登录状态。')
       }
-      const result = await lookupIcFlow(rows, (operation, params) => this.transport.post(operation, params))
+      const result = await lookupIcFlow(
+        rows,
+        (operation, params) => this.transport.post(operation, params),
+        caseId => loadCaseRecord(caseId, (operation, params) => this.transport.post(operation, params))
+      )
       if (!result.ok && result.error.code === 'SESSION_EXPIRED') this.session.expire()
       return result
     })()

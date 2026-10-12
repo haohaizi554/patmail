@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import ThemeSelect from '../shell/components/ThemeSelect.vue'
 import TreeOptionSelect from '../shell/components/TreeOptionSelect.vue'
 import type { HistoryQueryOption } from '../api/query-history'
@@ -25,12 +25,16 @@ const emit = defineEmits<{
 }>()
 
 const values = ref<Record<string, string>>({})
+const displayValues = ref<Record<string, string>>({})
+const unknownFields = ref<Record<string, string>>({})
+const loadedValues = ref<Record<string, string>>({})
 const templates = ref<HistoryQueryOption[]>([])
 const selectedId = ref('')
 const showMore = ref(false)
 const loading = ref(false)
 const message = ref('')
 const saveName = ref('')
+const saveNameDirty = ref(false)
 const saving = ref(false)
 const deleting = ref(false)
 const checking = ref(false)
@@ -41,6 +45,7 @@ const fallbackTick = ref(0)
 const stopFallbackWatch = subscribeOptionFallback(() => { fallbackTick.value = optionFallbackEpoch() })
 const loads = new TemplateLoadCoordinator()
 let filterTimer = 0
+let applyingTemplate = false
 const blocks = computed(() => LIMIT_BLOCKS.filter(block => showMore.value || !block.more))
 const canRead = computed(() => Boolean(props.bridge) && Boolean(props.userId))
 const templateLabels = computed(() => historyLabels(templates.value))
@@ -95,7 +100,16 @@ function choices(key: string): { value: string; label: string; parent?: string }
   const saved = stored ?? pageSelectOptions(LIMIT_OPTION_KEYS[key] ?? key) ?? LIMIT_SELECTS[key] ?? []
   const options = live ?? [...saved]
   const current = valueOf(key)
-  if (current && isQueryGuid(current) && !options.some(item => item.value === current)) options.unshift({ value: current, label: '已选择' })
+  if (key === 'ctrl_proc') {
+    const ids = splitCtrlProcIds(current)
+    const labels = (displayValues.value[key] ?? '').split(/[,，]/).map(item => item.trim())
+    ids.forEach((id, index) => {
+      if (!options.some(item => item.value === id)) options.unshift({ value: id, label: labels[index] || '已选择' })
+    })
+  } else if (current && isQueryGuid(current) && !options.some(item => item.value === current)) {
+    const remembered = displayValues.value[key]?.trim()
+    options.unshift({ value: current, label: remembered || '已选择' })
+  }
   return options.filter(item => item.value)
 }
 function treeChoices(key: string): { value: string; label: string; parent?: string }[] {
@@ -114,7 +128,38 @@ function namedLabel(key: string): string {
 function namedShown(key: string): string {
   const value = valueOf(key)
   if (!value) return ''
-  return isQueryGuid(value) ? '已选择' : value
+  return displayValues.value[key]?.trim() || (isQueryGuid(value) ? '已选择' : value)
+}
+function fieldLabel(key: string, value: string): string {
+  const ids = key === 'ctrl_proc' ? splitCtrlProcIds(value) : []
+  if (ids.length > 1) {
+    const remembered = (displayValues.value[key] ?? '').split(/[,，]/).map(item => item.trim())
+    const labels = ids.map((id, index) => {
+      const option = choices(key).find(item => item.value === id)
+      const label = option?.label && option.label !== '已选择' ? option.label : remembered[index]
+      return label || ''
+    })
+    if (labels.every(Boolean)) return labels.join(',')
+  }
+  const option = choices(key).find(item => item.value === value)
+  if (option?.label && option.label !== '已选择' && option.label !== '不限') return option.label
+  if ((loadedValues.value[key] ?? '') === value) return displayValues.value[key]?.trim() ?? ''
+  return ''
+}
+function filledDisplay(): Record<string, string> {
+  const labels: Record<string, string> = {}
+  for (const [key, value] of Object.entries(values.value)) {
+    if (!value.trim()) continue
+    const label = fieldLabel(key, value.trim())
+    if (label && label !== value.trim()) labels[key] = label
+  }
+  return labels
+}
+function titleToSave(): string {
+  const typed = saveName.value.trim()
+  const selected = templates.value.find(item => item.id === selectedId.value)
+  if (!selected) return typed
+  return typed === templateLabel(selected) ? selected.name : typed
 }
 async function loadTemplates(force: boolean): Promise<void> {
   if (!canRead.value || !props.bridge) {
@@ -147,8 +192,12 @@ async function loadTemplates(force: boolean): Promise<void> {
 
 async function applyTemplate(id: string): Promise<void> {
   selectedId.value = id
+  saveNameDirty.value = false
   if (!id || !props.bridge) {
     values.value = {}
+    displayValues.value = {}
+    unknownFields.value = {}
+    loadedValues.value = {}
     return
   }
   const ticket = loads.begin()
@@ -164,14 +213,19 @@ async function applyTemplate(id: string): Promise<void> {
     message.value = parsed.error.message
     return
   }
-  values.value = parsed.data
+  applyingTemplate = true
+  values.value = parsed.data.fields
+  displayValues.value = parsed.data.displayValues
+  unknownFields.value = parsed.data.unknownFields
+  loadedValues.value = { ...parsed.data.fields }
+  void nextTick(() => { applyingTemplate = false })
   const named = templates.value.find(item => item.id === id)
-  if (named) saveName.value = named.name
+  if (named && !saveNameDirty.value) saveName.value = named.name
 }
 
 async function saveTemplate(): Promise<void> {
   if (!props.bridge || saving.value) return
-  const title = saveName.value.trim()
+  const title = titleToSave()
   if (!title) {
     message.value = '先写模板名称。'
     return
@@ -180,7 +234,9 @@ async function saveTemplate(): Promise<void> {
   for (const [key, value] of Object.entries(values.value)) {
     if (isLimitMonitorInputField(key) && value.trim()) fields[key] = value.trim()
   }
-  if (!Object.keys(fields).length) {
+  const labels = filledDisplay()
+  const unknown = { ...unknownFields.value }
+  if (!Object.keys(fields).length && !Object.keys(unknown).length) {
     message.value = '先填写至少一项查询条件，再保存。'
     return
   }
@@ -192,7 +248,7 @@ async function saveTemplate(): Promise<void> {
   try {
     const response = await props.bridge.request({
       type: MessageType.SaveHistoryQuery,
-      payload: { title, queryId, queryXml: buildLimitQueryXml(fields), surface: 'limit' }
+      payload: { title, queryId, queryXml: buildLimitQueryXml(fields, labels, unknown), surface: 'limit' }
     })
     if (response.type !== MessageType.HistoryQuerySaved || !response.payload.ok) {
       message.value = response.type === MessageType.HistoryQuerySaved && !response.payload.ok
@@ -206,6 +262,9 @@ async function saveTemplate(): Promise<void> {
     if (saved) {
       selectedId.value = saved.id
       saveName.value = saved.name
+      saveNameDirty.value = false
+      displayValues.value = labels
+      loadedValues.value = { ...fields }
     }
     message.value = queryId ? '已更新原网站上的这份期限模板。' : '已在原网站新建这份期限模板。'
   } catch {
@@ -280,7 +339,12 @@ function search(): void {
 
 function reset(): void {
   values.value = {}
+  displayValues.value = {}
+  unknownFields.value = {}
+  loadedValues.value = {}
   selectedId.value = ''
+  saveName.value = ''
+  saveNameDirty.value = false
   emit('search', { type: 'all', caseVolume: '', applicationNo: '', customerName: '', reset: true })
 }
 
@@ -367,7 +431,7 @@ watch(() => props.userId, () => {
   }
 }, { immediate: true })
 watch(() => [valueOf('case_type'), valueOf('proc_type'), valueOf('country')].join('|'), (next, previous) => {
-  if (!pickersReady.value || next === previous) return
+  if (applyingTemplate || !pickersReady.value || next === previous) return
   if (valueOf('ctrl_proc')) setValue('ctrl_proc', '')
   const status = valueOf('case_status_id')
   if (status && !choices('case_status_id').some(item => item.value === status)) setValue('case_status_id', '')
@@ -421,17 +485,17 @@ watch(() => [valueOf('case_type'), valueOf('proc_type'), valueOf('country')].joi
               <TreeOptionSelect v-if="treeChoices(cell.key).length" :model-value="valueOf(cell.key)" :options="treeChoices(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
               <ThemeSelect v-else-if="choices(cell.key).length" :model-value="valueOf(cell.key)" :value-label="namedLabel(cell.key)" :options="optionsFor(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
               <span v-else class="hint">先校对字段，再选择处理事项</span>
-              <span v-if="splitCtrlProcIds(valueOf(cell.key)).length > 1" class="hint">选中的事项会一起放进同一次查询。一行只会命中其中一项。</span>
+              <span v-if="splitCtrlProcIds(valueOf(cell.key)).length > 1" class="hint proc-note">选中的事项会一起放进同一次查询。一行只会命中其中一项。</span>
             </label>
             <label v-else-if="cell.kind === 'named'" class="query-cell">
               <span>{{ cell.label }}</span>
               <TreeOptionSelect v-if="treeChoices(cell.key).length" :model-value="valueOf(cell.key)" :options="treeChoices(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
-              <ThemeSelect v-else-if="cell.key === 'case_status_id' || choices(cell.key).length" :model-value="valueOf(cell.key)" :options="optionsFor(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
+              <ThemeSelect v-else-if="cell.key === 'case_status_id' || choices(cell.key).length" :model-value="valueOf(cell.key)" :value-label="fieldLabel(cell.key, valueOf(cell.key))" :options="optionsFor(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
               <input v-else :value="namedShown(cell.key)" type="text" @input="onText(cell.key, $event)" />
             </label>
             <label v-else-if="cell.kind === 'select'" class="query-cell">
               <span>{{ cell.label }}</span>
-              <ThemeSelect :model-value="valueOf(cell.key)" :options="optionsFor(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
+              <ThemeSelect :model-value="valueOf(cell.key)" :value-label="fieldLabel(cell.key, valueOf(cell.key))" :options="optionsFor(cell.key)" @update:model-value="setValue(cell.key, String($event))" />
             </label>
             <div v-else class="query-cell">
               <span>{{ cell.label }}</span>
@@ -447,7 +511,7 @@ watch(() => [valueOf('case_type'), valueOf('proc_type'), valueOf('country')].joi
       </section>
     </div>
     <div class="form-actions">
-      <label class="limit-save">模板名称<input v-model="saveName" type="text" maxlength="80" /></label>
+      <label class="limit-save">模板名称<input v-model="saveName" type="text" maxlength="80" @input="saveNameDirty = true" /></label>
       <button class="ghost" type="button" :disabled="!canRead || saving" @click="saveTemplate">{{ saving ? '正在保存…' : '保存到网站' }}</button>
       <button class="ghost" type="button" :disabled="!canRead || deleting || !selectedId" @click="deleteTemplate">{{ deleting ? '正在删除…' : '删除原网站模板' }}</button>
       <button class="ghost" type="button" @click="reset">重置</button>

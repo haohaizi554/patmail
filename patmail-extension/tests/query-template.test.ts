@@ -42,7 +42,7 @@ describe('历史模板响应', () => {
       ]
     }))
     expect(repeated.map(item => item.id)).toEqual(['3E8B3288-4A3B-4685-B540-2EC98166B5B2', guid, other])
-    expect(historyLabels(repeated).get('3E8B3288-4A3B-4685-B540-2EC98166B5B2')).toBe('微众OA反馈 · 3E8B3288')
+    expect(historyLabels(repeated).get('3E8B3288-4A3B-4685-B540-2EC98166B5B2')).toBe('微众OA反馈')
     expect(historyLabels(repeated).get(guid)).toBe('微众OA反馈 · 227BFA59')
     expect(historyLabels(repeated).get(other)).toBe('宁德授权请款')
     expect(dataOf(normalizeHistoryOptions({ ...client, Options: null }))).toEqual([])
