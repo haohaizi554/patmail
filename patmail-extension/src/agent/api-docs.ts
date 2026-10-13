@@ -60,6 +60,12 @@ export function apiDocFiles(): string[] {
   return [...new Set(apiDocSections().map(section => section.file))].sort()
 }
 
+/** 文档浮窗用：按文件名取整篇原文。文件名对不上时给空串。 */
+export function apiDocRawText(file: string): string {
+  const hit = Object.entries(rawFiles).find(([path]) => fileName(path) === file)
+  return hit?.[1] ?? ''
+}
+
 function readmeText(): string {
   const hit = Object.entries(rawFiles).find(([path]) => fileName(path) === 'README.md')
   return hit?.[1] ?? ''

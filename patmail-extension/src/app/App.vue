@@ -7,6 +7,7 @@ import { createFullPageBridge } from './services/full-page-bridge'
 import { useWorkspace } from './composables/useWorkspace'
 import { useAccountAvatar } from '../settings/use-account-avatar'
 import AgentDock from './components/AgentDock.vue'
+import DocsDock from './components/DocsDock.vue'
 import CheckRainbow from './components/CheckRainbow.vue'
 import HomePage from './pages/HomePage.vue'
 import FilesPage from './pages/FilesPage.vue'
@@ -52,7 +53,6 @@ const workspace = useWorkspace()
 function workspaceScroller(): HTMLElement | null {
   return document.querySelector('.workspace')
 }
-const search = ref('')
 const pageName = computed(() => route.value === '/settings' ? '系统设置' : route.value === '/contacts' ? CASE_CONTACT_CUSTOMER_NAME : nav.find(item => item.hash === route.value)?.name ?? '首页')
 const page = computed(() => pages[route.value as keyof typeof pages] ?? HomePage)
 const profileName = computed(() => workspace.connection.value.displayName || '未登录')
@@ -109,10 +109,11 @@ onUnmounted(() => window.removeEventListener('hashchange', onHash))
 </script>
 
 <template>
-  <Shell :page="pageName" :search="search" placeholder="搜索我方文号、客户或申请号..." :items="nav" :profile-name="profileName" :profile-dept="profileDept" :avatar-src="avatarSrc" :show-demo="false" :show-settings="true" :show-mode="true" :mode="mode" :mode-busy="modeBusy" @navigate="go" @settings="onShellSettings" @mode="onMode" @preview="openZoom()" @update:search="search = $event">
+  <Shell :page="pageName" :items="nav" :profile-name="profileName" :profile-dept="profileDept" :avatar-src="avatarSrc" :show-demo="false" :show-settings="true" :show-mode="true" :mode="mode" :mode-busy="modeBusy" @navigate="go" @settings="onShellSettings" @mode="onMode" @preview="openZoom()">
     <template #top-actions>
       <CheckRainbow :page-on="taskPageOn" />
       <AgentDock />
+      <DocsDock />
     </template>
     <KeepAlive>
       <component :is="page" :key="route" />

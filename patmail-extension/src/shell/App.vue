@@ -50,16 +50,11 @@ const ui = { search, notify, open, go }
 provide('ui', ui)
 
 const view = computed(() => views[page.value])
-const placeholder = computed(() => ({
-  客户管理: '搜索客户、联系人、行业、备注...',
-  发文记录: '搜索客户、批次、邮件主题、申请号...',
-  发文任务: '搜索任务名称、客户或文件...'
-}[page.value] || '搜索客户、任务、文件、模板...'))
 </script>
 
 <template>
   <FloatPage v-if="page === '浮窗'" />
-  <Shell v-else :page="page" :search="search" :placeholder="placeholder" @navigate="go" @update:search="search = $event" @settings="open">
+  <Shell v-else :page="page" :items="nav" @navigate="go" @settings="open">
     <component :is="view" />
   </Shell>
   <div v-if="toast" class="toast">{{ toast }}</div>

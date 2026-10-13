@@ -6,8 +6,6 @@ import { nav } from '../data'
 
 const props = defineProps({
   page: String,
-  search: String,
-  placeholder: String,
   items: { type: Array, default: null },
   profileName: { type: String, default: '林小樱' },
   profileDept: { type: String, default: '知识产权部' },
@@ -18,7 +16,7 @@ const props = defineProps({
   mode: { type: String, default: 'large' },
   modeBusy: { type: Boolean, default: false }
 })
-const emit = defineEmits(['navigate', 'update:search', 'settings', 'preview', 'mode'])
+const emit = defineEmits(['navigate', 'settings', 'preview', 'mode'])
 const menu = computed(() => props.items || nav)
 </script>
 
@@ -29,10 +27,6 @@ const menu = computed(() => props.items || nav)
         <img :src="bg('专利发文自动化.png')" alt="PatMail 专利发文自动化" />
       </button>
       <img class="slogan" :src="bg('让每一封专业邮件，都温柔且高效.png')" alt="让每一封专业邮件都温柔且高效" />
-      <label class="search">
-        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        <input :value="search" :placeholder="placeholder" @input="emit('update:search', $event.target.value)" />
-      </label>
       <div class="top-actions">
         <slot name="top-actions" />
       </div>
