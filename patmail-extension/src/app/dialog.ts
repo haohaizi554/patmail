@@ -5,6 +5,8 @@ export interface DialogOptions {
   message: string
   confirmLabel?: string
   cancelLabel?: string
+  /** 警示框：标题居中标红，用来在提交前拦一下。 */
+  warn?: boolean
 }
 
 const state = reactive({
@@ -12,7 +14,8 @@ const state = reactive({
   title: '',
   message: '',
   confirmLabel: '确定',
-  cancelLabel: '取消'
+  cancelLabel: '取消',
+  warn: false
 })
 
 let settle: ((confirmed: boolean) => void) | null = null
@@ -105,6 +108,7 @@ export function confirmDialog(options: DialogOptions): Promise<boolean> {
   state.message = options.message
   state.confirmLabel = options.confirmLabel?.trim() || '确定'
   state.cancelLabel = options.cancelLabel === undefined ? '取消' : options.cancelLabel.trim()
+  state.warn = options.warn === true
   state.open = true
   return new Promise(resolve => {
     settle = resolve

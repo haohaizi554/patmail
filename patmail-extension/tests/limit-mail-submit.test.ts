@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { EasyTransport } from '../src/api/transport'
 import {
-  buildMailSubmit, dropPrefilledNoticeRecipient, limitMailItems, nextLimitMailAttempt, pickMailSubmitNodes, readLimitMailCustomer, readMailSubmit, selectionNeedsAddressChoice, submitLimitMailBatch,
+  buildMailSubmit, dropPrefilledNoticeRecipient, limitMailItems, limitMailProcIds, nextLimitMailAttempt, pickMailSubmitNodes, readLimitMailCustomer, readMailSubmit, selectionNeedsAddressChoice, submitLimitMailBatch,
   type LimitMailSubmitItem
 } from '../src/customer/limit-mail-submit'
 import type { WorkflowNode } from '../src/workflow/types'
@@ -422,5 +422,33 @@ describe('limit mail submit', () => {
     const onlyEmpty = limitMailItems({ procIds: [proc2], rows, sheetRows, mode: 'ipr', address: 'named' })
     expect(onlyEmpty.ok).toBe(false)
     if (!onlyEmpty.ok) expect(onlyEmpty.message).toContain('全选联系人')
+  })
+
+  it('合并按钮：有名字的行按仲裁提交，空着的行按发文规则全选兜底', () => {
+    const rows = [
+      { procId: proc, caseVolume: 'PA1' },
+      { procId: proc2, caseVolume: 'PA2' }
+    ]
+    const sheetRows = [
+      { ourVolume: 'PA1', mailTypeId: mailType, customerName: '甲客户', iprName: '雷工' },
+      { ourVolume: 'PA2', mailTypeId: mailType, customerName: '甲客户', iprName: '' }
+    ]
+    const merged = limitMailItems({ procIds: [proc, proc2], rows, sheetRows, mode: 'ipr', address: 'auto' })
+    expect(merged.ok).toBe(true)
+    if (!merged.ok) return
+    const namedItem = merged.items.find(item => limitMailProcIds(item).includes(proc))
+    const allItem = merged.items.find(item => limitMailProcIds(item).includes(proc2))
+    expect(namedItem?.iprName).toBe('雷工')
+    expect(namedItem?.contacts).toBeUndefined()
+    expect(allItem?.contacts).toBe('all')
+    expect(allItem?.iprName).toBe('')
+  })
+
+  it('合并按钮在技术负责人模式也兜底：没有负责人的行走全选', () => {
+    const rows = [{ procId: proc, caseVolume: 'PA1' }]
+    const sheetRows = [{ ourVolume: 'PA1', mailTypeId: mailType, customerName: '甲客户', iprName: '', leadName: '' }]
+    const merged = limitMailItems({ procIds: [proc], rows, sheetRows, mode: 'lead', address: 'auto' })
+    expect(merged.ok).toBe(true)
+    if (merged.ok) expect(merged.items[0]?.contacts).toBe('all')
   })
 })

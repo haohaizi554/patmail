@@ -518,7 +518,8 @@ async function submitEasy(
     procIds: openIds,
     rows: picked.map(row => ({ procId: row.procId, caseVolume: row.caseVolume })),
     sheetRows: sheets,
-    mode: lead ? 'lead' : 'ipr'
+    mode: lead ? 'lead' : 'ipr',
+    address: 'auto'
   })
   if (!planned.ok) return planned.message
   const found = await forward({ type: MessageType.SubmitLimitMail, payload: { userId: session.operatorId, items: planned.items } })

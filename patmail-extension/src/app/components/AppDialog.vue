@@ -98,7 +98,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
 <template>
   <div v-if="state.open" class="mask app-dialog" @click.self="closeDialog(false)">
-    <div ref="dialogRoot" class="dialog" role="dialog" aria-modal="true" aria-labelledby="app-dialog-title" aria-describedby="app-dialog-message" tabindex="-1">
+    <div ref="dialogRoot" class="dialog" :class="{ warn: state.warn }" role="dialog" aria-modal="true" aria-labelledby="app-dialog-title" aria-describedby="app-dialog-message" tabindex="-1">
       <header>
         <h3 id="app-dialog-title">{{ state.title }}</h3>
         <button type="button" aria-label="关闭" @click="closeDialog(false)">×</button>

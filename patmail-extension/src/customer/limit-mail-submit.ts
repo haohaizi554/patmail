@@ -202,8 +202,8 @@ export function limitMailItems(input: {
   sheetRows: Array<{ ourVolume: string; mailTypeId?: string; customerName?: string; contactName?: string; iprName?: string; leadName?: string; mailTo?: string; mailCc?: string; iprArbitrated?: true }>
   mode: 'ipr' | 'lead'
   specials?: ReadonlySet<string>
-  /** checked：没有 IPR 的行改为按发文规则勾选客户联系人后提交。 */
-  address?: 'named' | 'checked'
+  /** auto：有名字的行按写回的收件人提交，空着的行按发文规则勾选客户联系人兜底。checked：空着的行按发文规则勾选。named：只提交有名字的行。 */
+  address?: 'named' | 'checked' | 'auto'
 }): { ok: true; items: LimitMailSubmitItem[] } | { ok: false; message: string } {
   if (!input.procIds.length) return { ok: false, message: '还没有确认勾选。先勾选还没提交审核的事项。' }
   const specials = input.specials ?? new Set<string>()
@@ -228,9 +228,14 @@ export function limitMailItems(input: {
     const customerName = source?.customerName?.trim() ?? ''
     const iprName = lookupName(source?.iprName)
     const leadName = lookupName(source?.leadName)
-    const checked = input.address === 'checked' && !iprName
+    const checked = input.address === 'checked'
+      ? !iprName
+      : input.address === 'auto'
+        ? (input.mode === 'lead' ? !leadName : !iprName)
+        : false
     if (input.mode === 'lead' && !leadName && !checked) return { ok: false, message: `文号 ${row.caseVolume} 表格里没有技术负责人，没有提交。` }
-    if (!iprName && !checked) continue
+    const primaryName = input.mode === 'lead' ? leadName : iprName
+    if (input.address === 'auto' ? (!primaryName && !checked) : (!iprName && !checked)) continue
     const ccName = lookupName(source?.mailCc ?? '')
     const item: LimitMailSubmitItem = {
       procId,

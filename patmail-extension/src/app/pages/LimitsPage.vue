@@ -243,7 +243,7 @@ function onSelect(ids: string[]): void {
   selected.value = ids
 }
 
-async function onSubmitAsk(): Promise<void> {
+async function onSubmitAsk(address?: string): Promise<void> {
   if (!writesReady.value) {
     message.value = '正在读取系统设置里的写开关。'
     return
@@ -263,7 +263,8 @@ async function onSubmitAsk(): Promise<void> {
     rows: rows.value,
     sheetRows: task?.rows ?? [],
     mode: recipientModeForTask(task, catalog.value.workflows),
-    specials: inventorCustomerNames(flow)
+    specials: inventorCustomerNames(flow),
+    address: address === 'auto' ? 'auto' : undefined
   })
   if (!planned.ok) {
     message.value = planned.message

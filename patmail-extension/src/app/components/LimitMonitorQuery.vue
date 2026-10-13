@@ -7,7 +7,7 @@ import { isLimitMonitorType, type LimitMonitorQuery } from '../../api/limit-moni
 import { MAILED_UNFINISHED_REVIEW, SKIP_SEND_REVIEW } from '../../customer/pct-flow-status'
 import { clonePctTask, readWorkflowTask, writeWorkflowTask } from '../../customer/pct-sheet'
 import { limitMailItems, limitMailLetterLabel, limitMailProcIds, limitMailSubmitShouldHalt, runLimitMailSubmit, runMailLetterPool, selectionNeedsAddressChoice } from '../../customer/limit-mail-submit'
-import { beginProgress, classifySubmitText, endProgress, logProgress, progressSummaryLine, tallyProgress } from '../dialog'
+import { beginProgress, classifySubmitText, confirmDialog, endProgress, logProgress, progressSummaryLine, tallyProgress } from '../dialog'
 import { splitCaseVolumes } from '../../customer/volume-list'
 import { isQueryGuid } from '../../query/query-validator'
 import { MessageType, type MessageBridge } from '../../shared/message'
@@ -29,6 +29,8 @@ const props = defineProps<{
   flowByKey?: Record<string, string>
   /** 下面的核对已经在读同一批流程。上表不再为这 40 行另开一轮流程图。 */
   flowChecking?: boolean
+  /** 「已发文，事项未管制完成日」的行是否允许勾选提交。默认允许，提交前会弹警示框。 */
+  allowMailedUnfinished?: boolean
 }>()
 
 const { open: writesOpen, ready: writesReady } = useWriteSwitch()
@@ -338,7 +340,8 @@ function goPage(page: number): void {
 function rowCanConfirm(procId: string): boolean {
   if (closedIds.value.has(procId.toLowerCase())) return false
   const flow = flowByProc.value[procId]
-  if (flow === '已提交审核' || flow === MAILED_UNFINISHED_REVIEW || flow === SKIP_SEND_REVIEW) return false
+  if (flow === MAILED_UNFINISHED_REVIEW) return props.allowMailedUnfinished !== false
+  if (flow === '已提交审核' || flow === SKIP_SEND_REVIEW) return false
   const gate = gates.value[procId]
   if (gate === 'pending') return false
   return true
@@ -395,6 +398,21 @@ async function onSubmitAsk(address?: string): Promise<void> {
   }
   const remembered = (confirmedIds.value.length ? confirmedIds.value : (task?.confirmedProcIds ?? [])).filter(id => rowCanConfirm(id))
   const procIds = live.length ? live : remembered
+  const mailedPending = rows.value.filter(row => procIds.includes(row.procId) && flowByProc.value[row.procId] === MAILED_UNFINISHED_REVIEW)
+  if (mailedPending.length) {
+    const lines = mailedPending.map(row => `${row.caseVolume}｜${row.ctrlProc}｜${row.customerName}`).join('\n')
+    const goOn = await confirmDialog({
+      title: `警示：${mailedPending.length} 行已发文、事项未管制完成日`,
+      message: `这些行以前发过文，只是事项还没有管制完成日。再提交会重发一封，请仔细核对：\n${lines}`,
+      confirmLabel: '核对过，继续提交',
+      cancelLabel: '再核对',
+      warn: true
+    })
+    if (!goOn) {
+      message.value = '没有提交。已发文、事项未管制完成日的行要先核对。'
+      return
+    }
+  }
   if (live.length || remembered.length !== (confirmedIds.value.length || (task?.confirmedProcIds.length ?? 0))) {
     const nextIds = live.length ? live : remembered
     confirmedIds.value = nextIds
@@ -408,7 +426,7 @@ async function onSubmitAsk(address?: string): Promise<void> {
     sheetRows: props.sheetRows?.length ? props.sheetRows : (task?.rows ?? []),
     mode: props.recipientMode ?? (task?.recipientMode === 'lead' || task?.recipientMode === 'ipr' ? task.recipientMode : 'ipr'),
     specials: new Set(props.inventorCustomers ?? []),
-    address: address === 'checked' ? 'checked' : 'named'
+    address: address === 'auto' ? 'auto' : address === 'checked' ? 'checked' : 'named'
   })
   if (!planned.ok) {
     message.value = planned.message
@@ -647,6 +665,7 @@ watch(() => props.seedToken, () => {
     :writes-open="writesOpen"
     :writes-ready="writesReady"
     :ipr-gap="hasIprGap"
+    :allow-mailed-unfinished="allowMailedUnfinished !== false"
     @page="goPage"
     @select="selected = $event"
     @confirm="onConfirm"
