@@ -1,5 +1,6 @@
 import { CURRENT_ENVIRONMENT } from '../config'
 import { isQueryGuid } from '../../query/query-validator'
+import { readSmeCustomerList } from '../../customer/sme-customers'
 import { buildFileTypeTree } from '../../schema/file-type-tree'
 import { apiError, type ApiResult } from '../types'
 import type { EasyTransport } from '../transport'
@@ -211,8 +212,17 @@ export class DictionaryService {
     })
   }
 
-  /** 客户列表页 GetCustomerlist。一次取全量，只保留编号和名称，结果按账号缓存。 */
-  loadCustomerList(userKey: string, force: boolean, signal?: AbortSignal): Promise<ApiResult<CustomerListSnapshot>> {
+  /**
+   * 客户列表页 GetCustomerlist。一次取全量，只保留编号和名称，结果按账号缓存。
+   * 中小客户的三万多家接口要二三十分钟，走打包的数据库快照；快照没读到就明确报错，不再悄悄去撞原站接口。
+   */
+  async loadCustomerList(userKey: string, force: boolean, signal?: AbortSignal): Promise<ApiResult<CustomerListSnapshot>> {
+    const local = await readSmeCustomerList(force)
+    if (local) return local
+    return this.loadCustomerListFromSite(userKey, force, signal)
+  }
+
+  private loadCustomerListFromSite(userKey: string, force: boolean, signal?: AbortSignal): Promise<ApiResult<CustomerListSnapshot>> {
     return this.cache.load(this.cache.customerListKey(userKey), force, async () => {
       const response = await this.transport.post('customerList', customerListParams(), signal)
       if (!response.ok) return response

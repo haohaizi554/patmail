@@ -6,10 +6,13 @@ import { readPageInfo, scanPage } from './scanner'
 import { EasyRuntime } from '../api/client'
 import { scanFileSearchForm } from '../query/scan-file-search-form.mjs'
 import { LiveEasyAcceptanceRunner } from '../automation/acceptance-runner'
+import { hydrateCustomerMode, watchCustomerMode } from '../settings/customer-mode'
 import { hydrateWriteSwitch, watchWriteSwitch } from '../settings/write-switch'
 
 watchWriteSwitch()
 void hydrateWriteSwitch()
+watchCustomerMode()
+void hydrateCustomerMode()
 
 // API 请求始终由目标页面同源的 Content Script 发起，沿用浏览器已有会话。
 const easyRuntime = new EasyRuntime(location.origin)

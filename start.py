@@ -157,6 +157,40 @@ def pipe_output(proc: subprocess.Popen[str], ready: threading.Event) -> None:
             ready.set()
 
 
+def user_env_value(name: str) -> str:
+    """用户级环境变量。setx 之后，已经在跑的终端（含它新开的页签）拿不到新值，所以直接读注册表。"""
+    if sys.platform == "win32":
+        import winreg
+
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment") as key:
+                value, _ = winreg.QueryValueEx(key, name)
+        except OSError:
+            return ""
+        return value if isinstance(value, str) else ""
+    return os.environ.get(name, "")
+
+
+def pull_sme_customers() -> None:
+    """设了 DB_PWD 就每次启动前拉一份中小客户名单快照；没设或失败就沿用现有文件。"""
+    script = EXTENSION / "scripts" / "pull-sme-customers.py"
+    stored = os.environ.get("DB_PWD") or user_env_value("DB_PWD")
+    if not script.is_file() or not stored:
+        print("没有设置 DB_PWD，跳过中小客户名单快照拉取，编译沿用现有快照文件。")
+        return
+    print("拉取中小客户名单快照...")
+    env = tool_env()
+    env["DB_PWD"] = stored
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=EXTENSION,
+        env=env,
+        check=False,
+    )
+    if result.returncode != 0:
+        print("快照没有更新，编译沿用上一次的文件。")
+
+
 def build_extension(runner: str) -> None:
     if not (EXTENSION / "package.json").is_file():
         fail("找不到 patmail-extension/package.json，无法编译插件。")
@@ -170,6 +204,7 @@ def build_extension(runner: str) -> None:
         )
         if install.returncode != 0:
             fail("插件依赖恢复失败。请在 patmail-extension 目录查看 pnpm install 的输出。")
+    pull_sme_customers()
     print(f"编译插件    {EXTENSION / 'dist'}")
     build = subprocess.run(
         [runner, "run", "build"],

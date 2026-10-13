@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, ref, watch } from 'vue'
+import { computed, inject, nextTick, onUnmounted, ref, watch } from 'vue'
 import PageHead from '../../shell/components/PageHead.vue'
 import ThemeSelect from '../../shell/components/ThemeSelect.vue'
 import { bg } from '../../shell/assets'
@@ -21,6 +21,7 @@ import {
   workflowsFor
 } from '../../customer/mail-flow'
 import { fetchCustomerList } from '../../customer/customer-list-load'
+import { customerMode, hydrateCustomerMode, watchCustomerMode } from '../../settings/customer-mode'
 import type { EasyCustomerOption } from '../../customer/customer-list'
 import { fetchMailTypeNodes } from '../../customer/mail-type-load'
 import { fetchMailSenders } from '../../customer/mailset-load'
@@ -41,11 +42,11 @@ const { connection, customers, rules, call } = useWorkspace()
 const contactCustomers = computed(() => customers.value.filter(hasCaseContactSkill))
 const { catalog } = useWorkflowCatalog()
 const mailNodes = ref<Array<{ id: string; name: string }>>([])
-const mailTypeMessage = ref('正在从原网站读取发文类型…')
+const mailTypeMessage = ref('')
 const mailsets = ref<MailSender[]>([])
 const mailsetId = ref('')
 const senderTouched = ref(false)
-const mailsetMessage = ref('正在从原网站读取发件邮箱…')
+const mailsetMessage = ref('')
 const mailsetOptions = computed(() => {
   const items = mailsets.value.map(item => ({ value: item.id, label: item.label }))
   if (mailsetId.value && !items.some(item => item.value === mailsetId.value)) {
@@ -59,7 +60,7 @@ const mailsetOptions = computed(() => {
 const ready = computed(() => connection.value.sessionStatus === 'authenticated')
 const customerCatalog = ref<EasyCustomerOption[]>([])
 const customerPick = ref('')
-const customerListMessage = ref('正在从原网站读取客户…')
+const customerListMessage = ref(customerMode() === 'sme' ? '正在读取中小客户名单快照…' : '正在从原网站读取客户…')
 const name = ref('')
 const surface = ref<QuerySurfaceId | ''>('')
 const workflow = ref<WorkflowId | ''>('')
@@ -130,15 +131,19 @@ function alignCustomerPick(): void {
 
 let customerListTicket = 0
 async function loadCustomerList(force: boolean): Promise<void> {
-  if (!bridge || !ready.value) {
+  await hydrateCustomerMode()
+  const sme = customerMode() === 'sme'
+  if (!sme && (!bridge || !ready.value)) {
+    customerCatalog.value = []
     customerListMessage.value = '还没确认当前登录的人，客户名单还没读取。'
     return
   }
   const ticket = ++customerListTicket
-  customerListMessage.value = '正在从原网站读取客户…'
+  customerListMessage.value = sme ? '正在读取中小客户名单快照…' : '正在从原网站读取客户…'
   const loaded = await fetchCustomerList(bridge, force)
   if (ticket !== customerListTicket) return
   if (!loaded.ok) {
+    customerCatalog.value = []
     customerListMessage.value = loaded.message
     return
   }
@@ -208,6 +213,14 @@ async function loadReviewers(force: boolean): Promise<void> {
     const self = reviewers.value.find(item => samePerson(item.id))
     if (self) reviewChoice.value = self.id
   }
+}
+
+function ensureReviewers(): void {
+  if (!reviewers.value.length && reviewerMessage.value !== '正在读取审核人…') void loadReviewers(false)
+}
+
+function ensureMailsets(): void {
+  if (!mailsets.value.length && mailsetMessage.value !== '正在从原网站读取发件邮箱…') void loadMailSets(false)
 }
 function writeRemark(id: string): void {
   edit(id)
@@ -473,25 +486,22 @@ async function loadMailSets(force: boolean): Promise<void> {
   mailsetMessage.value = loaded.message
 }
 
-watch([workflow, ready], () => {
-  if (workflow.value === 'pct-reminder' && ready.value) {
-    void loadMailTypes(false)
-    void loadMailSets(false)
-    void loadReviewers(false)
-  }
-}, { immediate: true })
+void loadCustomerList(false)
 watch(ready, (value) => {
   if (value) void loadCustomerList(false)
-}, { immediate: true })
+})
+const stopCustomerModeWatch = watchCustomerMode(() => { void loadCustomerList(false) })
+onUnmounted(stopCustomerModeWatch)
 watch(() => `${connection.value.easyOrigin}\n${connection.value.operatorId}`, (next, previous) => {
   if (!previous || next === previous) return
   customerCatalog.value = []
   void loadCustomerList(true)
-  if (ready.value && workflow.value === 'pct-reminder') {
-    void loadMailTypes(true)
-    void loadMailSets(true)
-    void loadReviewers(true)
-  }
+  mailNodes.value = []
+  mailsets.value = []
+  reviewers.value = []
+  mailTypeMessage.value = ''
+  mailsetMessage.value = ''
+  reviewerMessage.value = ''
   if (!editingId.value && !name.value && !customerPick.value) return
   cancel()
   formMessage.value = '换了系统或账号，没保存的内容已清掉。'
@@ -561,7 +571,7 @@ watch(() => `${connection.value.easyOrigin}\n${connection.value.operatorId}`, (n
             </div>
             <div v-else-if="mode.id === 'review'">
               <label>审核
-                <ThemeSelect :model-value="reviewChoice" placeholder="选择审核人" empty-text="审核人还没读到。点下面的重新读取。" :options="reviewerOptions" @update:model-value="reviewChoice = String($event)" />
+                <ThemeSelect :model-value="reviewChoice" placeholder="选择审核人" empty-text="审核人还没读到。点下面的重新读取。" :options="reviewerOptions" @update:model-value="reviewChoice = String($event)" @open="ensureReviewers" />
               </label>
               <button type="button" class="text-button" @click="useDefaultReview">使用默认</button>
               <p v-if="pickedReviewerName && samePerson(reviewChoice)" class="hint">当前就是默认：{{ pickedReviewerName }}（当前账号）</p>
@@ -570,7 +580,7 @@ watch(() => `${connection.value.easyOrigin}\n${connection.value.operatorId}`, (n
             </div>
             <div v-else-if="mode.id === 'from'">
               <label>{{ mode.label }}
-                <ThemeSelect :model-value="mailsetId" placeholder="选择发件邮箱" empty-text="发件邮箱还没读到。点下面的重新读取。" :options="mailsetOptions" @update:model-value="chooseSender(String($event))" />
+                <ThemeSelect :model-value="mailsetId" placeholder="选择发件邮箱" empty-text="发件邮箱还没读到。点下面的重新读取。" :options="mailsetOptions" @update:model-value="chooseSender(String($event))" @open="ensureMailsets" />
               </label>
               <button type="button" class="text-button" @click="useDefaultSender">使用默认</button>
               <p v-if="defaultSender && mailsetId === defaultSender.id" class="hint">当前就是默认：{{ defaultSender.label }}</p>

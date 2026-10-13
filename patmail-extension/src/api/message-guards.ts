@@ -222,7 +222,9 @@ export function isHistoryDeleteResult(value: unknown): value is ApiResult<{ dele
 }
 
 function isCustomerListSnapshot(value: Record<string, unknown>): boolean {
-  if (value.kind !== 'customerList' || Object.keys(value).length !== 2 || !Array.isArray(value.customers) || value.customers.length > 5000) return false
+  if (value.kind !== 'customerList' || !Array.isArray(value.customers) || value.customers.length > 50_000) return false
+  const keys = Object.keys(value)
+  if (keys.length !== 2 && !(keys.length === 3 && value.takenAt !== undefined && typeof value.takenAt === 'string' && value.takenAt.length <= 40)) return false
   return value.customers.every(item => isRecord(item) && Object.keys(item).length === 2 &&
     typeof item.id === 'string' && isQueryGuid(item.id) &&
     typeof item.name === 'string' && item.name.trim() === item.name && item.name.length > 0 && item.name.length <= 200)

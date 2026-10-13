@@ -108,6 +108,8 @@ export interface MailSetSnapshot {
 export interface CustomerListSnapshot {
   kind: 'customerList'
   customers: Array<{ id: string; name: string }>
+  /** 中小客户的名单快照才有：拉取时间，页面展示用。 */
+  takenAt?: string
 }
 
 export type DictionaryKind = 'basic' | 'flow' | 'fileType' | 'fieldColumn' | 'listColumn' | 'mailType' | 'reviewer' | 'picker' | 'mailSet' | 'signature' | 'customerList'

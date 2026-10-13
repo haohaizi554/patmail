@@ -15,6 +15,7 @@ import { loadAccount, deleteCustomerAccount, deleteQueryTemplateAccount, refresh
 import { observeSearchPage, resolveSelectedFiles, toQueryObservation, type QueryObservationResult } from '../automation/file-search-snapshot'
 import { rememberFileTypeTree } from '../automation/file-description-resolver'
 import { isConfirmedOperator } from '../automation/operator'
+import { readSmeCustomerList } from '../customer/sme-customers'
 import { customerMode, modeLabel, modeOrigin, originMatchesMode, setCustomerMode as saveCustomerMode } from '../settings/customer-mode'
 import { planTrustedTask } from '../automation/task-planner'
 import type { AutomationTask } from '../automation/types'
@@ -457,6 +458,17 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
     }
   }
   if (action.action === 'forward') {
+    if (action.message.type === MessageType.LoadDictionary && action.message.payload.kind === 'customerList') {
+      const local = await readSmeCustomerList(action.message.payload.force)
+      if (local) {
+        return workspaceResult({
+          ok: true,
+          message: '',
+          connection: host.connection.context,
+          forwarded: { type: MessageType.DictionaryResult, payload: local }
+        })
+      }
+    }
     const readBurst = (action.message.type === MessageType.LookupIcFlow
       || action.message.type === MessageType.SearchLimitMonitor
       || action.message.type === MessageType.ReadCaseBusFlow)

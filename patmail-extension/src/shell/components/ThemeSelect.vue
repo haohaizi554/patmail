@@ -40,7 +40,10 @@ const owner = Symbol('theme-select')
 const current = computed(() => props.modelValue !== undefined ? props.modelValue : internal.value)
 const selected = computed(() => props.options.find(item => item.value === current.value))
 const searchable = computed(() => selectNeedsSearch(props.options.length))
-const listed = computed(() => searchable.value ? filterSelectOptions(props.options, query.value) : props.options)
+/** 选项再多也只渲染前 100 条，靠搜索缩小范围。量大的名单（如中小客户三万家）全渲染会卡死。 */
+const filtered = computed(() => searchable.value ? filterSelectOptions(props.options, query.value) : props.options)
+const listed = computed(() => filtered.value.slice(0, 100))
+const hiddenCount = computed(() => Math.max(0, filtered.value.length - listed.value.length))
 const shown = computed(() => selected.value?.label || props.valueLabel || (current.value === '' || current.value == null ? props.placeholder : String(current.value)))
 const placeholderShown = computed(() => !selected.value && !props.valueLabel)
 
@@ -70,10 +73,11 @@ function updatePosition(): void {
   const el = trigger.value
   if (!el) return
   const rect = el.getBoundingClientRect()
-  const labels = props.options.flatMap(item => {
+  const labels = listed.value.flatMap(item => {
     const text = item.badge ? `${item.badge} ${item.label}` : item.label
     return item.group ? [text, item.group] : [text]
   })
+  if (hiddenCount.value > 0) labels.push(`还有 ${hiddenCount.value} 条没显示`)
   const placed = placeMenu(
     { top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width },
     { width: window.innerWidth, height: window.innerHeight },
@@ -97,7 +101,8 @@ function show(): void {
   portal.value = resolvePortal()
   query.value = ''
   const index = props.options.findIndex(item => item.value === current.value && item.value !== '')
-  highlight.value = index >= 0 ? index : 0
+  // 已选的那条不在当前显示的前 100 条里时不高亮，避免高亮到错行。
+  highlight.value = index >= 0 && index < listed.value.length ? index : (index >= 0 ? -1 : 0)
   opened.value = true
   closeOthers()
   emit('open')
@@ -233,6 +238,7 @@ onBeforeUnmount(() => {
             <span class="theme-select-label">{{ option.label }}</span>
           </li>
         </template>
+        <li v-if="hiddenCount > 0" class="theme-select-empty" role="presentation">已显示前 {{ listed.length }} 条，还有 {{ hiddenCount }} 条没显示。输入关键词缩小范围。</li>
         <li v-if="listed.length === 0" class="theme-select-empty" role="presentation">{{ query.trim() ? '没有匹配的选项' : (emptyText || '没有可选项') }}</li>
       </ul>
     </Teleport>

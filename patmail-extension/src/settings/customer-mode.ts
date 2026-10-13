@@ -64,10 +64,12 @@ export function watchCustomerMode(listener?: () => void): () => void {
 
 export async function hydrateCustomerMode(): Promise<void> {
   const mine = ++ticket
+  const previous = mode
+  const first = !hydrated
   if (!storageReady()) {
     if (mine !== ticket) return
     hydrated = true
-    publish()
+    if (first) publish()
     return
   }
   try {
@@ -80,7 +82,7 @@ export async function hydrateCustomerMode(): Promise<void> {
     mode = CUSTOMER_MODE_DEFAULT
   }
   hydrated = true
-  publish()
+  if (first || mode !== previous) publish()
 }
 
 export function isCustomerModeReady(): boolean {
