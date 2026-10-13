@@ -11,7 +11,7 @@ import { IC_LOOKUP_WIDTH } from '../../customer/ic-flow-lookup'
 import { MAILED_UNFINISHED_REVIEW, SKIP_SEND_REVIEW, reviewNeedsArbitration, type IcFlowHit } from '../../customer/pct-flow-status'
 import { paintTaskCheckProgress, resetTaskCheckProgress } from '../check-progress'
 import { applyArbitrationReply, arbitrationAllowed, checkedSourceSheets, iprArbitrationWaves, isPctWorkbookSheet, missedSourceSheets, pctRowsFromWorkbook, shouldAutoArbitrate, type ArbitrationDecision } from '../../customer/pct-workbook'
-import { applyPctMailTypes, buildPctTask, clonePctTask, matchSheetCtrlProcs, PCT_WORKFLOW_TASK_KEY, procGapNotes, readWorkflowTask, summarizePctTask, volumesOf, writeWorkflowTask } from '../../customer/pct-sheet'
+import { applyPctMailTypes, buildPctTask, clonePctTask, matchSheetCtrlProcs, PCT_WORKFLOW_TASK_KEY, procGapNotes, readWorkflowTask, recarryCustomerContacts, summarizePctTask, volumesOf, writeWorkflowTask } from '../../customer/pct-sheet'
 import type { CustomerQueryProfile, PctTaskRow } from '../../customer/types'
 import { groupWorkflowRows } from '../../customer/workflow-mail'
 import { arbitratedMark, carriedMark, sheetDisplayName, sheetRecipientNames, usesInventorSheet } from '../../customer/pct-recipients'
@@ -74,14 +74,27 @@ const limitByKey = reactive<Record<string, string>>({})
 const gapWaves = ref<string[]>([])
 const sheetPage = ref(1)
 const AUTO_ARBITRATE_KEY = 'patmail.autoArbitrate.v1'
+const ALLOW_MAILED_UNFINISHED_KEY = 'patmail.allowMailedUnfinished.v1'
+const ARBITRATE_IPR_ONLY_KEY = 'patmail.arbitrateIprOnly.v1'
+const CARRY_ACROSS_BREAKS_KEY = 'patmail.carryAcrossBreaks.v1'
 const askingGap = ref(false)
 const autoArbitrate = ref(true)
+/** 「已发文，事项未管制完成日」的行默认允许提交，提交前会弹警示框列出这些行。 */
+const allowMailedUnfinished = ref(true)
+/** 客户要求没写发给谁时，仲裁是否允许把技术联系人写成收件人。默认关：这类行留空，交给「全选联系人」。 */
+const arbitrateIprOnly = ref(false)
+/** 空着的联系人是否跨行顺延。默认只在同一客户连成整块时补；勾上后中间隔了别的客户也照补。 */
+const carryAcrossBreaks = ref(false)
 const arbitrationReady = computed(() => arbitrationAllowed(icPhase.value))
 const arbitrationHint = computed(() => arbitrationReady.value
-  ? '用核对时暂存的客户要求和著录项目仲裁。已经提交、审核通过或未管制的行不交。不再另查接口。'
+  ? '用核对时暂存的客户要求和著录项目仲裁。已经提交、审核通过的行不交；未管制完成日的行跟着「已发文未管制的行允许发文」开关。不再另查接口。'
   : '核对还没结束。客户要求和著录项目是跟着核对带回来的，齐了才能仲裁。')
 const arbitrationOpen = ref(false)
 const arbitrationBoard = ref<Array<ArbitrationDecision & { customer: string }>>([])
+/** 这两个值只在核对前有意义，核对开始就固定。仲裁写回过的表格也不许再改，避免和已有结论冲突。 */
+const optionLocked = computed(() => icPhase.value !== 'idle' || rows.value.some(row => row.iprArbitrated))
+/** 允不允许未管制行发文会改变这轮核对和仲裁的范围，核对中、仲裁中锁定，结束后到发文阶段才许改。 */
+const mailToggleLocked = computed(() => icPhase.value === 'run' || askingGap.value)
 const abnormalKeys = ref(new Set<string>())
 const confirmedProcIds = ref<string[]>([])
 let sheetQueryToken = 0
@@ -285,11 +298,11 @@ async function onSheet(event: Event): Promise<void> {
   try {
     await new Promise(resolve => window.setTimeout(resolve, 0))
     if (generation !== sheetImportToken) return
-    const parsed = pctRowsFromWorkbook(await readXlsxSheets(await file.arrayBuffer(), isPctWorkbookSheet), props.mailTypes, runtime.value)
+    const parsed = pctRowsFromWorkbook(await readXlsxSheets(await file.arrayBuffer(), isPctWorkbookSheet), props.mailTypes, runtime.value, carryAcrossBreaks.value ? 'cross' : 'block')
     if (generation !== sheetImportToken) return
     rows.value = applyPctMailTypes(parsed.rows, props.mailTypes, runtime.value)
     resetSheetPages()
-    gapWaves.value = iprArbitrationWaves(rowsForArbitration())
+    gapWaves.value = iprArbitrationWaves(rowsForArbitration(), {}, {}, { iprOnly: arbitrateIprOnly.value })
     sheetNotice.value = parsed.notice
     await new Promise(resolve => window.setTimeout(resolve, 0))
     if (generation !== sheetImportToken) return
@@ -462,7 +475,7 @@ function sheetStatus(row: PctTaskRow): { found: string; review: string } {
 }
 
 function rowsForArbitration(): PctTaskRow[] {
-  return rows.value.filter(row => reviewNeedsArbitration(sheetStatus(row).review))
+  return rows.value.filter(row => reviewNeedsArbitration(sheetStatus(row).review, allowMailedUnfinished.value))
 }
 
 function sheetReview(row: PctTaskRow): { found: string; review: string } {
@@ -703,7 +716,7 @@ async function lookupCases(token: number, only?: FlowAsk[], kind: 'unread' | 'mi
     return
   }
   icPhase.value = 'done'
-  gapWaves.value = iprArbitrationWaves(rowsForArbitration())
+  gapWaves.value = iprArbitrationWaves(rowsForArbitration(), {}, {}, { iprOnly: arbitrateIprOnly.value })
   if (shouldAutoArbitrate({ fullCheck: !again, phase: 'done', enabled: autoArbitrate.value, gaps: gapWaves.value.length, asking: askingGap.value })) {
     void askGaps()
   }
@@ -1216,7 +1229,7 @@ function onArbitrationResult(event: Event): void {
   if (!text.trim()) return
   const applied = applyArbitrationReply(rows.value, text)
   rows.value = applied.rows
-  gapWaves.value = iprArbitrationWaves(rowsForArbitration())
+  gapWaves.value = iprArbitrationWaves(rowsForArbitration(), {}, {}, { iprOnly: arbitrateIprOnly.value })
   const known = new Map(arbitrationBoard.value.map(item => [volumeKey(item.volume), item]))
   for (const decision of applied.decisions) {
     const row = rows.value.find(item => volumeKey(item.ourVolume) === volumeKey(decision.volume) || (item.customerVolume && volumeKey(item.customerVolume) === volumeKey(decision.volume)))
@@ -1236,18 +1249,55 @@ function setAutoArbitrate(event: Event): void {
   void chrome.storage.local.set({ [AUTO_ARBITRATE_KEY]: autoArbitrate.value })
 }
 
+function setAllowMailedUnfinished(event: Event): void {
+  allowMailedUnfinished.value = (event.target as HTMLInputElement).checked
+  gapWaves.value = iprArbitrationWaves(rowsForArbitration(), {}, {}, { iprOnly: arbitrateIprOnly.value })
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) return
+  void chrome.storage.local.set({ [ALLOW_MAILED_UNFINISHED_KEY]: allowMailedUnfinished.value })
+}
+
+function setArbitrateIprOnly(event: Event): void {
+  arbitrateIprOnly.value = (event.target as HTMLInputElement).checked
+  gapWaves.value = iprArbitrationWaves(rowsForArbitration(), {}, {}, { iprOnly: arbitrateIprOnly.value })
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) return
+  void chrome.storage.local.set({ [ARBITRATE_IPR_ONLY_KEY]: arbitrateIprOnly.value })
+}
+
+function applyCarryMode(): void {
+  if (!rows.value.length) return
+  rows.value = recarryCustomerContacts(rows.value, carryAcrossBreaks.value ? 'cross' : 'block').rows
+  gapWaves.value = iprArbitrationWaves(rowsForArbitration(), {}, {}, { iprOnly: arbitrateIprOnly.value })
+  try { buildPreview() } catch { /* 预览失败不影响重新顺延 */ }
+}
+
+function setCarryAcrossBreaks(event: Event): void {
+  carryAcrossBreaks.value = (event.target as HTMLInputElement).checked
+  applyCarryMode()
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) return
+  void chrome.storage.local.set({ [CARRY_ACROSS_BREAKS_KEY]: carryAcrossBreaks.value })
+}
+
 onMounted(() => {
   window.addEventListener('patmail-arbitration-result', onArbitrationResult)
   if (typeof chrome === 'undefined' || !chrome.storage?.local) return
-  void chrome.storage.local.get(AUTO_ARBITRATE_KEY).then(stored => {
+  void chrome.storage.local.get([AUTO_ARBITRATE_KEY, ALLOW_MAILED_UNFINISHED_KEY, ARBITRATE_IPR_ONLY_KEY, CARRY_ACROSS_BREAKS_KEY]).then(stored => {
     if (stored[AUTO_ARBITRATE_KEY] === false) autoArbitrate.value = false
-  }).catch(() => { /* 读不到就保持默认勾选 */ })
+    if (stored[ALLOW_MAILED_UNFINISHED_KEY] === false) {
+      allowMailedUnfinished.value = false
+      gapWaves.value = iprArbitrationWaves(rowsForArbitration(), {}, {}, { iprOnly: arbitrateIprOnly.value })
+    }
+    if (stored[ARBITRATE_IPR_ONLY_KEY] === true) arbitrateIprOnly.value = true
+    if (stored[CARRY_ACROSS_BREAKS_KEY] === true) {
+      carryAcrossBreaks.value = true
+      applyCarryMode()
+    }
+  }).catch(() => { /* 读不到就保持默认 */ })
 })
 onUnmounted(() => window.removeEventListener('patmail-arbitration-result', onArbitrationResult))
 
 async function askGaps(): Promise<void> {
-  const gaps = rows.value.filter(row => !row.iprName.trim() && reviewNeedsArbitration(sheetStatus(row).review))
-  const settled = rows.value.filter(row => !row.iprName.trim() && !reviewNeedsArbitration(sheetStatus(row).review)).length
+  const gaps = rows.value.filter(row => !row.iprName.trim() && reviewNeedsArbitration(sheetStatus(row).review, allowMailedUnfinished.value))
+  const settled = rows.value.filter(row => !row.iprName.trim() && !reviewNeedsArbitration(sheetStatus(row).review, allowMailedUnfinished.value)).length
   if (!gaps.length || askingGap.value) return
   if (!arbitrationReady.value) {
     sheetNotice.value = '核对还没结束，客户要求和著录项目还没齐，没有交给仲裁。'
@@ -1269,14 +1319,17 @@ async function askGaps(): Promise<void> {
       return Boolean(customerInfo[row.customerName.trim()]) || Boolean(caseInfo[volume])
     })
     const held = gaps.length - eligible.length
-    const waves = iprArbitrationWaves(eligible, customerInfo, caseInfo).filter(item => item.trim())
+    const waves = iprArbitrationWaves(eligible, customerInfo, caseInfo, { iprOnly: arbitrateIprOnly.value }).filter(item => item.trim())
     if (!waves.length) {
       sheetNotice.value = '核对时没有带上这些行的客户要求和著录项目。不再另外查客户名单或案件，也没有交给仲裁。'
       return
     }
     const heldNote = held ? `${held} 行核对里没带上，没有再查。` : ''
-    const settledNote = settled ? `${settled} 行已经提交、审核通过或未管制，没有交给仲裁。` : ''
-    sheetNotice.value = [`用核对时暂存的材料，${eligible.length} 行分 ${waves.length} 批交给仲裁。助手只看这些文字，不再查接口。`, heldNote, settledNote].filter(Boolean).join('')
+    const settledNote = settled ? `${settled} 行已经提交、审核通过${allowMailedUnfinished.value ? '' : '，或未管制完成日不允许发文'}，没有交给仲裁。` : ''
+    const modeNote = arbitrateIprOnly.value
+      ? '开了「没要求时仲裁只写技术联系人」：客户没写发给谁的行，仲裁会把技术联系人写成收件人。'
+      : '这一批没开「没要求时仲裁只写技术联系人」：客户没写发给谁的行一律拿不准留空，交给「全选联系人」，但客户要求明确写了发给谁的行照要求写。'
+    sheetNotice.value = [`用核对时暂存的材料，${eligible.length} 行分 ${waves.length} 批交给仲裁。助手只看这些文字，不再查接口。`, modeNote, heldNote, settledNote].filter(Boolean).join('')
     window.dispatchEvent(new CustomEvent('patmail-arbitrate', { detail: waves }))
   } finally {
     askingGap.value = false
@@ -1293,7 +1346,7 @@ function definitionHint(item: WorkflowDefinition | null): string {
   <section class="card">
     <div class="card-head"><h2>按工作流发文</h2></div>
     <p v-if="workflowId === FILE_MANAGE_ID" class="hint">选择已经绑好文件管理的客户。按这位客户保存的查询条件和发文方式查出文件。文件描述按发文映射对上发文类型。收件人是案件联系人，抄送是默认发件人和商务，审核人是默认审核人，标题用标题模板，正文用发文页邮件签名下拉里的格式。所属部门包含研发本部时，在文件描述右侧写入全部发明人，顿号分隔。</p>
-    <p v-else class="hint">一次读「提醒申请PCT」和「PCT进国家」两张表。进国家有客户文号就用贵方案号，没有客户文号就用我方案号。外观用涉外外观那一种。同一客户里连续空着的 IPR 只沿紧挨着的上一行往下补，中间隔了别的客户就不补。完全空着的，核对时会带上客户要求和著录项目里的发明人、客户联系人。交给助手时只使用这份暂存，不再查客户名单或案件。助手按文号把收件人写回这一行。核对完成后可以导出，在原表上加一列审核状态。邮箱那一列不读。</p>
+    <p v-else class="hint">一次读「提醒申请PCT」和「PCT进国家」两张表。进国家有客户文号就用贵方案号，没有客户文号就用我方案号。外观用涉外外观那一种。同一客户里空着的联系人默认只在连成整块时顺延补上，中间隔了别的客户就断开；「同客户隔行也顺延补上」打开后不受截断影响。完全空着的，核对时会带上客户要求和著录项目里的发明人、客户联系人。交给助手时只使用这份暂存，不再查客户名单或案件。助手按文号把收件人写回这一行。核对完成后可以导出，在原表上加一列审核状态。邮箱那一列不读。</p>
     <div class="form-grid">
       <div v-if="workflowOptions.length === 0" class="span-all">
         <EmptyGuide text="还没有工作流。去工作流里看 PCT提醒。" action="去工作流" hash="/workflow" />
@@ -1332,10 +1385,24 @@ function definitionHint(item: WorkflowDefinition | null): string {
         </span>
         <button v-if="icPhase === 'done' && rows.length" type="button" class="ghost" @click="exportChecked">导出核对表</button>
         <button v-if="arbitrationBoard.length" type="button" class="ghost" @click="arbitrationOpen = true">仲裁结果 {{ arbitrationBoard.length }}</button>
-        <label class="arbitrate-auto">
-          <input type="checkbox" :checked="autoArbitrate" @change="setAutoArbitrate" />
-          核对完状态之后自动开始仲裁（如果有缺失）
-        </label>
+        <span class="arbitrate-auto-group">
+          <label class="arbitrate-auto">
+            <input type="checkbox" :checked="autoArbitrate" @change="setAutoArbitrate" />
+            核对完状态之后自动开始仲裁（如果有缺失）
+          </label>
+          <label class="arbitrate-auto" v-hint="'状态是「已发文，事项未管制完成日」的行也允许勾选提交。提交时这些行会先弹出警示框，列出文号要仔细核对。去掉勾选后这类行不能勾选，也不进仲裁。核对中和仲裁中这一项固定，都结束后到发文阶段才能改。'">
+            <input type="checkbox" :checked="allowMailedUnfinished" :disabled="mailToggleLocked" @change="setAllowMailedUnfinished" />
+            已发文未管制的行允许发文
+          </label>
+          <label class="arbitrate-auto" v-hint="'IPR 空着、客户要求也没写发给谁时：勾上后仲裁可以把著录项目里的技术联系人写成收件人；不勾（默认）这类行不写收件人，交给「全选联系人」兜底。只在核对前有效，核对开始就固定，要改就重新读表格。'">
+            <input type="checkbox" :checked="arbitrateIprOnly" :disabled="optionLocked" @change="setArbitrateIprOnly" />
+            没要求时仲裁只写技术联系人
+          </label>
+          <label class="arbitrate-auto" v-hint="'空着的联系人默认只在同一客户连成整块时往下补（第一行有、后面空行补「补」），中间隔了别的客户就断开。勾上后同一客户不管中间隔了多少别的客户，都沿用该客户最近一行。只在核对前有效：开始核对或已有仲裁结果后固定，避免和写回的结论冲突。'">
+            <input type="checkbox" :checked="carryAcrossBreaks" :disabled="optionLocked" @change="setCarryAcrossBreaks" />
+            同客户隔行也顺延补上
+          </label>
+        </span>
       </div>
       <p v-if="mailTypes.length === 0" class="hint">发文类型还没读到。确认已经连上后，重新打开这一页。</p>
       <p v-if="unmatched.length" class="hint">这 {{ unmatched.length }} 行没有对上发文类型，请点选。</p>
@@ -1354,6 +1421,7 @@ function definitionHint(item: WorkflowDefinition | null): string {
         :inventor-customers="inventorCustomers"
         :flow-by-key="flowByKey"
         :flow-checking="icPhase === 'run'"
+        :allow-mailed-unfinished="allowMailedUnfinished"
         @result="onLimitResult"
         @confirm="onSheetConfirm"
         @refresh-status="onRefreshStatus"

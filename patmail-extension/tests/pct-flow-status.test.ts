@@ -112,11 +112,14 @@ describe('PCT 发文审核状态', () => {
     expect(suffixVariant('PA2519196CNDYS', 'PA2519196CND')).toBe(false)
   })
 
-  it('已经提交、审核通过或未管制的行不再仲裁', () => {
-    expect(reviewNeedsArbitration('已提交审核')).toBe(false)
-    expect(reviewNeedsArbitration('已经审核通过')).toBe(false)
-    expect(reviewNeedsArbitration(MAILED_UNFINISHED_REVIEW)).toBe(false)
-    expect(reviewNeedsArbitration('还没提交审核')).toBe(true)
-    expect(reviewNeedsArbitration('—')).toBe(true)
+  it('已经提交、审核通过的行不再仲裁，未管制完成日跟允许发文开关', () => {
+    expect(reviewNeedsArbitration('已提交审核', true)).toBe(false)
+    expect(reviewNeedsArbitration('已经审核通过', true)).toBe(false)
+    expect(reviewNeedsArbitration('已提交审核', false)).toBe(false)
+    expect(reviewNeedsArbitration(MAILED_UNFINISHED_REVIEW, true)).toBe(true)
+    expect(reviewNeedsArbitration(MAILED_UNFINISHED_REVIEW, false)).toBe(false)
+    expect(reviewNeedsArbitration('还没提交审核', true)).toBe(true)
+    expect(reviewNeedsArbitration('还没提交审核', false)).toBe(true)
+    expect(reviewNeedsArbitration('—', true)).toBe(true)
   })
 })

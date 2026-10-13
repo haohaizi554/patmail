@@ -1,4 +1,4 @@
-import { pctRowsFromTable } from './pct-sheet'
+import { pctRowsFromTable, type CarryMode } from './pct-sheet'
 import { sheetDisplayName } from './pct-recipients'
 import type { PctRuntimeConfig } from '../workflow/pct-config'
 import type { PctTaskRow } from './types'
@@ -169,7 +169,8 @@ function withDetailNotes(rows: PctTaskRow[], lines: readonly string[]): PctTaskR
 export function pctRowsFromWorkbook(
   sheets: XlsxSheet[],
   mailTypes: Array<{ id: string; name: string }> = [],
-  config?: PctRuntimeConfig
+  config?: PctRuntimeConfig,
+  carry: CarryMode = 'block'
 ): PctWorkbookRead {
   const detail = sheets.find(sheet => isDetailSheet(sheet.name))
   const namedRemind = sheets.filter(sheet => isRemindSheet(sheet.name))
@@ -178,8 +179,8 @@ export function pctRowsFromWorkbook(
   const remindSheets = named ? namedRemind : sheets.filter(sheet => !isDetailSheet(sheet.name)).slice(0, 1)
   const nationalSheets = named ? namedNational : []
   const parts = [
-    ...remindSheets.map(sheet => pctRowsFromTable(sheet.rows, mailTypes, config, 'remind')),
-    ...nationalSheets.map(sheet => pctRowsFromTable(sheet.rows, mailTypes, config, 'national'))
+    ...remindSheets.map(sheet => pctRowsFromTable(sheet.rows, mailTypes, config, 'remind', carry)),
+    ...nationalSheets.map(sheet => pctRowsFromTable(sheet.rows, mailTypes, config, 'national', carry))
   ]
   const merged = parts.flatMap(part => part.rows).slice(0, 5000)
   const noted = withDetailNotes(merged, detail ? detailLines(detail.rows) : [])
@@ -290,14 +291,26 @@ function splitOversized(unit: ArbitrationUnit, demands: Readonly<Record<string, 
   return pieces
 }
 
-function waveMessage(units: readonly ArbitrationUnit[], index: number, total: number, demands: Readonly<Record<string, string>>, cases: Readonly<Record<string, string>>): string {
+export interface ArbitrationOptions {
+  /** 客户要求没写发给谁时，允许仲裁把著录项目或表格里的技术联系人写成收件人。默认关：这类行拿不准留空，交给「全选联系人」。 */
+  iprOnly?: boolean
+}
+
+function priorityLine(iprOnly: boolean): string {
+  if (iprOnly) {
+    return '优先级：1. 客户要求里明确写了发给谁、抄送谁，就按要求。收件人和抄送都可以是 IPR、发明人、客户联系人的任意组合。2. 客户要求没有指定收件人时，收件人只写著录项目或表格里的技术联系人，身份写 IPR。著录项目里仅仅列出来的发明人、客户联系人，不是发信要求。3. 没有明确要求，也没有技术联系人时，这一行写成拿不准，收件人留空。不要用客户联系人名单、技术负责人或商务去顶。'
+  }
+  return '优先级：1. 客户要求里明确写了发给谁、抄送谁，就按要求写全，不要因为本批的兜底规则而漏写。收件人和抄送都可以是 IPR、发明人、客户联系人的任意组合，客户要求点名了技术联系人也照样写。2. 只有客户要求没有指定收件人时，这一行才写成拿不准，收件人留空，提交时用「全选联系人」兜底。这时不要从著录项目或表格里挑技术联系人来顶，也不要用发明人、客户联系人名单、技术负责人或商务来顶。著录项目里仅仅列出来的发明人、客户联系人，不是发信要求。'
+}
+
+function waveMessage(units: readonly ArbitrationUnit[], index: number, total: number, demands: Readonly<Record<string, string>>, cases: Readonly<Record<string, string>>, options: Readonly<ArbitrationOptions> = {}): string {
   const blocks = units.map(unit => unitBlock(unit, demands, cases))
   const text = [
     `请仲裁收件人和抄送。这是第 ${index}/${total} 批。材料只有下面这些文字：每一行的表格字段，以及核对时已经暂存的客户要求和著录项目。`,
     '每一行单独裁。第一客户联系人不同的，不能收成同一个人，也不能用一条结论盖住同客户的全部文号。',
     'IPR 就是技术联系人。身份只能是：发明人、客户联系人、IPR。多人用顿号，身份与人名一一对应。',
     '不要写商务、登录人、登陆人、密送、技术负责人。抄送商务、抄送登录人、密送登录人由系统在提交时默认追加。仲裁写了也会被丢掉，写抄送无也不会取消这些默认项。',
-    '优先级：1. 客户要求里明确写了发给谁、抄送谁，就按要求。收件人和抄送都可以是 IPR、发明人、客户联系人的任意组合。2. 客户要求没有指定收件人时，收件人只写著录项目或表格里的技术联系人，身份写 IPR。著录项目里仅仅列出来的发明人、客户联系人，不是发信要求。3. 没有明确要求，也没有技术联系人时，这一行写成拿不准，收件人留空。不要用客户联系人名单、技术负责人或商务去顶。抄送只写第 1 条里额外要点名的人，没有就写无。',
+    priorityLine(options.iprOnly === true) + '抄送只写第 1 条里额外要点名的人，没有就写无。',
     '每一行只写一行，用竖线分开，文号原样照抄，外面不要加尖括号：',
     '文号 我方文号｜收件人 人名｜身份 身份｜抄送 人名或无｜抄送身份 身份或无｜依据 一句话',
     '拿不准的行写成：文号 我方文号｜拿不准｜依据 一句话。不要把身份写进人名括号，文号和人名外面也不要加尖括号。',
@@ -311,7 +324,8 @@ function waveMessage(units: readonly ArbitrationUnit[], index: number, total: nu
 export function iprArbitrationWaves(
   rows: readonly PctTaskRow[],
   demands: Readonly<Record<string, string>> = {},
-  cases: Readonly<Record<string, string>> = {}
+  cases: Readonly<Record<string, string>> = {},
+  options: Readonly<ArbitrationOptions> = {}
 ): string[] {
   const units = arbitrationUnits(rows).flatMap(unit => splitOversized(unit, demands, cases))
   const waves: ArbitrationUnit[][] = []
@@ -321,7 +335,7 @@ export function iprArbitrationWaves(
     waves.push(rest.slice(0, size))
     rest = rest.slice(size)
   }
-  return waves.map((wave, index) => waveMessage(wave, index + 1, waves.length, demands, cases))
+  return waves.map((wave, index) => waveMessage(wave, index + 1, waves.length, demands, cases, options))
 }
 
 /** 核对整表结束之后才能仲裁。材料是核对顺带带回来的，没结束就点会用到不完整的原文。 */
@@ -338,9 +352,10 @@ export function shouldAutoArbitrate(input: { fullCheck: boolean; phase: 'idle' |
 export function iprArbitrationBrief(
   rows: readonly PctTaskRow[],
   demands: Readonly<Record<string, string>> = {},
-  cases: Readonly<Record<string, string>> = {}
+  cases: Readonly<Record<string, string>> = {},
+  options: Readonly<ArbitrationOptions> = {}
 ): string {
-  return iprArbitrationWaves(rows, demands, cases)[0] ?? ''
+  return iprArbitrationWaves(rows, demands, cases, options)[0] ?? ''
 }
 
 function volumeKey(value: string): string {

@@ -355,6 +355,17 @@ describe('仲裁交给本地模型时分批', () => {
     expect(withCase).not.toContain('还有')
   })
 
+  it('默认没要求时拿不准交给全选，开了才允许写技术联系人', () => {
+    const byDefault = iprArbitrationWaves([gap('A1', '歌尔')])
+    expect(byDefault[0]).toContain('全选联系人')
+    expect(byDefault[0]).toContain('不要因为本批的兜底规则而漏写')
+    expect(byDefault[0]).toContain('客户要求点名了技术联系人也照样写')
+    expect(byDefault[0]).not.toContain('收件人只写著录项目或表格里的技术联系人')
+    const iprOnly = iprArbitrationWaves([gap('A1', '歌尔')], {}, {}, { iprOnly: true })
+    expect(iprOnly[0]).toContain('收件人只写著录项目或表格里的技术联系人')
+    expect(iprOnly[0]).not.toContain('全选联系人')
+  })
+
   it('按文号写回，拿不准的不填', () => {
     const rows = [gap('PA2519006CND', '华润怡宝'), gap('PA2518902CND', '唯品会'), gap('PA2518903CND', '唯品会')]
     const applied = applyArbitrationReply(rows, [

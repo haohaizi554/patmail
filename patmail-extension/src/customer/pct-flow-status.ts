@@ -7,10 +7,11 @@ export const MAILED_UNFINISHED_REVIEW = '已发文，事项未管制完成日'
 /** 这项事项已经完成，下面没有子流程。 */
 export const SKIP_SEND_REVIEW = '不用发'
 
-/** 已经提交、审核通过，或发文已结束但事项未管制完成日。这些行不用再仲裁收件人。 */
-export function reviewNeedsArbitration(review: string): boolean {
+/** 已经提交、审核通过的行不用再仲裁。「已发文，事项未管制完成日」的行跟着「允许发文」开关：允许发文才仲裁。 */
+export function reviewNeedsArbitration(review: string, allowMailedUnfinished: boolean): boolean {
   const text = review.trim()
-  if (text === '已提交审核' || text === '已经审核通过' || text === MAILED_UNFINISHED_REVIEW) return false
+  if (text === '已提交审核' || text === '已经审核通过') return false
+  if (text === MAILED_UNFINISHED_REVIEW) return allowMailedUnfinished
   return true
 }
 
