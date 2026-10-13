@@ -24,7 +24,7 @@ export function nationalTypeName(input: { ourVolume?: string; customerVolume?: s
   return NATIONAL_OUR_TYPE
 }
 
-export function pctRowsFromTable(table: string[][], mailTypes: Array<{ id: string; name: string }> = [], config?: PctRuntimeConfig, sheetKind: 'remind' | 'national' = 'remind'): { rows: PctTaskRow[]; notice: string } {
+export function pctRowsFromTable(table: string[][], mailTypes: Array<{ id: string; name: string }> = [], config?: PctRuntimeConfig, sheetKind: 'remind' | 'national' = 'remind', carry: CarryMode = 'block'): { rows: PctTaskRow[]; notice: string } {
   const runtime = resolvePctRuntime(config)
   const header = (table[0] ?? []).map(item => item.trim())
   const column = (name: string) => header.indexOf(name)
@@ -68,12 +68,16 @@ export function pctRowsFromTable(table: string[][], mailTypes: Array<{ id: strin
     })
     if (rows.length >= 5000) break
   }
-  const carried = carryCustomerContacts(rows)
+  const carried = carryCustomerContacts(rows, carry)
   if (!carried.rows.length) return { rows: [], notice: skipped ? '表格里没有同时带我方文号、并能判断发文类型的行。' : '表格里没有数据行。' }
   const other = sheetKind === 'remind' ? carried.rows.filter(row => row.procLabel && row.procLabel !== runtime.procLabel).length : 0
   const notice = [
     `读到 ${carried.rows.length} 行。`,
-    carried.filled ? `同客户后面空着的联系人，沿用了该客户最近一行。` : '',
+    carried.filled
+      ? (carry === 'cross'
+        ? '同客户后面空着的联系人，沿用了该客户最近一行，中间隔了别的客户也沿用。'
+        : '同客户连成整块时，第一行之后的空行沿用了第一行的联系人。')
+      : '',
     runtime.columns.leadName && lead < 0 ? `表格没有「${runtime.columns.leadName}」这一列。` : '',
     other ? `其中 ${other} 行的处理事项不是「${runtime.procLabel}」。` : '',
     skipped ? `跳过 ${skipped} 行没有文号的记录。` : ''
@@ -81,43 +85,68 @@ export function pctRowsFromTable(table: string[][], mailTypes: Array<{ id: strin
   return { rows: carried.rows, notice }
 }
 
-/** 联系人沿用该客户往上最近一行。IPR 只补紧挨着的同客户空行，中间隔了别的客户就断开。 */
-function carryCustomerContacts(rows: PctTaskRow[]): { rows: PctTaskRow[]; filled: number } {
-  const remembered = new Map<string, { contactName: string; leadName: string }>()
+/** 顺延补上的两种口径。block：同一客户连成整块时才往下补，中间隔了别的客户就断开。cross：同一客户不管中间隔了什么都沿用最近一行。 */
+export type CarryMode = 'block' | 'cross'
+
+/** 联系人往下顺延。block 只补同一客户整块里第一行之后的空行；cross 按客户沿用最近一行，中间隔了别的客户也不断。 */
+function carryCustomerContacts(rows: PctTaskRow[], mode: CarryMode = 'block'): { rows: PctTaskRow[]; filled: number } {
+  const remembered = new Map<string, { contactName: string; leadName: string; iprName: string }>()
   let filled = 0
   let previousKey = ''
-  let streakIpr = ''
   const next = rows.map(row => {
     const key = normalizeCustomerName(row.customerName)
     if (!key) {
       previousKey = ''
-      streakIpr = ''
       return row
     }
     const previous = remembered.get(key)
-    const contactName = row.contactName.trim() || previous?.contactName || ''
-    const leadName = (row.leadName ?? '').trim() || previous?.leadName || ''
+    const near = mode === 'cross' || key === previousKey
+    const contactName = row.contactName.trim() || (near ? previous?.contactName ?? '' : '')
+    const leadName = row.leadName === undefined
+      ? undefined
+      : ((row.leadName ?? '').trim() || (near ? previous?.leadName ?? '' : ''))
     const ownIpr = row.iprName.trim()
-    const iprName = ownIpr || (key === previousKey ? streakIpr : '')
+    const iprName = ownIpr || (near ? previous?.iprName ?? '' : '')
     previousKey = key
-    streakIpr = iprName
+    remembered.set(key, { contactName, leadName: leadName ?? '', iprName })
     const contactCarried = !row.contactName.trim() && Boolean(contactName)
     const iprCarried = !ownIpr && Boolean(iprName)
     const leadCarried = row.leadName !== undefined && !(row.leadName ?? '').trim() && Boolean(leadName)
-    remembered.set(key, { contactName, leadName })
     if (!contactCarried && !iprCarried && !leadCarried) return row
     filled += 1
     return {
       ...row,
       contactName,
       iprName,
-      ...(row.leadName !== undefined || leadCarried ? { leadName } : {}),
+      ...(row.leadName !== undefined || leadCarried ? { leadName: leadName ?? '' } : {}),
       ...(contactCarried ? { contactCarried: true as const } : {}),
       ...(iprCarried ? { iprCarried: true as const } : {}),
       ...(leadCarried ? { leadCarried: true as const } : {})
     }
   })
   return { rows: next, filled }
+}
+
+/** 已解析的行按另一种口径重新顺延。仲裁写回的（仲）不动，只重算（补）。 */
+export function recarryCustomerContacts(rows: readonly PctTaskRow[], mode: CarryMode): { rows: PctTaskRow[]; filled: number } {
+  const stripped = rows.map(row => {
+    if (!row.contactCarried && !row.iprCarried && !row.leadCarried) return row
+    const next: PctTaskRow = { ...row }
+    if (next.contactCarried) {
+      next.contactName = ''
+      delete next.contactCarried
+    }
+    if (next.iprCarried) {
+      next.iprName = ''
+      delete next.iprCarried
+    }
+    if (next.leadCarried) {
+      next.leadName = ''
+      delete next.leadCarried
+    }
+    return next
+  })
+  return carryCustomerContacts(stripped, mode)
 }
 
 export const PCT_WORKFLOW_TASK_KEY = 'patmail.pctWorkflowTask'

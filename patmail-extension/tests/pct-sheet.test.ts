@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { isCustomerProfile, isPctTask } from '../src/customer/guards'
 import { pctMailTypeFor } from '../src/customer/mail-flow'
 import { resolvePctRuntime } from '../src/workflow/pct-config'
-import { applyPctMailTypes, buildPctTask, matchSheetCtrlProcs, NATIONAL_PROC_LABEL, pctRowsFromTable, procGapNotes, summarizePctTask } from '../src/customer/pct-sheet'
+import { applyPctMailTypes, buildPctTask, matchSheetCtrlProcs, NATIONAL_PROC_LABEL, pctRowsFromTable, procGapNotes, recarryCustomerContacts, summarizePctTask } from '../src/customer/pct-sheet'
 import type { CustomerQueryProfile, PctTaskDraft } from '../src/customer/types'
 import { joinCaseVolumes, splitCaseVolumes } from '../src/customer/volume-list'
 import { readXlsxRows, rowsFromSheetXml, sharedStringsFromXml, sheetGridFromXml } from '../src/customer/xlsx-table'
@@ -84,7 +84,7 @@ describe('PCT 表格', () => {
     expect(parsed.notice).not.toContain('邮箱')
   })
 
-  it('同一客户后面空着的联系人沿用最近一行', () => {
+  it('整块顺延：第一行之后的空行沿用，隔开后再出现的块不沿用旧值', () => {
     const parsed = pctRowsFromTable([
       ['我方文号', '客户文号', '客户名称', '第一客户联系人', '客户联系人(IPR)', '处理事项'],
       ['PA1', 'WT-1', '鹏城国家实验室', '姜颖', '牛乐宏', '提醒申请PCT'],
@@ -99,23 +99,51 @@ describe('PCT 表格', () => {
       ['PA2', '姜颖', '牛乐宏', true, true],
       ['PA3', '姜颖', '牛乐宏', true, true],
       ['PB1', '王一', '李二', '', ''],
-      ['PA4', '姜颖', '赵三', true, ''],
-      ['PA5', '姜颖', '赵三', true, true]
+      ['PA4', '', '赵三', '', ''],
+      ['PA5', '', '赵三', '', true]
     ])
-    expect(parsed.notice).toContain('沿用了该客户最近一行')
+    expect(parsed.notice).toContain('整块')
   })
 
-  it('IPR 只沿紧挨着的同客户往下补，隔开后不找最近一行', () => {
-    const parsed = pctRowsFromTable([
+  it('跨行顺延：中间隔了别的客户也沿用该客户最近一行', () => {
+    const table = [
+      ['我方文号', '客户文号', '客户名称', '第一客户联系人', '客户联系人(IPR)', '处理事项'],
+      ['PA1', 'WT-1', '鹏城国家实验室', '姜颖', '牛乐宏', '提醒申请PCT'],
+      ['PB1', 'WA-1', '另一客户', '王一', '李二', '提醒申请PCT'],
+      ['PA2', 'WT-2', '鹏城国家实验室', '', '', '提醒申请PCT']
+    ]
+    const blocked = pctRowsFromTable(table)
+    expect(blocked.rows[2]?.contactName).toBe('')
+    expect(blocked.rows[2]?.contactCarried).toBeUndefined()
+    expect(blocked.rows[2]?.iprName).toBe('')
+    expect(blocked.rows[2]?.iprCarried).toBeUndefined()
+    const crossed = pctRowsFromTable(table, [], undefined, 'remind', 'cross')
+    expect(crossed.rows[2]?.contactName).toBe('姜颖')
+    expect(crossed.rows[2]?.contactCarried).toBe(true)
+    expect(crossed.rows[2]?.iprName).toBe('牛乐宏')
+    expect(crossed.rows[2]?.iprCarried).toBe(true)
+    expect(crossed.notice).toContain('中间隔了别的客户也沿用')
+  })
+
+  it('切换口径时只重算（补），仲裁写回的（仲）不动', () => {
+    const base = pctRowsFromTable([
       ['我方文号', '客户文号', '客户名称', '第一客户联系人', '客户联系人(IPR)', '处理事项'],
       ['PA1', 'WT-1', '鹏城国家实验室', '姜颖', '牛乐宏', '提醒申请PCT'],
       ['PB1', 'WA-1', '另一客户', '王一', '李二', '提醒申请PCT'],
       ['PA2', 'WT-2', '鹏城国家实验室', '', '', '提醒申请PCT']
     ])
-    expect(parsed.rows[2]?.contactName).toBe('姜颖')
-    expect(parsed.rows[2]?.contactCarried).toBe(true)
-    expect(parsed.rows[2]?.iprName).toBe('')
-    expect(parsed.rows[2]?.iprCarried).toBeUndefined()
+    const arbitrated = base.rows.map(row => row.ourVolume === 'PB1' ? { ...row, iprName: '仲裁人', iprArbitrated: true as const } : row)
+    const crossed = recarryCustomerContacts(arbitrated, 'cross').rows
+    expect(crossed[2]?.contactName).toBe('姜颖')
+    expect(crossed[2]?.contactCarried).toBe(true)
+    expect(crossed[2]?.iprName).toBe('牛乐宏')
+    expect(crossed[2]?.iprCarried).toBe(true)
+    expect(crossed[1]?.iprName).toBe('仲裁人')
+    expect(crossed[1]?.iprArbitrated).toBe(true)
+    const back = recarryCustomerContacts(crossed, 'block').rows
+    expect(back[2]?.contactName).toBe('')
+    expect(back[2]?.contactCarried).toBeUndefined()
+    expect(back[1]?.iprName).toBe('仲裁人')
   })
 
   it('套上发文类型后，补出来的联系人仍带着备注', () => {
