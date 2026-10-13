@@ -61,6 +61,10 @@
 .docs-leaf { display: block; width: 100%; text-align: left; border: 0; background: transparent; border-radius: 10px; padding: 8px 10px; font: inherit; font-size: 13px; color: #35415e; cursor: pointer; }
 .docs-leaf:hover { background: #fff4f8; }
 .docs-leaf.on { background: #ffe9f1; color: #e44586; font-weight: 700; }
+.docs-leaf.docs-section { font-weight: 700; color: #6a5fd0; }
+.docs-leaf.docs-section::before { content: '▸'; display: inline-block; width: 14px; color: #b3a8e8; transition: transform .12s; }
+.docs-leaf.docs-section.open::before { transform: rotate(90deg); }
+.docs-leaf.docs-sub { padding-left: 28px; font-size: 12.5px; }
 .docs-body { flex: 1; overflow: auto; padding: 18px 26px 28px; }
 .docs-md { font-size: 14px; line-height: 1.75; color: #2a3550; max-width: 60em; }
 .docs-md h1 { font-size: 22px; margin: 4px 0 12px; color: #e44586; }

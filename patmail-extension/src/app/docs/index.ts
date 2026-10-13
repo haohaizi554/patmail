@@ -3,8 +3,10 @@ import { apiDocFiles, apiDocRawText } from '../../agent/api-docs'
 export interface DocEntry {
   /** 树里的显示名。 */
   title: string
-  /** 点开这一篇时才加载 Markdown 原文。 */
-  load: () => Promise<string>
+  /** 点开这一篇时才加载 Markdown 原文。没有 load 的是目录节点。 */
+  load?: () => Promise<string>
+  /** 有 children 时是二级目录节点，点开收起。 */
+  children?: DocEntry[]
 }
 
 export interface DocGroup {
@@ -44,8 +46,50 @@ const apiEntries: DocEntry[] = apiSorted.map(file => ({
   load: async () => apiDocRawText(file)
 }))
 
-/** 文档浮窗左侧的文件树。 */
+/** agent 学习文档在仓库根的 docs 目录，一层子目录按二级树展开，点开才加载。 */
+const agentFiles = import.meta.glob('../../../../docs/**/*.md', {
+  query: '?raw',
+  import: 'default'
+}) as Record<string, () => Promise<string>>
+
+interface AgentFile {
+  dir: string
+  name: string
+  path: string
+}
+
+const agentList: AgentFile[] = Object.keys(agentFiles).map(path => {
+  const rel = path.replace(/^(\.\.\/)+/, '')
+  const parts = rel.split('/')
+  const file = parts[parts.length - 1] ?? ''
+  const dir = parts.length > 2 ? parts[parts.length - 2] : ''
+  return { dir, name: file, path }
+})
+
+const agentRoots: DocEntry[] = agentList
+  .filter(item => !item.dir)
+  .sort((a, b) => /^readme\.md$/i.test(b.name) ? 1 : a.name.localeCompare(b.name, 'zh-Hans-CN'))
+  .map(item => ({
+    title: /^readme\.md$/i.test(item.name) ? 'README（总目录）' : item.name.replace(/\.md$/i, ''),
+    load: agentFiles[item.path]
+  }))
+
+const agentSectionNames = [...new Set(agentList.filter(item => item.dir).map(item => item.dir))]
+  .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
+
+const agentSections: DocEntry[] = agentSectionNames.map(dir => ({
+  title: dir,
+  children: agentList
+    .filter(item => item.dir === dir)
+    .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'))
+    .map(item => ({ title: item.name.replace(/\.md$/i, ''), load: agentFiles[item.path] }))
+}))
+
+const agentEntries: DocEntry[] = [...agentRoots, ...agentSections]
+
+/** 文档浮窗左侧的文件树。前两组是平铺文章，agent学习按子目录展开二级树。 */
 export const DOC_GROUPS: DocGroup[] = [
   { name: '使用文档', entries: usageEntries },
-  { name: '接口文档', entries: apiEntries }
+  { name: '接口文档', entries: apiEntries },
+  { name: 'agent学习', entries: agentEntries }
 ]

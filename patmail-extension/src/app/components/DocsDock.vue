@@ -8,16 +8,19 @@ const active = ref<DocEntry | null>(null)
 const html = ref('')
 const loading = ref(false)
 const body = ref<HTMLElement | null>(null)
+const openSections = ref<DocEntry[]>([])
 let loadToken = 0
 
 async function show(entry: DocEntry): Promise<void> {
+  const loader = entry.load
+  if (!loader) return
   active.value = entry
   loading.value = true
   html.value = ''
   const token = ++loadToken
   void nextTick(() => body.value?.scrollTo({ top: 0 }))
   try {
-    const text = await entry.load()
+    const text = await loader()
     if (token !== loadToken) return
     html.value = renderAgentMarkdown(text.trim()
       ? text
@@ -29,11 +32,21 @@ async function show(entry: DocEntry): Promise<void> {
   }
 }
 
+function sectionOpen(entry: DocEntry): boolean {
+  return openSections.value.includes(entry)
+}
+
+function toggleSection(entry: DocEntry): void {
+  openSections.value = sectionOpen(entry)
+    ? openSections.value.filter(item => item !== entry)
+    : [...openSections.value, entry]
+}
+
 function toggle(): void {
   open.value = !open.value
   if (open.value && !active.value) {
     const first = DOC_GROUPS[0]?.entries[0]
-    if (first) void show(first)
+    if (first?.load) void show(first)
   }
 }
 
@@ -65,14 +78,33 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           <nav class="docs-tree" aria-label="文档目录">
             <div v-for="group in DOC_GROUPS" :key="group.name" class="docs-group">
               <p class="docs-group-name">{{ group.name }}</p>
-              <button
-                v-for="entry in group.entries"
-                :key="entry.title"
-                type="button"
-                class="docs-leaf"
-                :class="{ on: active?.title === entry.title }"
-                @click="show(entry)"
-              >{{ entry.title }}</button>
+              <template v-for="entry in group.entries" :key="entry.title">
+                <button
+                  v-if="entry.children"
+                  type="button"
+                  class="docs-leaf docs-section"
+                  :class="{ open: sectionOpen(entry) }"
+                  :aria-expanded="sectionOpen(entry)"
+                  @click="toggleSection(entry)"
+                >{{ entry.title }}</button>
+                <button
+                  v-else
+                  type="button"
+                  class="docs-leaf"
+                  :class="{ on: active === entry }"
+                  @click="show(entry)"
+                >{{ entry.title }}</button>
+                <template v-if="entry.children && sectionOpen(entry)">
+                  <button
+                    v-for="leaf in entry.children"
+                    :key="leaf.title"
+                    type="button"
+                    class="docs-leaf docs-sub"
+                    :class="{ on: active === leaf }"
+                    @click="show(leaf)"
+                  >{{ leaf.title }}</button>
+                </template>
+              </template>
             </div>
           </nav>
           <div ref="body" class="docs-body">
