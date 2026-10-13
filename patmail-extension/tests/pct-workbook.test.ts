@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { lookupIcFlow } from '../src/customer/ic-flow-lookup'
 import { NATIONAL_CUSTOMER_TYPE, NATIONAL_OUR_TYPE, pctRowsFromTable } from '../src/customer/pct-sheet'
-import { applyArbitrationReply, arbitrateDetail, arbitrationAllowed, arbitrationBatchSize, checkedSourceSheets, detailLines, iprArbitrationBrief, iprArbitrationWaves, isPctWorkbookSheet, missedSourceSheets, noteForBlankIpr, pctRowsFromWorkbook, shouldAutoArbitrate } from '../src/customer/pct-workbook'
+import { applyArbitrationReply, arbitrateDetail, arbitrationAllowed, arbitrationBatchSize, checkedSourceSheets, detailLines, iprArbitrationBrief, iprArbitrationWaves, isPctWorkbookSheet, missedSourceSheets, noteForBlankIpr, pctRowsFromWorkbook, pickArbitrationText, readArbitrationDecisions, shouldAutoArbitrate } from '../src/customer/pct-workbook'
 import { matchListedCustomer } from '../src/customer/customer-list'
 import { caseTextUsable } from '../src/customer/case-arbitration'
 import { readXlsxSheets, xlsxBookBytes } from '../src/customer/xlsx-table'
@@ -360,6 +360,7 @@ describe('仲裁交给本地模型时分批', () => {
     expect(byDefault[0]).toContain('全选联系人')
     expect(byDefault[0]).toContain('不要因为本批的兜底规则而漏写')
     expect(byDefault[0]).toContain('客户要求点名了技术联系人也照样写')
+    expect(byDefault[0]).toContain('依据只写「客户要求没有指定发给谁」')
     expect(byDefault[0]).not.toContain('收件人只写著录项目或表格里的技术联系人')
     const iprOnly = iprArbitrationWaves([gap('A1', '歌尔')], {}, {}, { iprOnly: true })
     expect(iprOnly[0]).toContain('收件人只写著录项目或表格里的技术联系人')
@@ -426,6 +427,50 @@ describe('仲裁交给本地模型时分批', () => {
     expect(applied.rows[3]?.iprName).toBe('余祖')
     expect(applied.rows[3]?.mailCc).toBe('黄萱燕')
     expect(applied.decisions.find(item => item.volume === 'PA4')?.ccRole).toBe('客户联系人')
+  })
+
+  it('短总结里的「文号」不盖过真正的裁决行', () => {
+    const lines = [
+      '文号为PA2519006CND｜收件人 李英｜身份 客户联系人｜抄送 无｜抄送身份 无｜依据 第一客户联系人',
+      '文号是PA2518902CND｜收件人 李聪｜身份 IPR｜抄送 无｜抄送身份 无｜依据 微电子联系人'
+    ].join('\n')
+    const summary = '已按文号裁完这一批。'
+    const picked = pickArbitrationText([summary, `${lines}\n\n${summary}`, lines])
+    expect(readArbitrationDecisions(picked).map(item => item.volume)).toEqual(['PA2519006CND', 'PA2518902CND'])
+    const packed = applyArbitrationReply(
+      [gap('PA1', '华润怡宝'), gap('PA2', '唯品会')],
+      '文号为PA1｜收件人 杨智银｜身份 客户联系人｜抄送 无｜抄送身份 无｜依据 客户要求 文号是PA2｜收件人 郑建波｜身份 IPR｜抄送 无｜抄送身份 无｜依据 著录项目指定技术联系人'
+    )
+    expect(packed.written).toBe(2)
+    expect(packed.rows[0]?.iprName).toBe('杨智银')
+    expect(packed.rows[1]?.iprName).toBe('郑建波')
+  })
+
+  it('客户文号加我方文号的回复整批读回，英文词不算文号', () => {
+    const reply = [
+      '文号 being 还没定。',
+      'HYMI0089 PA25213828CN｜拿不准｜依据 客户要求没有指定发给谁',
+      'HYMI0090 PZ25213909CN｜拿不准｜依据 客户要求没有指定发给谁',
+      '空 CW1PZ2528270CN｜收件人 金超、陈垣静｜身份 发明人、发明人｜抄送 黄慧燕｜抄送身份 客户联系人｜依据 客户要求明确主送金超、陈垣静，抄送黄慧燕',
+      '空 PA25113213CN-优｜拿不准｜依据 客户要求没有指定发给谁',
+      '空 QPA25114402CN｜拿不准｜依据 客户要求没有指定发给谁'
+    ].join('\n')
+    const picked = pickArbitrationText(['已按文号裁完，being 只是说明。', reply])
+    const applied = applyArbitrationReply(
+      [gap('PA25213828CN', '海目'), gap('PZ25213909CN', '海目'), gap('CW1PZ2528270CN', '海目'), gap('PA25113213CN-优', '海目'), gap('QPA25114402CN', '海目')],
+      picked
+    )
+    expect(applied.decisions.map(item => item.volume)).toEqual([
+      'PA25213828CN', 'PZ25213909CN', 'CW1PZ2528270CN', 'PA25113213CN-优', 'QPA25114402CN'
+    ])
+    expect(applied.decisions.filter(item => item.unsure)).toHaveLength(4)
+    expect(applied.decisions[0]?.reason).toBe('客户要求没有指定发给谁')
+    expect(applied.written).toBe(1)
+    expect(applied.rows[2]?.iprName).toBe('金超、陈垣静')
+    expect(applied.rows[2]?.mailCc).toBe('黄慧燕')
+    expect(applied.decisions[2]?.role).toBe('发明人、发明人')
+    expect(applied.decisions[2]?.ccRole).toBe('客户联系人')
+    expect(applied.decisions.some(item => item.volume === 'being')).toBe(false)
   })
 
   it('客户名单对不上多家时不猜，著录项目空文不拿去仲裁', () => {

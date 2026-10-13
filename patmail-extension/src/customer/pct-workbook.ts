@@ -300,7 +300,7 @@ function priorityLine(iprOnly: boolean): string {
   if (iprOnly) {
     return '优先级：1. 客户要求里明确写了发给谁、抄送谁，就按要求。收件人和抄送都可以是 IPR、发明人、客户联系人的任意组合。2. 客户要求没有指定收件人时，收件人只写著录项目或表格里的技术联系人，身份写 IPR。著录项目里仅仅列出来的发明人、客户联系人，不是发信要求。3. 没有明确要求，也没有技术联系人时，这一行写成拿不准，收件人留空。不要用客户联系人名单、技术负责人或商务去顶。'
   }
-  return '优先级：1. 客户要求里明确写了发给谁、抄送谁，就按要求写全，不要因为本批的兜底规则而漏写。收件人和抄送都可以是 IPR、发明人、客户联系人的任意组合，客户要求点名了技术联系人也照样写。2. 只有客户要求没有指定收件人时，这一行才写成拿不准，收件人留空，提交时用「全选联系人」兜底。这时不要从著录项目或表格里挑技术联系人来顶，也不要用发明人、客户联系人名单、技术负责人或商务来顶。著录项目里仅仅列出来的发明人、客户联系人，不是发信要求。'
+  return '优先级：1. 客户要求里明确写了发给谁、抄送谁，就按要求写全，不要因为本批的兜底规则而漏写。收件人和抄送都可以是 IPR、发明人、客户联系人的任意组合，客户要求点名了技术联系人也照样写。2. 只有客户要求没有指定收件人时，这一行直接写成拿不准，收件人留空，提交时用「全选联系人」兜底。依据只写「客户要求没有指定发给谁」一句，不要去著录项目或表格里对联系人，不要把著录项目里有没有联系人写进依据，也不要用发明人、客户联系人名单、技术负责人或商务来顶。'
 }
 
 function waveMessage(units: readonly ArbitrationUnit[], index: number, total: number, demands: Readonly<Record<string, string>>, cases: Readonly<Record<string, string>>, options: Readonly<ArbitrationOptions> = {}): string {
@@ -421,22 +421,59 @@ function fieldOf(parts: string[], label: string): string {
   return found.slice(label.length).replace(/^[：:\s]+/, '').trim()
 }
 
+function isCaseVolume(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9\u4e00-\u9fff._/-]*\d[A-Za-z0-9\u4e00-\u9fff._/-]*$/.test(value)
+}
+
 function decisionLines(text: string): string[] {
-  return text.replace(/```[\w-]*\n?/g, '').replace(/<\/?think>/gi, '').split(/\n+/)
+  const clean = text.replace(/```[\w-]*\n?/g, '').replace(/<\/?think>/gi, '')
+  const out: string[] = []
+  for (const line of clean.split(/\n+/)) {
+    const pieces = line.split(/(?=文号(?:为|是)?\s*[｜|│丨:：]?\s*[<《「『"'\u201c*`]*\s*[A-Za-z0-9][A-Za-z0-9\u4e00-\u9fff._/-]*\d)/).map(part => part.trim()).filter(Boolean)
+    if (pieces.length > 1) out.push(...pieces)
+    else if (line.trim()) out.push(line.trim())
+  }
+  return out
+}
+
+/** 正式格式是「文号 我方文号」。模型也常写成「客户文号 我方文号」或「空 我方文号」。没有数字的词不是文号。 */
+function volumeOf(line: string): string {
+  const classic = line.match(/文号(?:为|是)?\s*[｜|│丨:：]?\s*[<《「『"'\u201c*`]*\s*([A-Za-z0-9][A-Za-z0-9\u4e00-\u9fff._/-]{1,80})/)
+  if (classic?.[1] && isCaseVolume(classic[1])) return classic[1]
+  const paired = line.match(/^(?:空|[A-Za-z0-9][A-Za-z0-9\u4e00-\u9fff._/-]{1,40})\s+([A-Za-z0-9][A-Za-z0-9\u4e00-\u9fff._/-]{1,80})\s*[｜|│丨]/)
+  if (paired?.[1] && isCaseVolume(paired[1])) return paired[1]
+  const single = line.match(/^([A-Za-z0-9][A-Za-z0-9\u4e00-\u9fff._/-]{1,80})\s*[｜|│丨]/)
+  return single?.[1] && isCaseVolume(single[1]) ? single[1] : ''
+}
+
+/** 同一份回复里，短总结常常也带「文号」二字，但裁决行在另一段。取能对上更多文号的那一段。 */
+export function pickArbitrationText(parts: readonly string[]): string {
+  let best = ''
+  let hits = -1
+  for (const part of parts) {
+    const text = part.trim()
+    if (!text) continue
+    const found = readArbitrationDecisions(text).length
+    if (found > hits) {
+      best = text
+      hits = found
+    }
+  }
+  return best
 }
 
 /** 从助手回复里取出每一行的收件人、身份和抄送。拿不准的也留下，但不写进表格。 */
 export function readArbitrationDecisions(text: string): ArbitrationDecision[] {
   const decisions: ArbitrationDecision[] = []
   for (const raw of decisionLines(text)) {
-    const line = raw.trim().replace(/^\d+[.、)\]]\s*/, '')
-    const volume = line.match(/文号\s*[｜|│丨:：]?\s*[<《「『"'\u201c*]*\s*([A-Za-z0-9][A-Za-z0-9\u4e00-\u9fff._-]{1,80})/)
-    if (!volume?.[1]) continue
+    const line = raw.trim().replace(/^\d+[.、)\]]\s*/, '').replace(/^[-*]\s+/, '')
+    const volume = volumeOf(line)
+    if (!volume) continue
     const parts = line.split(/[｜|│丨]/).map(part => part.trim())
     const unsure = parts.some(part => part === '拿不准' || part.startsWith('拿不准')) || /[：:]\s*拿不准/.test(line)
     const reason = unwrapToken(fieldOf(parts, '依据')).slice(0, 120)
     if (unsure) {
-      decisions.push({ volume: volume[1], recipient: '', role: '', cc: '', ccRole: '', reason, unsure: true })
+      decisions.push({ volume, recipient: '', role: '', cc: '', ccRole: '', reason, unsure: true })
       continue
     }
     const recipientRaw = fieldOf(parts, '收件人') || line.match(/收件人\s*[：:\-]?\s*([^，,；;｜|\n]+)/)?.[1]?.trim() || ''
@@ -445,12 +482,12 @@ export function readArbitrationDecisions(text: string): ArbitrationDecision[] {
     const keptCc = partySlots(partyText(ccRaw), roleText(fieldOf(parts, '抄送身份'), ccRaw), reason)
     if (!keptTo.names) {
       if (fieldOf(parts, '收件人') || unsure) {
-        decisions.push({ volume: volume[1], recipient: '', role: '', cc: '', ccRole: '', reason, unsure: true })
+        decisions.push({ volume, recipient: '', role: '', cc: '', ccRole: '', reason, unsure: true })
       }
       continue
     }
     decisions.push({
-      volume: volume[1],
+      volume,
       recipient: keptTo.names,
       role: keptTo.roles,
       cc: keptCc.names,

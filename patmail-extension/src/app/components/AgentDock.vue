@@ -6,6 +6,7 @@ import { foldActivity, type AgentTraceStep } from '../../agent/trace'
 import { AGENT_CONFIG_KEY, normalizeAgentConfig } from '../../agent/config'
 import AgentAnswer from './AgentAnswer.vue'
 import { splitAgentReply, thoughtLead } from '../../agent/loop'
+import { pickArbitrationText } from '../../customer/pct-workbook'
 import { formatAgentAnswer, isAgentQuestion, type AgentQuestion } from '../../agent/ask'
 import { filterCommands, resolveSlash, slashToken, type SlashCommand } from '../../agent/slash'
 import { MessageType, type BackgroundRequest } from '../../shared/message'
@@ -200,9 +201,7 @@ function historyCovers(server: Bubble[], local: Bubble[]): boolean {
 
 function arbitrationAnswer(reply: string): string {
   const split = splitAgentReply(reply)
-  if (/文号/.test(split.answer)) return split.answer
-  if (/文号/.test(reply)) return reply
-  return split.answer || reply
+  return pickArbitrationText([split.answer, reply, split.thought])
 }
 
 function nearBottom(): boolean {
@@ -442,6 +441,10 @@ async function finishJob(): Promise<void> {
   if (!wave) {
     batchProgress.value = ''
     queueOpen.value = false
+    if (arbitrationTotal.value > 0) {
+      arbitrationTotal.value = 0
+      window.dispatchEvent(new CustomEvent('patmail-arbitration-result', { detail: { text: '', open: true } }))
+    }
     await scrollDown()
     return
   }
