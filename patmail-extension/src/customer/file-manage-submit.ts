@@ -102,6 +102,43 @@ let memoryMarks: FileManageMark[] | null = null
 const droppedMarks = new Set<string>()
 let ledgerQueue: Promise<void> = Promise.resolve()
 
+type MarkRecovery = {
+  load(): Promise<unknown>
+  save(marks: unknown): void
+}
+let markRecovery: MarkRecovery | null = null
+
+/** 页面启动时接上 SQLite 恢复账本。内容脚本不接，避免把账本写进原站。 */
+export function bindFileManageRecovery(next: MarkRecovery): void {
+  markRecovery = next
+}
+
+function markRank(state: string): number {
+  if (state === 'submitted') return 3
+  if (state === 'unknown') return 2
+  if (state === 'created') return 1
+  return 0
+}
+
+function mergeFileMarks(local: FileManageMark[], extra: FileManageMark[]): FileManageMark[] {
+  const merged = new Map<string, FileManageMark>()
+  for (const item of [...local, ...extra]) {
+    const key = item.fileId.toLowerCase()
+    const previous = merged.get(key)
+    if (!previous || markRank(item.state) >= markRank(previous.state)) merged.set(key, item)
+  }
+  return [...merged.values()].slice(-500)
+}
+
+async function absorbFileRecovery(marks: FileManageMark[]): Promise<FileManageMark[]> {
+  if (!markRecovery) return marks
+  try {
+    return mergeFileMarks(marks, parseMarks(await markRecovery.load()))
+  } catch {
+    return marks
+  }
+}
+
 export function readFileManageLedger(): FileManageMark[] {
   return memoryMarks ?? readSessionLedger()
 }
@@ -109,7 +146,7 @@ export function readFileManageLedger(): FileManageMark[] {
 export async function loadFileManageLedger(): Promise<FileManageMark[]> {
   const area = sessionLedgerArea()
   if (!area) {
-    memoryMarks = readSessionLedger()
+    memoryMarks = await absorbFileRecovery(readSessionLedger())
     return memoryMarks
   }
   try {
@@ -118,6 +155,7 @@ export async function loadFileManageLedger(): Promise<FileManageMark[]> {
   } catch {
     memoryMarks = readSessionLedger()
   }
+  memoryMarks = await absorbFileRecovery(memoryMarks)
   return memoryMarks
 }
 
@@ -127,7 +165,9 @@ function flushLedger(): Promise<void> {
     const tombstones = [...droppedMarks]
     const area = sessionLedgerArea()
     if (!area) {
-      sessionStorage.setItem(LEDGER_KEY, JSON.stringify(local.slice(-500)))
+      const next = local.slice(-500)
+      sessionStorage.setItem(LEDGER_KEY, JSON.stringify(next))
+      markRecovery?.save(next)
       return
     }
     const stored = parseMarks((await area.get(LEDGER_KEY))[LEDGER_KEY])
@@ -144,6 +184,7 @@ function flushLedger(): Promise<void> {
     memoryMarks = next
     for (const id of tombstones) droppedMarks.delete(id)
     await area.set({ [LEDGER_KEY]: next })
+    markRecovery?.save(next)
   }).catch(() => {})
   ledgerQueue = job
   return job

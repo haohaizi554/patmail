@@ -329,6 +329,43 @@ let memoryMarks: LimitMailMark[] | null = null
 const droppedMarks = new Set<string>()
 let ledgerQueue: Promise<void> = Promise.resolve()
 
+type MarkRecovery = {
+  load(): Promise<unknown>
+  save(marks: unknown): void
+}
+let markRecovery: MarkRecovery | null = null
+
+/** 页面启动时接上 SQLite 恢复账本。内容脚本不接，避免把账本写进原站。 */
+export function bindLimitMailRecovery(next: MarkRecovery): void {
+  markRecovery = next
+}
+
+function markRank(state: string): number {
+  if (state === 'submitted') return 3
+  if (state === 'unknown') return 2
+  if (state === 'created') return 1
+  return 0
+}
+
+function mergeLimitMarks(local: LimitMailMark[], extra: LimitMailMark[]): LimitMailMark[] {
+  const merged = new Map<string, LimitMailMark>()
+  for (const item of [...local, ...extra]) {
+    const key = item.procId.toLowerCase()
+    const previous = merged.get(key)
+    if (!previous || markRank(item.state) >= markRank(previous.state)) merged.set(key, item)
+  }
+  return [...merged.values()].slice(-500)
+}
+
+async function absorbLimitRecovery(marks: LimitMailMark[]): Promise<LimitMailMark[]> {
+  if (!markRecovery) return marks
+  try {
+    return mergeLimitMarks(marks, parseLimitMailLedger(await markRecovery.load()))
+  } catch {
+    return marks
+  }
+}
+
 export function readLimitMailLedger(): LimitMailMark[] {
   return memoryMarks ?? readSessionLedger()
 }
@@ -336,7 +373,7 @@ export function readLimitMailLedger(): LimitMailMark[] {
 export async function loadLimitMailLedger(): Promise<LimitMailMark[]> {
   const area = sessionLedgerArea()
   if (!area) {
-    memoryMarks = readSessionLedger()
+    memoryMarks = await absorbLimitRecovery(readSessionLedger())
     return memoryMarks
   }
   try {
@@ -345,6 +382,7 @@ export async function loadLimitMailLedger(): Promise<LimitMailMark[]> {
   } catch {
     memoryMarks = readSessionLedger()
   }
+  memoryMarks = await absorbLimitRecovery(memoryMarks)
   return memoryMarks
 }
 
@@ -354,7 +392,9 @@ function flushLimitMailLedger(): Promise<void> {
     const tombstones = [...droppedMarks]
     const area = sessionLedgerArea()
     if (!area) {
-      sessionStorage.setItem(LEDGER_KEY, JSON.stringify(local.slice(-500)))
+      const next = local.slice(-500)
+      sessionStorage.setItem(LEDGER_KEY, JSON.stringify(next))
+      markRecovery?.save(next)
       return
     }
     const stored = parseLimitMailLedger((await area.get(LEDGER_KEY))[LEDGER_KEY])
@@ -371,6 +411,7 @@ function flushLimitMailLedger(): Promise<void> {
     memoryMarks = next
     for (const id of tombstones) droppedMarks.delete(id)
     await area.set({ [LEDGER_KEY]: next })
+    markRecovery?.save(next)
   }).catch(() => {})
   ledgerQueue = job
   return job

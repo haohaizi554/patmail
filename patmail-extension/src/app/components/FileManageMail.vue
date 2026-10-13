@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, ref, watch } from 'vue'
+import { computed, inject, onMounted, onUnmounted, ref, watch } from 'vue'
 import ThemeSelect from '../../shell/components/ThemeSelect.vue'
 import EmptyGuide from './EmptyGuide.vue'
 import { assessQueryScope } from '../../api/file-search-params'
@@ -18,6 +18,7 @@ import { defaultSignatureChoice, signatureChoices } from '../../mail/signature-c
 import { fetchMailboxSignature } from '../../mail/signature-load'
 import type { MailRuleBundle } from '../../mail/types'
 import { isQueryGuid } from '../../query/query-validator'
+import { flushRecovery, recallRecovery, scheduleRecovery } from '../../recovery/wal-ledger'
 import { scopeFromConnection } from '../../shared/connection'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useMailConcurrency } from '../../settings/use-mail-concurrency'
@@ -72,6 +73,48 @@ const readyLetters = computed(() => letters.value.filter(item => !item.blocked &
 const pickedLetters = computed(() => readyLetters.value.filter(item => picked.value.includes(item.key)))
 const allReadyPicked = computed(() => readyLetters.value.length > 0 && readyLetters.value.every(item => picked.value.includes(item.key)))
 const styleLabel = computed(() => customer.value ? customerMailStyleLabel(customer.value) : '')
+
+function readFileDesk(): unknown | null {
+  if (!letters.value.length && !foundFiles.value.length && !picked.value.length) return null
+  const owner = connection.value.operatorId
+  return {
+    version: 1,
+    operatorId: isQueryGuid(owner) ? owner.toLowerCase() : '',
+    customerId: customerId.value,
+    notice: notice.value,
+    letters: letters.value,
+    notes: notes.value,
+    outcomes: { ...outcomes.value },
+    foundFiles: foundFiles.value,
+    picked: picked.value
+  }
+}
+
+function applyFileDesk(payload: unknown): void {
+  if (!payload || typeof payload !== 'object' || letters.value.length || foundFiles.value.length) return
+  const desk = payload as Record<string, unknown>
+  if (desk.version !== 1) return
+  const owner = typeof desk.operatorId === 'string' ? desk.operatorId.toLowerCase() : ''
+  const live = connection.value.operatorId
+  if (isQueryGuid(live) && owner && live.toLowerCase() !== owner) return
+  if (typeof desk.customerId === 'string') customerId.value = desk.customerId
+  if (typeof desk.notice === 'string') notice.value = desk.notice
+  letters.value = Array.isArray(desk.letters) ? desk.letters as FileManageLetterPlan[] : []
+  notes.value = Array.isArray(desk.notes) ? desk.notes.filter((item): item is string => typeof item === 'string') : []
+  outcomes.value = desk.outcomes && typeof desk.outcomes === 'object' ? desk.outcomes as Record<string, string> : {}
+  foundFiles.value = Array.isArray(desk.foundFiles) ? desk.foundFiles as FileManageFile[] : []
+  picked.value = Array.isArray(desk.picked) ? desk.picked.filter((item): item is string => typeof item === 'string') : []
+  if (!notice.value && (letters.value.length || foundFiles.value.length)) notice.value = '登录中断前的发文已经从本机恢复账本找回。'
+}
+
+watch([letters, foundFiles, picked, outcomes, notice, customerId], () => {
+  scheduleRecovery('file-desk', 'file', readFileDesk)
+}, { deep: true })
+
+onMounted(() => {
+  void recallRecovery('file-desk', 'file').then(payload => applyFileDesk(payload)).catch(() => { /* 没有账本就重新查 */ })
+})
+onUnmounted(() => { void flushRecovery('file-desk', 'file', readFileDesk) })
 
 function asFile(file: PatentFile): FileManageFile {
   return {

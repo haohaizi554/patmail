@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import LimitPage from '../../shell/pages/LimitPage.vue'
 import LimitQuerySection from '../../floating/LimitQuerySection.vue'
 import type { LimitMonitorResult, LimitMonitorRow } from '../../api/limit-monitor-types'
@@ -10,6 +10,7 @@ import { limitMailItems, limitMailLetterLabel, limitMailProcIds, limitMailSubmit
 import { beginProgress, classifySubmitText, confirmDialog, endProgress, logProgress, progressSummaryLine, tallyProgress } from '../dialog'
 import { splitCaseVolumes } from '../../customer/volume-list'
 import { isQueryGuid } from '../../query/query-validator'
+import { flushRecovery, recallRecovery, scheduleRecovery } from '../../recovery/wal-ledger'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useMailConcurrency } from '../../settings/use-mail-concurrency'
 import { isWriteSwitchOpen, isWriteSwitchReady } from '../../settings/write-switch'
@@ -99,6 +100,55 @@ const flowByProc = computed(() => {
 })
 
 type SearchInput = Omit<LimitMonitorQuery, 'pageIndex' | 'pageSize'> & { reset?: boolean; templateId?: string; page?: number }
+
+function readQueryDesk(): unknown | null {
+  if (!rows.value.length && !selected.value.length && !confirmedIds.value.length) return null
+  const owner = props.userId
+  return {
+    version: 1,
+    operatorId: isQueryGuid(owner) ? owner.toLowerCase() : '',
+    rows: rows.value,
+    gates: { ...gates.value },
+    selected: selected.value,
+    confirmedIds: confirmedIds.value,
+    message: message.value,
+    total: total.value,
+    pageIndex: pageIndex.value,
+    pageSize: pageSize.value,
+    sheetMerged: sheetMerged.value,
+    lastQuery: lastQuery.value
+  }
+}
+
+function applyQueryDesk(payload: unknown): void {
+  if (!payload || typeof payload !== 'object' || rows.value.length) return
+  const desk = payload as Record<string, unknown>
+  if (desk.version !== 1 || !Array.isArray(desk.rows) || !desk.rows.length) return
+  const owner = typeof desk.operatorId === 'string' ? desk.operatorId.toLowerCase() : ''
+  if (isQueryGuid(props.userId) && owner && props.userId.toLowerCase() !== owner) return
+  rows.value = desk.rows as LimitMonitorRow[]
+  gates.value = desk.gates && typeof desk.gates === 'object' ? desk.gates as Record<string, 'open' | 'pending' | 'done'> : {}
+  selected.value = Array.isArray(desk.selected) ? desk.selected.filter((item): item is string => typeof item === 'string') : []
+  confirmedIds.value = Array.isArray(desk.confirmedIds) ? desk.confirmedIds.filter((item): item is string => typeof item === 'string') : []
+  if (typeof desk.message === 'string' && desk.message) message.value = desk.message
+  if (typeof desk.total === 'number') total.value = desk.total
+  if (typeof desk.pageIndex === 'number' && desk.pageIndex > 0) pageIndex.value = desk.pageIndex
+  sheetMerged.value = desk.sheetMerged === true
+  lastQuery.value = desk.lastQuery && typeof desk.lastQuery === 'object' ? desk.lastQuery as Omit<LimitMonitorQuery, 'pageIndex' | 'pageSize'> : null
+  if (!message.value) message.value = '登录中断前的查询结果已经从本机恢复账本找回。'
+  publish()
+}
+
+function pokeQuery(): void {
+  scheduleRecovery('limit-query', 'workflow', readQueryDesk)
+}
+
+watch([rows, selected, confirmedIds, message, pageIndex], pokeQuery, { deep: true })
+
+onMounted(() => {
+  void recallRecovery('limit-query', 'workflow').then(payload => applyQueryDesk(payload)).catch(() => { /* 没有账本就等下一次查询 */ })
+})
+onUnmounted(() => { void flushRecovery('limit-query', 'workflow', readQueryDesk) })
 
 function publish(): void {
   emit('result', {
@@ -403,7 +453,7 @@ async function onSubmitAsk(address?: string): Promise<void> {
     const lines = mailedPending.map(row => `${row.caseVolume}｜${row.ctrlProc}｜${row.customerName}`).join('\n')
     const goOn = await confirmDialog({
       title: `警示：${mailedPending.length} 行已发文、事项未管制完成日`,
-      message: `这些行以前发过文，只是事项还没有管制完成日。再提交会重发一封，请仔细核对：\n${lines}`,
+      message: `这些行的发文流程已结束，但事项还没有管制完成日。\n这个状态分不出两种情况：真的发出过邮件，或没发文就把流程手动结束。请逐行确认到底发没发过，再提交会发一封新的：\n${lines}`,
       confirmLabel: '核对过，继续提交',
       cancelLabel: '再核对',
       warn: true

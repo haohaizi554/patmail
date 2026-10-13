@@ -313,8 +313,7 @@ onMounted(() => { if (ready.value) void call({ action: 'load' }) })
 
 <template>
   <PageHead title="发文任务" desc="高效执行专利发文任务，让重要文件准时送达！" :art="bg('创业路上的小胜利.png')" />
-  <section v-if="!ready" class="card"><p class="empty">尚未确认 EASY 用户。刷新页面后也不会加载其他账号的任务。</p></section>
-  <template v-else>
+  <section v-if="!ready" class="card"><p class="empty">原站登录掉了。表格、查询结果和发文进度还留在这台电脑上，重新连上后可以接着做。换了账号不会拿上一个账号的记录来用。</p></section>
     <div class="filters">
       <button type="button" :class="entry === 'diy' ? 'solid' : 'ghost'" @click="entry = 'diy'">自己拼一封</button>
       <button type="button" :class="entry === 'workflow' ? 'solid' : 'ghost'" @click="entry = 'workflow'">按工作流发文</button>
@@ -442,5 +441,4 @@ onMounted(() => { if (ready.value) void call({ action: 'load' }) })
       </table>
     </section>
     <p v-if="detailMessage" class="hint">{{ detailMessage }}</p>
-  </template>
 </template>

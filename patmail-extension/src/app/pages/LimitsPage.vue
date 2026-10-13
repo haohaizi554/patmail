@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onActivated, onMounted, ref, watch } from 'vue'
+import { computed, inject, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import LimitPage from '../../shell/pages/LimitPage.vue'
 import LimitQuerySection from '../../floating/LimitQuerySection.vue'
 import BindQueryBar from '../components/BindQueryBar.vue'
@@ -11,6 +11,7 @@ import { limitMailItems, limitMailLetterLabel, limitMailProcIds, limitMailSubmit
 import { inventorCustomerNames, recipientModeForTask } from '../../workflow/catalog'
 import { joinCaseVolumes, splitCaseVolumes } from '../../customer/volume-list'
 import { isQueryGuid } from '../../query/query-validator'
+import { flushRecovery, recallRecovery, scheduleRecovery } from '../../recovery/wal-ledger'
 import { scopeFromConnection } from '../../shared/connection'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useWorkflowCatalog } from '../composables/useWorkflowCatalog'
@@ -389,8 +390,50 @@ watch(() => connection.value.easyOrigin, (next, previous) => {
   seedToken.value += 1
 })
 
-onMounted(() => { void resumeQuery() })
+function readLimitDesk(): unknown | null {
+  if (!rows.value.length && !selected.value.length && !confirmedIds.value.length) return null
+  const owner = connection.value.operatorId
+  return {
+    version: 1,
+    operatorId: isQueryGuid(owner) ? owner.toLowerCase() : '',
+    rows: rows.value,
+    gates: { ...gates.value },
+    selected: selected.value,
+    confirmedIds: confirmedIds.value,
+    message: message.value,
+    total: total.value,
+    pageIndex: pageIndex.value,
+    pageSize: pageSize.value
+  }
+}
+
+function applyLimitDesk(payload: unknown): void {
+  if (!payload || typeof payload !== 'object' || rows.value.length) return
+  const desk = payload as Record<string, unknown>
+  if (desk.version !== 1 || !Array.isArray(desk.rows) || !desk.rows.length) return
+  const owner = typeof desk.operatorId === 'string' ? desk.operatorId.toLowerCase() : ''
+  const live = connection.value.operatorId
+  if (isQueryGuid(live) && owner && live.toLowerCase() !== owner) return
+  rows.value = desk.rows as LimitMonitorRow[]
+  gates.value = desk.gates && typeof desk.gates === 'object' ? desk.gates as Record<string, 'open' | 'pending' | 'done'> : {}
+  selected.value = Array.isArray(desk.selected) ? desk.selected.filter((item): item is string => typeof item === 'string') : []
+  confirmedIds.value = Array.isArray(desk.confirmedIds) ? desk.confirmedIds.filter((item): item is string => typeof item === 'string') : []
+  if (typeof desk.message === 'string' && desk.message) message.value = desk.message
+  if (typeof desk.total === 'number') total.value = desk.total
+  if (typeof desk.pageIndex === 'number' && desk.pageIndex > 0) pageIndex.value = desk.pageIndex
+  if (!message.value) message.value = '登录中断前的查询结果已经从本机恢复账本找回。'
+}
+
+watch([rows, selected, confirmedIds, message, pageIndex], () => {
+  scheduleRecovery('limit-query', 'page', readLimitDesk)
+}, { deep: true })
+
+onMounted(() => {
+  void recallRecovery('limit-query', 'page').then(payload => applyLimitDesk(payload)).catch(() => { /* 没有账本就等下一次查询 */ })
+  void resumeQuery()
+})
 onActivated(() => { void resumeQuery() })
+onUnmounted(() => { void flushRecovery('limit-query', 'page', readLimitDesk) })
 
 </script>
 

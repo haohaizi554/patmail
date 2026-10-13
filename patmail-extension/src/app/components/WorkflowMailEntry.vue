@@ -23,6 +23,7 @@ import type { MailRuleBundle, SelectedPatentFile } from '../../mail/types'
 import { joinCaseVolumes } from '../../customer/volume-list'
 import type { LimitMonitorRow } from '../../api/limit-monitor-types'
 import { isQueryGuid } from '../../query/query-validator'
+import { flushRecovery, recallLatest, recallRecovery, scheduleRecovery } from '../../recovery/wal-ledger'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { scopeFromConnection } from '../../shared/connection'
 import { useWorkspace } from '../composables/useWorkspace'
@@ -408,11 +409,121 @@ function leaveSystem(): void {
   resetLimit()
   queryToken.value += 1
   try { sessionStorage.removeItem(PCT_WORKFLOW_TASK_KEY) } catch { /* 当前页面没有会话存储时略过 */ }
+  void flushRecovery('workflow-desk', deskScope(), () => null)
 }
 
 watch(() => connection.value.easyOrigin, (next, previous) => {
   if (!previous || next === previous) return
   leaveSystem()
+})
+
+let deskOwner = ''
+
+function deskScope(): string {
+  const id = deskOwner || props.operatorId || connection.value.operatorId
+  return isQueryGuid(id) ? id.toLowerCase() : 'local'
+}
+
+function phaseOf(value: unknown): 'idle' | 'run' | 'done' | 'fail' {
+  return value === 'run' || value === 'done' || value === 'fail' || value === 'idle' ? value : 'idle'
+}
+
+function readDesk(): unknown | null {
+  const idle = !rows.value.length && icPhase.value === 'idle' && limitPhase.value === 'idle' && !progress.value.length && !arbitrationBoard.value.length && !confirmedProcIds.value.length
+  if (idle) return null
+  const owner = props.operatorId || connection.value.operatorId || deskOwner
+  return {
+    version: 1,
+    operatorId: isQueryGuid(owner) ? owner.toLowerCase() : '',
+    origin: connection.value.easyOrigin,
+    workflowId: workflowId.value,
+    sheetName: sheetName.value,
+    sheetNotice: sheetNotice.value,
+    rows: rows.value,
+    senderId: senderId.value,
+    status: status.value,
+    progress: progress.value,
+    limitPhase: limitPhase.value,
+    limitNote: limitNote.value,
+    icPhase: icPhase.value,
+    icNote: icNote.value,
+    icHits,
+    recordByVolume,
+    limitByKey: { ...limitByKey },
+    arbitrationBoard: arbitrationBoard.value,
+    confirmedProcIds: confirmedProcIds.value,
+    abnormalKeys: [...abnormalKeys.value],
+    queryOpen: queryOpen.value,
+    querySeed: querySeed.value,
+    queryProcs: queryProcs.value,
+    queryCaseVolume: queryCaseVolume.value
+  }
+}
+
+function applyDesk(payload: unknown): void {
+  if (!payload || typeof payload !== 'object' || rows.value.length) return
+  const desk = payload as Record<string, unknown>
+  if (desk.version !== 1 || !Array.isArray(desk.rows)) return
+  const owner = typeof desk.operatorId === 'string' ? desk.operatorId.toLowerCase() : ''
+  const live = props.operatorId || connection.value.operatorId
+  if (isQueryGuid(live) && owner && live.toLowerCase() !== owner) return
+  const next = desk.rows.filter((row): row is PctTaskRow => Boolean(row) && typeof row === 'object' && typeof (row as PctTaskRow).ourVolume === 'string')
+  if (!next.length && !Array.isArray(desk.progress)) return
+  if (typeof desk.workflowId === 'string') workflowId.value = desk.workflowId
+  if (typeof desk.sheetName === 'string') sheetName.value = desk.sheetName
+  if (typeof desk.senderId === 'string') senderId.value = desk.senderId
+  if (typeof desk.status === 'string') status.value = desk.status
+  rows.value = next
+  const ic = phaseOf(desk.icPhase)
+  icPhase.value = ic === 'run' ? 'fail' : ic
+  icNote.value = ic === 'run' ? '登录中断时核对还在进行。已经对上的行还在，可以继续查剩下的。' : (typeof desk.icNote === 'string' ? desk.icNote : '')
+  const limit = phaseOf(desk.limitPhase)
+  limitPhase.value = limit === 'run' ? 'fail' : limit
+  limitNote.value = limit === 'run' ? '登录中断时查询还在进行。已经查到的结果还在。' : (typeof desk.limitNote === 'string' ? desk.limitNote : '')
+  progress.value = Array.isArray(desk.progress)
+    ? desk.progress.flatMap(item => {
+      if (!item || typeof item !== 'object') return []
+      const step = item as { label?: unknown; detail?: unknown; state?: unknown }
+      const state = step.state === 'wait' || step.state === 'run' || step.state === 'done' || step.state === 'stop' ? step.state : 'stop'
+      return [{
+        label: typeof step.label === 'string' ? step.label : '发文',
+        detail: state === 'run' ? '登录中断，这一步停住了。已经完成的还在。' : (typeof step.detail === 'string' ? step.detail : ''),
+        state: state === 'run' ? 'stop' as const : state
+      }]
+    })
+    : []
+  if (desk.icHits && typeof desk.icHits === 'object') icHits = desk.icHits as Record<string, IcHit>
+  if (desk.recordByVolume && typeof desk.recordByVolume === 'object') recordByVolume = desk.recordByVolume as Record<string, { customer: string; record: string }>
+  for (const key of Object.keys(limitByKey)) delete limitByKey[key]
+  if (desk.limitByKey && typeof desk.limitByKey === 'object') Object.assign(limitByKey, desk.limitByKey)
+  arbitrationBoard.value = Array.isArray(desk.arbitrationBoard) ? desk.arbitrationBoard as Array<ArbitrationDecision & { customer: string }> : []
+  confirmedProcIds.value = Array.isArray(desk.confirmedProcIds) ? desk.confirmedProcIds.filter((item): item is string => typeof item === 'string') : []
+  abnormalKeys.value = new Set(Array.isArray(desk.abnormalKeys) ? desk.abnormalKeys.filter((item): item is string => typeof item === 'string') : [])
+  queryOpen.value = desk.queryOpen === true
+  querySeed.value = desk.querySeed && typeof desk.querySeed === 'object' ? desk.querySeed as Record<string, string> : null
+  queryProcs.value = Array.isArray(desk.queryProcs) ? desk.queryProcs.flatMap(item => {
+    if (!item || typeof item !== 'object') return []
+    const proc = item as { id?: unknown; volumes?: unknown }
+    return typeof proc.id === 'string' && typeof proc.volumes === 'string' ? [{ id: proc.id, volumes: proc.volumes }] : []
+  }) : []
+  queryCaseVolume.value = typeof desk.queryCaseVolume === 'string' ? desk.queryCaseVolume : ''
+  icEpoch.value += 1
+  deskOwner = owner
+  if (!sheetNotice.value) sheetNotice.value = '登录中断前的工作已经从本机恢复账本找回。'
+  gapWaves.value = iprArbitrationWaves(rowsForArbitration(), {}, {}, { iprOnly: arbitrateIprOnly.value })
+}
+
+function pokeDesk(): void {
+  scheduleRecovery('workflow-desk', deskScope(), readDesk)
+}
+
+watch([rows, icPhase, limitPhase, progress, arbitrationBoard, confirmedProcIds, sheetName, status, queryOpen], pokeDesk, { deep: true })
+
+watch(() => connection.value.operatorId, next => {
+  if (!isQueryGuid(next)) return
+  const id = next.toLowerCase()
+  if (deskOwner && deskOwner !== id) leaveSystem()
+  deskOwner = id
 })
 
 function resetLimit(): void {
@@ -1200,6 +1311,21 @@ function exportUnread(): void {
   exportByVerdict(found => found === '没查成', count => `没查成-${count}行.xlsx`)
 }
 
+function exportArbitration(): void {
+  const header = ['我方文号', '客户', '收件人', '身份', '抄送', '抄送身份', '依据']
+  const body = arbitrationBoard.value.map(line => [
+    line.volume,
+    line.customer || '',
+    line.unsure ? '拿不准' : line.recipient,
+    line.role,
+    line.cc || '无',
+    line.ccRole,
+    line.reason
+  ])
+  if (body.length < 1) return
+  downloadXlsxSheets([{ name: '仲裁结果', rows: [header, ...body] }], `仲裁结果-${body.length}行.xlsx`)
+}
+
 function exportChecked(): void {
   const sheets = checkedSourceSheets(rows.value, row => {
     const status = sheetStatus(row)
@@ -1226,7 +1352,10 @@ function onArbitrationResult(event: Event): void {
       ? detail.text
       : ''
   const open = typeof detail === 'string' || Boolean(detail && typeof detail === 'object' && 'open' in detail && detail.open)
-  if (!text.trim()) return
+  if (!text.trim()) {
+    if (open && arbitrationBoard.value.length) arbitrationOpen.value = true
+    return
+  }
   const applied = applyArbitrationReply(rows.value, text)
   rows.value = applied.rows
   gapWaves.value = iprArbitrationWaves(rowsForArbitration(), {}, {}, { iprOnly: arbitrateIprOnly.value })
@@ -1277,8 +1406,16 @@ function setCarryAcrossBreaks(event: Event): void {
   void chrome.storage.local.set({ [CARRY_ACROSS_BREAKS_KEY]: carryAcrossBreaks.value })
 }
 
+function hideDesk(): void {
+  void flushRecovery('workflow-desk', deskScope(), readDesk)
+}
+
 onMounted(() => {
   window.addEventListener('patmail-arbitration-result', onArbitrationResult)
+  window.addEventListener('pagehide', hideDesk)
+  const scope = deskScope()
+  const saved = scope === 'local' ? recallLatest('workflow-desk').then(head => head?.payload ?? null) : recallRecovery('workflow-desk', scope)
+  void saved.then(payload => { if (!rows.value.length) applyDesk(payload) }).catch(() => { /* 没有账本就从空表开始 */ })
   if (typeof chrome === 'undefined' || !chrome.storage?.local) return
   void chrome.storage.local.get([AUTO_ARBITRATE_KEY, ALLOW_MAILED_UNFINISHED_KEY, ARBITRATE_IPR_ONLY_KEY, CARRY_ACROSS_BREAKS_KEY]).then(stored => {
     if (stored[AUTO_ARBITRATE_KEY] === false) autoArbitrate.value = false
@@ -1293,7 +1430,11 @@ onMounted(() => {
     }
   }).catch(() => { /* 读不到就保持默认 */ })
 })
-onUnmounted(() => window.removeEventListener('patmail-arbitration-result', onArbitrationResult))
+onUnmounted(() => {
+  window.removeEventListener('patmail-arbitration-result', onArbitrationResult)
+  window.removeEventListener('pagehide', hideDesk)
+  void flushRecovery('workflow-desk', deskScope(), readDesk)
+})
 
 async function askGaps(): Promise<void> {
   const gaps = rows.value.filter(row => !row.iprName.trim() && reviewNeedsArbitration(sheetStatus(row).review, allowMailedUnfinished.value))
@@ -1492,6 +1633,7 @@ function definitionHint(item: WorkflowDefinition | null): string {
       <div class="dialog arbitration-board" role="dialog" aria-labelledby="arbitration-title">
         <header>
           <h3 id="arbitration-title">仲裁结果 {{ arbitrationBoard.length }} 行</h3>
+          <button type="button" class="ghost tiny" @click="exportArbitration">导出仲裁结果</button>
           <button type="button" aria-label="关闭" @click="arbitrationOpen = false">×</button>
         </header>
         <p>收件人只在 IPR（技术联系人）、发明人和客户联系人里选。商务、登录人、密送登录人仍按默认追加，不在这张表里改。没有要求也没有技术联系人的行留空，提交时用「全选联系人」兜底。拿不准的行没有填进表格。</p>

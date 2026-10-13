@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, provide, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue'
+import { mirrorLocalExecutions, restoreLocalExecutions } from '../recovery/executions'
 import { customerMode, hydrateCustomerMode, setCustomerMode, watchCustomerMode, type CustomerMode } from '../settings/customer-mode'
 import { resetTaskCheckProgress } from './check-progress'
 import { progressDialog } from './dialog'
@@ -22,6 +23,7 @@ import AcceptancePage from './pages/AcceptancePage.vue'
 import SettingsPage from './pages/SettingsPage.vue'
 import LimitsPage from './pages/LimitsPage.vue'
 import CaseContactsPage from './pages/CaseContactsPage.vue'
+import SnapshotProbe from './pages/SnapshotProbe.vue'
 import { CASE_CONTACT_CUSTOMER_NAME } from '../customer/skills'
 import Shell from '../shell/components/Shell.vue'
 import AppDialog from './components/AppDialog.vue'
@@ -38,11 +40,12 @@ const nav = [
   { name: '邮件草稿', path: 'task', hash: '/drafts' },
   { name: '工作流', path: 'rule', hash: '/workflow' }
 ]
-const hiddenRoutes = new Set(['/acceptance', '/settings', '/contacts'])
-const pages = { '/': HomePage, '/files': FilesPage, '/limits': LimitsPage, '/customers': CustomersPage, '/contacts': CaseContactsPage, '/templates': TemplatesPage, '/rules': RulesPage, '/tasks': TasksPage, '/drafts': DraftsPage, '/workflow': WorkflowPage, '/records': RecordsPage, '/acceptance': AcceptancePage, '/settings': SettingsPage }
+const hiddenRoutes = new Set(['/acceptance', '/settings', '/contacts', '/probe'])
+const pages = { '/': HomePage, '/files': FilesPage, '/limits': LimitsPage, '/customers': CustomersPage, '/contacts': CaseContactsPage, '/templates': TemplatesPage, '/rules': RulesPage, '/tasks': TasksPage, '/drafts': DraftsPage, '/workflow': WorkflowPage, '/records': RecordsPage, '/acceptance': AcceptancePage, '/settings': SettingsPage, '/probe': SnapshotProbe }
 
 function readRoute(): string {
   const path = location.hash.replace(/^#/, '') || '/'
+  if (path === '/probe') return path
   return nav.some(item => item.hash === path) || hiddenRoutes.has(path) ? path : '/'
 }
 
@@ -98,8 +101,13 @@ function onHash(): void {
     if (node) node.scrollTop = scrollTops.get(next) ?? 0
   })
 }
+watch(() => workspace.connection.value.sessionStatus, (status, previous) => {
+  if (previous === 'authenticated' && status !== 'authenticated') void mirrorLocalExecutions()
+})
+
 onMounted(() => {
   window.addEventListener('hashchange', onHash)
+  void restoreLocalExecutions().finally(() => { void mirrorLocalExecutions() })
   void hydrateCustomerMode().then(() => {
     mode.value = customerMode()
     void workspace.call({ action: 'load' })
