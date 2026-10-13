@@ -46,7 +46,7 @@ async function openDraft(taskId: string): Promise<void> {
 </script>
 
 <template>
-  <PageHead title="邮件草稿" desc="本地草稿来自发文计划，这里不会把任务完成当成已经发出。" :art="bg('规则配置好，发文更轻松.png')" />
+  <PageHead title="邮件草稿" desc="本地草稿来自发文计划，这里不会把任务完成当成已经发出。" :art="bg('邮件草稿.png')" />
   <section class="card">
     <h2>邮件草稿</h2>
     <p class="hint">本地草稿来自已保存的发文计划。这里不会把任务完成当成邮件已经发出。</p>
