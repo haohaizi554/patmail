@@ -521,7 +521,7 @@ watch(() => `${connection.value.easyOrigin}\n${connection.value.operatorId}`, (n
             <td>{{ item.workflowId === 'pct-reminder' ? pctName : (WORKFLOWS.find(flow => flow.id === item.workflowId)?.label ?? '—') }}</td>
             <td>{{ item.workflowRemark || '—' }}</td>
             <td>{{ customerMailStyleLabel(item) }}</td>
-            <td class="query-memory" v-hint="describe(item)">{{ describe(item) }}</td>
+            <td class="query-memory" v-hint.clip="describe(item)">{{ describe(item) }}</td>
             <td>{{ item.enabled ? '启用中' : '已停用' }}</td>
             <td>
               <button type="button" class="ghost" @click="openQuery(item.id, item.querySurface)">绑定查询</button>

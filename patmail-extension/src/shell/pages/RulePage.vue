@@ -42,7 +42,7 @@ const titleRules = reactive([
         <thead><tr><th>客户名称</th><th>公司简称</th><th>默认发文方式</th><th>需要审批</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="c in rows" :key="c.name">
-            <td class="who"><BrandLogo :brand="c.brand" /><span>{{ c.name }}</span></td>
+            <td class="who"><BrandLogo :brand="c.brand" /><span v-hint.clip="c.name">{{ c.name }}</span></td>
             <td>{{ c.short }}</td>
             <td>{{ c.rule }}</td>
             <td><button class="switch" :class="{ on: c.approve }" @click="c.approve = !c.approve" /></td>

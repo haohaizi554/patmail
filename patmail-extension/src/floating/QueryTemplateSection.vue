@@ -1116,7 +1116,7 @@ watch(selectedCustomerId, () => {
     <ul v-if="mode === 'history' && accountTemplates.length" class="template-picks">
       <li v-for="item in accountTemplates" :key="item.source + item.id">
         <button type="button" :class="{ on: selectedBaseId === item.id }" @click="pickTemplate(item.id)">
-          <b>{{ item.name }}</b>
+          <b v-hint.clip="item.name">{{ item.name }}</b>
           <small>{{ item.source === 'easy' ? 'EASY' : '本地' }}</small>
         </button>
       </li>
@@ -1124,7 +1124,7 @@ watch(selectedCustomerId, () => {
     <ul v-else-if="mode === 'customer' && customers.length" class="template-picks">
       <li v-for="item in customers" :key="item.id">
         <button type="button" :class="{ on: selectedCustomerId === item.id }" @click="selectedCustomerId = item.id">
-          <b>{{ item.name }}</b>
+          <b v-hint.clip="item.name">{{ item.name }}</b>
           <small>{{ item.enabled ? '启用' : '停用' }}</small>
         </button>
       </li>
@@ -1254,7 +1254,7 @@ watch(selectedCustomerId, () => {
             <div v-else :class="cellClass(cell)">
               <span>{{ cell.label }}</span>
               <span class="file-summary">
-                <em>{{ formValue(cell.key) ? namedShown(cell.key) : '未选择' }}</em>
+                <em v-hint.clip="formValue(cell.key) ? namedShown(cell.key) : '未选择'">{{ formValue(cell.key) ? namedShown(cell.key) : '未选择' }}</em>
                 <button type="button" class="text-button" @click="showFileTree = !showFileTree">{{ showFileTree ? '收起' : '修改' }}</button>
                 <button v-if="formValue(cell.key)" type="button" class="text-button" @click="setOverride(cell.key, '')">清除</button>
               </span>

@@ -190,7 +190,7 @@ async function run(action: () => Promise<void>): Promise<void> {
         </label>
         <button type="button" class="probe" :disabled="agentBusy" @click="onAgentTest">{{ agentBusy ? '正在检测…' : '检测连通' }}</button>
         <span class="agent-lamp" :class="lampKind" aria-hidden="true"></span>
-        <p class="agent-probe-meta" v-hint="probeText">{{ probeText }}</p>
+        <p class="agent-probe-meta" v-hint.clip="probeText">{{ probeText }}</p>
       </div>
       <p v-if="agentNote" class="hint">{{ agentNote }}</p>
     </form>

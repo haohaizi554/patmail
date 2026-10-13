@@ -62,7 +62,7 @@ const rules = [
             <tr v-for="r in rows" :key="r.id">
               <td><input type="checkbox" /></td>
               <td>{{ r.id }}</td>
-              <td class="who"><BrandLogo :brand="r.brand" /><span>{{ r.name }}</span></td>
+              <td class="who"><BrandLogo :brand="r.brand" /><span v-hint.clip="r.name">{{ r.name }}</span></td>
               <td>✉ {{ r.method }}</td>
               <td>{{ r.subject }}</td>
               <td>{{ r.count }}</td>

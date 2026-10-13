@@ -210,7 +210,7 @@ onBeforeUnmount(() => {
     >
       <span class="theme-select-value" :class="{ 'is-placeholder': placeholderShown }">
         <span v-if="selected?.badge && !placeholderShown" class="theme-select-badge" :class="toneClass(selected.tone)">{{ selected.badge }}</span>
-        <span class="theme-select-label">{{ shown }}</span>
+        <span class="theme-select-label" v-hint.clip="shown">{{ shown }}</span>
       </span>
       <svg class="theme-select-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4.2 6 8l4-3.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>

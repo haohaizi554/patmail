@@ -50,7 +50,7 @@ const rows = computed(() => tasks.filter((t) => {
           <tbody>
             <tr v-for="row in rows" :key="row.name + row.time">
               <td><input type="checkbox" /></td>
-              <td class="who"><BrandLogo :brand="row.brand" /><span>{{ row.name }}</span></td>
+              <td class="who"><BrandLogo :brand="row.brand" /><span v-hint.clip="row.name">{{ row.name }}</span></td>
               <td>{{ row.mode }}</td>
               <td>{{ row.count }}</td>
               <td><em class="pri" :class="row.priority">{{ row.priority }}</em></td>

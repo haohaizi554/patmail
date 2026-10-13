@@ -29,6 +29,17 @@ const STYLE = `
 type HintHost = Document | ShadowRoot
 type HintEl = HTMLElement & { __hintCleanup?: () => void; __hintText?: string }
 
+/** 有写明的句子就用它；截断模式没写时用元素自己的文字。没被截断就不弹。 */
+export function visibleHint(explicit: string, content: string, clipOnly: boolean, clipped: boolean): string {
+  const tip = (explicit || (clipOnly ? content : '')).trim()
+  if (!tip || (clipOnly && !clipped)) return ''
+  return tip
+}
+
+export function isTextClipped(el: HTMLElement): boolean {
+  return el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1
+}
+
 function remember(el: HintEl, value: unknown): void {
   el.__hintText = typeof value === 'string' ? value.trim() : ''
 }
@@ -89,10 +100,11 @@ function showBubble(el: HTMLElement, text: string): void {
 }
 
 export const hintDirective = {
-  mounted(el: HintEl, binding: { value: unknown }) {
+  mounted(el: HintEl, binding: { value: unknown; modifiers: { clip?: boolean } }) {
     remember(el, binding.value)
     const show = (): void => {
-      const tip = el.__hintText ?? ''
+      const content = (el.textContent ?? '').replace(/\s+/g, ' ')
+      const tip = visibleHint(el.__hintText ?? '', content, Boolean(binding.modifiers.clip), isTextClipped(el))
       if (tip) showBubble(el, tip)
     }
     const hide = (): void => hideBubble(hostOf(el))

@@ -82,7 +82,7 @@ const alerts = [
       <table class="grid rank">
         <thead><tr><th>#</th><th>客户名称</th><th>发文数量</th><th>成功率</th></tr></thead>
         <tbody>
-          <tr v-for="(r, i) in ranks" :key="r.name"><td>{{ i + 1 }}</td><td class="who"><BrandLogo :brand="r.brand" /><span>{{ r.name }}</span></td><td>{{ r.count }}</td><td class="good">{{ r.rate }}%</td></tr>
+          <tr v-for="(r, i) in ranks" :key="r.name"><td>{{ i + 1 }}</td><td class="who"><BrandLogo :brand="r.brand" /><span v-hint.clip="r.name">{{ r.name }}</span></td><td>{{ r.count }}</td><td class="good">{{ r.rate }}%</td></tr>
         </tbody>
       </table>
     </section>

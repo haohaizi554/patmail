@@ -26,7 +26,7 @@ function thoughtHtml(text: string): string {
       <button type="button" class="think-bar" :aria-expanded="view.open" @click="toggleThought">
         <span class="think-chevron" :class="{ open: view.open }" aria-hidden="true"></span>
         <span class="think-label">{{ thoughtTitle }}</span>
-        <span v-if="!view.open && lead" class="think-lead">{{ lead }}</span>
+        <span v-if="!view.open && lead" class="think-lead" v-hint.clip="lead">{{ lead }}</span>
       </button>
       <div v-if="view.open">
         <template v-for="(item, index) in entries" :key="index">
@@ -34,7 +34,7 @@ function thoughtHtml(text: string): string {
           <p v-else class="think-step done">
             <span class="agent-step-mark" aria-hidden="true"></span>
             <span class="agent-step-label">{{ item.text }}</span>
-            <span v-if="item.detail" class="agent-step-detail">{{ item.detail }}</span>
+            <span v-if="item.detail" class="agent-step-detail" v-hint.clip="item.detail">{{ item.detail }}</span>
           </p>
         </template>
       </div>
