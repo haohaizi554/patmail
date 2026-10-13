@@ -125,6 +125,28 @@ describe('PCT 表格', () => {
     expect(crossed.notice).toContain('中间隔了别的客户也沿用')
   })
 
+  it('被跳过的别家行也算隔断：没文号的行夹在中间不沿用', () => {
+    const parsed = pctRowsFromTable([
+      ['我方文号', '客户文号', '客户名称', '客户联系人(IPR)', '处理事项'],
+      ['PA1', 'WT-1', '鹏城国家实验室', '牛乐宏', '提醒申请PCT'],
+      ['', '', '另一客户', '李二', '提醒申请PCT'],
+      ['PA2', 'WT-2', '鹏城国家实验室', '', '提醒申请PCT']
+    ])
+    expect(parsed.rows[1]?.iprName).toBe('')
+    expect(parsed.rows[1]?.iprCarried).toBeUndefined()
+  })
+
+  it('被跳过的同客户行不打断整块', () => {
+    const parsed = pctRowsFromTable([
+      ['我方文号', '客户文号', '客户名称', '客户联系人(IPR)', '处理事项'],
+      ['PA1', 'WT-1', '鹏城国家实验室', '牛乐宏', '提醒申请PCT'],
+      ['', '', '鹏城国家实验室', '', '提醒申请PCT'],
+      ['PA2', 'WT-2', '鹏城国家实验室', '', '提醒申请PCT']
+    ])
+    expect(parsed.rows[1]?.iprName).toBe('牛乐宏')
+    expect(parsed.rows[1]?.iprCarried).toBe(true)
+  })
+
   it('切换口径时只重算（补），仲裁写回的（仲）不动', () => {
     const base = pctRowsFromTable([
       ['我方文号', '客户文号', '客户名称', '第一客户联系人', '客户联系人(IPR)', '处理事项'],

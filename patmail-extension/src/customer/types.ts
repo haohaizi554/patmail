@@ -23,6 +23,8 @@ export interface PctTaskRow {
   contactCarried?: true
   /** IPR 是从紧挨着的上一行同客户补上的。页面标（补），对联系人仍用原名。 */
   iprCarried?: true
+  /** 上一条物理行（含被跳过的行）的客户。整块顺延按它判断，不是按读进来的行的顺序。 */
+  sheetPrevCustomer?: string
   /** 处理细节里裁出来的收件人。页面标（仲），发给原站时仍用原名。不用发和发明人只显示，不写入收件人。 */
   iprArbitrated?: true
   /** 提醒申请 PCT、进国家，或涉外外观。没写时按提醒申请 PCT。 */

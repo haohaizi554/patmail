@@ -40,14 +40,18 @@ export function pctRowsFromTable(table: string[][], mailTypes: Array<{ id: strin
   const lead = runtime.columns.leadName ? column(runtime.columns.leadName) : -1
   const rows: PctTaskRow[] = []
   let skipped = 0
+  /** 上一条物理行（含被跳过的行）的客户。被跳过的行也要打断「紧挨着」，否则隔行会误判成整块。 */
+  let prevPhysicalKey = ''
   for (const source of table.slice(1)) {
     const ourVolume = cell(source, our)
     const customerVolume = cell(source, customer)
     const procLabel = cell(source, proc)
+    const physicalKey = normalizeCustomerName(cell(source, name)) || ''
     const letterKind: PctTaskRow['letterKind'] = /外观/.test(procLabel) ? 'design' : sheetKind
     const slot = letterKind === 'remind' ? pctVolumeSlot({ customerVolume, ourVolume }, runtime) : null
     if (letterKind === 'remind' ? !slot || !ourVolume : !ourVolume && !customerVolume) {
       skipped += 1
+      prevPhysicalKey = physicalKey
       continue
     }
     const picked = letterKind === 'remind'
@@ -61,11 +65,13 @@ export function pctRowsFromTable(table: string[][], mailTypes: Array<{ id: strin
       contactName: cell(source, contact),
       iprName: cell(source, ipr),
       ...(lead >= 0 ? { leadName: sheetDisplayName(cell(source, lead)) } : {}),
+      sheetPrevCustomer: prevPhysicalKey,
       procLabel,
       letterKind,
       mailTypeLabel: picked?.name ?? nationalName,
       ...(picked ? { mailTypeId: picked.id, ...(letterKind === 'remind' && slot ? { mailTypeRadioIndex: slot.radioIndex } : {}) } : letterKind === 'remind' && slot ? { mailTypeRadioIndex: slot.radioIndex } : {})
     })
+    prevPhysicalKey = physicalKey
     if (rows.length >= 5000) break
   }
   const carried = carryCustomerContacts(rows, carry)
@@ -88,26 +94,28 @@ export function pctRowsFromTable(table: string[][], mailTypes: Array<{ id: strin
 /** 顺延补上的两种口径。block：同一客户连成整块时才往下补，中间隔了别的客户就断开。cross：同一客户不管中间隔了什么都沿用最近一行。 */
 export type CarryMode = 'block' | 'cross'
 
-/** 联系人往下顺延。block 只补同一客户整块里第一行之后的空行；cross 按客户沿用最近一行，中间隔了别的客户也不断。 */
+/** 联系人往下顺延。block 只补同客户整块里紧挨着的空行；cross 按客户沿用最近一行，中间隔了别的客户也不断。
+ * 整块按表格的物理行判断：每一行记着上一条物理行的客户，被跳过的行（没文号读不进来的）也算隔断。 */
 function carryCustomerContacts(rows: PctTaskRow[], mode: CarryMode = 'block'): { rows: PctTaskRow[]; filled: number } {
   const remembered = new Map<string, { contactName: string; leadName: string; iprName: string }>()
   let filled = 0
-  let previousKey = ''
+  let previousEmittedKey = ''
   const next = rows.map(row => {
-    const key = normalizeCustomerName(row.customerName)
+    const key = normalizeCustomerName(row.customerName) || ''
     if (!key) {
-      previousKey = ''
+      previousEmittedKey = ''
       return row
     }
     const previous = remembered.get(key)
-    const near = mode === 'cross' || key === previousKey
+    const prevKey = row.sheetPrevCustomer !== undefined ? row.sheetPrevCustomer : previousEmittedKey
+    const near = mode === 'cross' || (prevKey !== '' && prevKey === key)
     const contactName = row.contactName.trim() || (near ? previous?.contactName ?? '' : '')
     const leadName = row.leadName === undefined
       ? undefined
       : ((row.leadName ?? '').trim() || (near ? previous?.leadName ?? '' : ''))
     const ownIpr = row.iprName.trim()
     const iprName = ownIpr || (near ? previous?.iprName ?? '' : '')
-    previousKey = key
+    previousEmittedKey = key
     remembered.set(key, { contactName, leadName: leadName ?? '', iprName })
     const contactCarried = !row.contactName.trim() && Boolean(contactName)
     const iprCarried = !ownIpr && Boolean(iprName)
