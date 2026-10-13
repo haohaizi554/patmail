@@ -952,8 +952,9 @@ async function saveBoth(): Promise<void> {
       return
     }
     try { await loadHistory(true) } catch { /* 网站已写入，列表刷新失败时仍保留本地模板。 */ }
+    // 原站带 query_id 保存也是另存一份新的，不是覆盖。本地模板改挂到新存出来的那份上。
     const created = historyOptions.value.find(item => !before.has(item.id) && item.name === name)
-    const linkedId = queryId || created?.id || ''
+    const linkedId = created?.id || queryId || ''
     if (stored && linkedId && isQueryGuid(linkedId) && stored.sourceQueryId !== linkedId) {
       const again = liveScope()
       if (again) {
@@ -965,7 +966,9 @@ async function saveBoth(): Promise<void> {
         })
       }
     }
-    storageMessage.value = queryId ? '已更新本地模板，并写回原网站上的同名模板。' : '已保存在本地，并在原网站新建了这份查询模板。'
+    storageMessage.value = created
+      ? '已保存在本地，并在原网站另存了一份新的查询模板。'
+      : queryId ? '已更新本地模板，并写回原网站上的同名模板。' : '已保存在本地，并在原网站新建了这份查询模板。'
     await reloadLocal()
     const picked = localTemplates.value.find(item => item.id === template.id)
     if (picked) await applyBase(picked.id)

@@ -42,8 +42,9 @@ describe('历史模板响应', () => {
       ]
     }))
     expect(repeated.map(item => item.id)).toEqual(['3E8B3288-4A3B-4685-B540-2EC98166B5B2', guid, other])
-    expect(historyLabels(repeated).get('3E8B3288-4A3B-4685-B540-2EC98166B5B2')).toBe('微众OA反馈')
-    expect(historyLabels(repeated).get(guid)).toBe('微众OA反馈 · 227BFA59')
+    // 列表新保存在前：靠后的才是原来那份，保留原名；先出现的新建副本带编号。
+    expect(historyLabels(repeated).get('3E8B3288-4A3B-4685-B540-2EC98166B5B2')).toBe('微众OA反馈 · 3E8B3288')
+    expect(historyLabels(repeated).get(guid)).toBe('微众OA反馈')
     expect(historyLabels(repeated).get(other)).toBe('宁德授权请款')
     expect(dataOf(normalizeHistoryOptions({ ...client, Options: null }))).toEqual([])
     expect(dataOf(normalizeHistoryOptions({ ...client, Options: [] }))).toEqual([])
@@ -87,6 +88,15 @@ describe('QueryXml', () => {
     expect(parsed.data.unknownFields.TreefiletypetxtSearch).toBe('意见陈述')
     expect(parsed.data.fields.filetype_text).toBeUndefined()
     expect(parsed.data.warnings.some(item => item.includes('case_volume'))).toBe(true)
+  })
+
+  it('原站存回的双层 xmlRoot 也能读出全部字段', () => {
+    const parsed = parseQueryXml('<xmlRoot><xmlRoot><case_volume>PA-1</case_volume><filetype_text>专利证书</filetype_text></xmlRoot></xmlRoot>', '双层样本')
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.data.fields.case_volume).toBe('PA-1')
+    expect(parsed.data.displayValues.filetype).toBe('专利证书')
+    expect(parsed.data.unknownFields.xmlRoot).toBeUndefined()
   })
 
   it('rejects empty, illegal, doctype and oversized xml', () => {

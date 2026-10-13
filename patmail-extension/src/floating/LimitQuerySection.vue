@@ -257,8 +257,9 @@ async function saveTemplate(): Promise<void> {
       return
     }
     await loadTemplates(true)
+    // 原站带 query_id 保存也是另存一份新的，不是覆盖。优先选中新存出来的那份。
     const created = templates.value.find(item => !before.has(item.id) && item.name === title)
-    const saved = queryId ? templates.value.find(item => item.id === queryId) : created
+    const saved = created ?? (queryId ? templates.value.find(item => item.id === queryId) : undefined)
     if (saved) {
       selectedId.value = saved.id
       saveName.value = saved.name
@@ -266,7 +267,9 @@ async function saveTemplate(): Promise<void> {
       displayValues.value = labels
       loadedValues.value = { ...fields }
     }
-    message.value = queryId ? '已更新原网站上的这份期限模板。' : '已在原网站新建这份期限模板。'
+    message.value = created
+      ? '已在原网站另存了这份新的期限模板。'
+      : queryId ? '已更新原网站上的这份期限模板。' : '已在原网站新建这份期限模板。'
   } catch {
     message.value = '保存期限模板失败。'
   } finally {

@@ -233,7 +233,9 @@ export function readLimitQueryXml(xml: string): ApiResult<LimitParsedQuery> {
   if (document.getElementsByTagName('parsererror').length > 0) return apiError('INVALID_RESPONSE', '期限模板无法解析。')
   const root = document.documentElement
   if (!root || root.nodeName !== 'xmlRoot') return apiError('INVALID_RESPONSE', '期限模板缺少 xmlRoot。')
-  const nodes = Array.from(root.children)
+  // 原站保存时会把整段再包一层 xmlRoot 存。双层时穿透到内层，否则所有字段都被当成未知节点，表单显示全空。
+  let nodes = Array.from(root.children)
+  while (nodes.length === 1 && nodes[0].nodeName === 'xmlRoot') nodes = Array.from(nodes[0].children)
   if (nodes.length > MAX_QUERY_XML_NODES) return apiError('INVALID_RESPONSE', '期限模板节点过多。')
   const fields: Record<string, string> = {}
   const displayValues: Record<string, string> = {}

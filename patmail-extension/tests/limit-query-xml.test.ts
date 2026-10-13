@@ -84,4 +84,13 @@ describe('期限查询模板', () => {
     expect(read.data.fields.custom_flag).toBeUndefined()
     expect(read.data.unknownFields.custom_flag_text).toBe('不应进查询')
   })
+
+  it('原站存回的双层 xmlRoot 也能读出全部字段', () => {
+    const wrapped = '<xmlRoot><xmlRoot><case_volume_other>PA25213828CN</case_volume_other><ctrl_proc_text>提醒申请PCT</ctrl_proc_text></xmlRoot></xmlRoot>'
+    const read = readLimitQueryXml(wrapped)
+    expect(read.ok).toBe(true)
+    if (!read.ok) return
+    expect(read.data.fields.case_volume).toBe('PA25213828CN')
+    expect(read.data.unknownFields.xmlRoot).toBeUndefined()
+  })
 })

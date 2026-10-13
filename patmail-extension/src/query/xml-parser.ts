@@ -36,7 +36,9 @@ export function parseQueryXml(xml: string, sourceName = '历史模板'): ApiResu
   if (!root || root.nodeName !== 'xmlRoot') {
     return apiError('INVALID_RESPONSE', '历史模板 XML 缺少 xmlRoot。')
   }
-  const nodes = Array.from(root.children)
+  // 原站保存时会把整段再包一层 xmlRoot 存。双层时穿透到内层，否则所有字段都被当成未知节点，表单显示全空。
+  let nodes = Array.from(root.children)
+  while (nodes.length === 1 && nodes[0].nodeName === 'xmlRoot') nodes = Array.from(nodes[0].children)
   if (nodes.length > MAX_QUERY_XML_NODES) {
     return apiError('INVALID_RESPONSE', '历史模板 XML 节点过多。')
   }
