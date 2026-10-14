@@ -129,6 +129,8 @@ describe('文件管理工作流规划', () => {
     expect(fileManageSubmitShouldHalt('没有提交到审核人。客户联系人「魏丽琼(IPR)」的姓名或邮箱不能写成「名称(邮箱);」，没有提交。')).toBe(false)
     expect(fileManageSubmitShouldHalt('没有提交到审核人。这封还在审核里，没有再创建。')).toBe(false)
     expect(fileManageSubmitShouldHalt('没有提交到审核人。提交响应无法确认，没有再次提交。')).toBe(true)
+    expect(fileManageSubmitShouldHalt('没有提交到审核人。EASY 网关异常。 EASY 网关异常。')).toBe(false)
+    expect(fileManageSubmitShouldHalt('没有提交到审核人。请求超时，请重试。')).toBe(false)
   })
 
   it('审核人必须是下一节点里的默认审核人', () => {

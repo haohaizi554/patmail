@@ -133,6 +133,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         <span class="is-abnormal">异常 {{ progress.counts.abnormal }} 件</span>
         <span v-if="progress.counts.skipped" class="is-skipped">跳过 {{ progress.counts.skipped }} 件</span>
       </p>
+      <ul v-if="progress.notes.length" class="progress-notes">
+        <li v-for="(note, index) in progress.notes" :key="index" :class="'is-' + note.kind">{{ note.kind === 'failed' ? '失败' : note.kind === 'abnormal' ? '异常' : '跳过' }} {{ note.label }}：{{ note.reason }}</li>
+      </ul>
       <footer v-if="progress.finished">
         <button ref="progressDone" type="button" class="solid" @click="closeProgress">知道了</button>
       </footer>

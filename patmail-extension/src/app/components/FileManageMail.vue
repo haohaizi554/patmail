@@ -24,7 +24,7 @@ import { scopeFromConnection } from '../../shared/connection'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useMailConcurrency } from '../../settings/use-mail-concurrency'
 import { useWorkspace } from '../composables/useWorkspace'
-import { beginProgress, classifySubmitText, endProgress, logProgress, progressSummaryLine, tallyProgress } from '../dialog'
+import { beginProgress, classifySubmitText, endProgress, logProgress, noteProgress, progressSummaryLine, tallyProgress } from '../dialog'
 
 const props = defineProps<{
   customers: CustomerQueryProfile[]
@@ -123,7 +123,19 @@ function pokeFile(): void {
 }
 
 watch(() => connection.value.easyOrigin, (next, previous) => {
-  if (!previous || next === previous) return
+  if (next === previous) return
+  if (!previous) {
+    fileScope = systemScope(next, 'file')
+    if (letters.value.length || foundFiles.value.length) return
+    const arriving = fileScope
+    void recallRecovery('file-desk', arriving).then(async saved => {
+      if (!saved) saved = await recallRecovery('file-desk', 'file')
+      if (fileScope !== arriving || letters.value.length || foundFiles.value.length) return
+      applyFileDesk(saved)
+      pokeFile()
+    }).catch(() => { /* 这个系统还没有账本 */ })
+    return
+  }
   parkingFile = true
   const payload = readFileDesk()
   holdRecovery('file-desk', systemScope(previous, 'file'), payload)
@@ -155,6 +167,7 @@ watch([letters, foundFiles, picked, outcomes, notice, customerId], () => {
 
 onMounted(() => {
   fileScope = systemScope(connection.value.easyOrigin, 'file')
+  if (fileScope.endsWith('|local')) return
   void recallRecovery('file-desk', fileScope).then(async payload => {
     if (!payload) payload = await recallRecovery('file-desk', 'file')
     applyFileDesk(payload)
@@ -368,6 +381,7 @@ async function submit(): Promise<void> {
       const text = await runFileManageSubmit(bridge, connection.value.operatorId, [item])
       const kind = classifySubmitText(text)
       tallyProgress(kind, fileIdsOf(item).length)
+      if (kind !== 'success') noteProgress(kind, label, text)
       finished += 1
       text.split('\n').forEach((line, lineIndex) => logProgress(lineIndex === 0 ? `${label}：${line}` : line, finished))
       const next = { ...outcomes.value }
@@ -376,8 +390,24 @@ async function submit(): Promise<void> {
       await rememberRun(item, letter, text)
       return fileManageSubmitShouldHalt(text)
     })
-    if (halted) tallyProgress('skipped', unstarted.reduce((sum, item) => sum + fileIdsOf(item).length, 0))
-    if (left) logProgress(`还有 ${left} 封超过一次 20 封的上限，这次没有开始。`)
+    if (halted) {
+      for (const item of unstarted) {
+        const letter = letters.value.find(entry => entry.files.some(file => file.fileId.toLowerCase() === item.fileId.toLowerCase()))
+        const skipLabel = letter ? letterLabel(letter) : '这一封'
+        const reason = '上一封结果无法确认，这一件没有开始。'
+        tallyProgress('skipped', fileIdsOf(item).length)
+        noteProgress('skipped', skipLabel, reason)
+        logProgress(`${skipLabel}：跳过。${reason}`)
+      }
+    }
+    for (const item of queued.slice(FILE_MANAGE_BATCH)) {
+      const letter = letters.value.find(entry => entry.files.some(file => file.fileId.toLowerCase() === item.fileId.toLowerCase()))
+      const skipLabel = letter ? letterLabel(letter) : '这一封'
+      const reason = '超过一次 20 封的上限，这次没有开始。'
+      tallyProgress('skipped', fileIdsOf(item).length)
+      noteProgress('skipped', skipLabel, reason)
+      logProgress(`${skipLabel}：跳过。${reason}`)
+    }
     logProgress(progressSummaryLine())
   } catch (error) {
     logProgress(error instanceof Error ? error.message : '提交中断了。')

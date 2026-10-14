@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { contactSpec, formatMailContactText, loadMailContactText, mailContactParams, readMailContactGroup } from '../src/mail/easy/mail-contacts'
-import type { ApiResult } from '../src/api/types'
+import { apiError, type ApiResult } from '../src/api/types'
 import type { MailContactOperation } from '../src/mail/easy/mail-contacts'
 
 const mailId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
@@ -64,5 +64,13 @@ describe('发文页联系人', () => {
     expect(partial.data.complete).toBe(false)
     expect(partial.data.text).toContain('张三 <a@example.com>（IP联系人）')
     expect(partial.data.message).toContain('IP联系人')
+  })
+
+  it('几组联系人同时网关异常时，原因只写一次', async () => {
+    const loaded = await loadMailContactText({ mailId, customerId }, async () => apiError('HTTP_ERROR', 'EASY 网关异常。', 502))
+    expect(loaded.ok).toBe(true)
+    if (!loaded.ok) return
+    expect(loaded.data.complete).toBe(false)
+    expect(loaded.data.message).toBe('EASY 网关异常。')
   })
 })

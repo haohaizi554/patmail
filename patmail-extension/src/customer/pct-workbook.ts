@@ -234,7 +234,7 @@ function sheetFieldLine(row: PctTaskRow): string {
 function clipDemand(text: string | undefined): string {
   const clean = text?.trim() ?? ''
   if (!clean) return '插件没有读到这位客户的客户信息。'
-  return clean.length > 2000 ? `${clean.slice(0, 2000)}…` : clean
+  return clean.length > 4000 ? `${clean.slice(0, 3999)}…` : clean
 }
 
 function clipCase(text: string | undefined): string {
@@ -296,11 +296,15 @@ export interface ArbitrationOptions {
   iprOnly?: boolean
 }
 
+function mailKindLine(): string {
+  return '这批是提醒申请 PCT 或 PCT 进国家。先看有没有单独点名这封提醒的句子，没有再用「所有邮件」「官文转达」「流程事务」「提醒」。初稿、检索、看稿、年费、办登、撰稿时限、总委和地址都不是这封信的收件人。下面几条都只看客户要求原文，著录项目里列出的人名本身不是要求。要求写了不发 PCT 提醒、不用发这种提醒、不用发涉外提醒的，整行写成：客户文号 我方文号｜不用发｜依据 一句。这条优先于同客户的主送技术联系人和所有邮件。要求单独写了 PCT 提醒、提醒 PCT、进国家提醒或国家提醒发给谁，就用那一条的人，身份按这一行著录项目写，不要改成只发业务。要求原文写了所有邮件只发业务或商务、不要发给客户、无需再发送给客户，或者原文点名的人在这一行里只是业务人员，整行写成：客户文号 我方文号｜只发业务｜依据 一句。著录项目里只有业务人员、客户要求又没指定发给谁，不是只发业务。所有邮件只发某个技术联系人、IPR 或客户联系人时，写这个人，不要写成只发业务。不要把业务员姓名写成收件人或抄送。要求说按案件备注发文时，用这一行著录项目里的案件备注；备注没有人名、又写了改主送负责人的，用这一行的公司负责人，身份写客户联系人；都对不上就拿不准。要求说主送第一申请人的 IPR 时，用著录项目里对上该申请人的联系人，身份写 IPR，对不上就拿不准。只有客户要求原文写了主送技术联系人时，才用这一行著录项目里的技术联系人，同客户别的案子的人不能拿来用。著录项目里有技术联系人，不等于客户要求主送技术联系人。不用发和只发业务不要写成拿不准，也不要写身份。'
+}
+
 function priorityLine(iprOnly: boolean): string {
   if (iprOnly) {
-    return '优先级：1. 客户要求里明确写了发给谁、抄送谁，就按要求。收件人和抄送都可以是 IPR、发明人、客户联系人的任意组合。2. 客户要求没有指定收件人时，收件人只写著录项目或表格里的技术联系人，身份写 IPR。著录项目里仅仅列出来的发明人、客户联系人，不是发信要求。3. 没有明确要求，也没有技术联系人时，这一行写成拿不准，收件人留空。不要用客户联系人名单、技术负责人或商务去顶。'
+    return '优先级：1. 上面已经判成不用发或只发业务的，保持那种写法。其余客户要求里明确写了发给谁、抄送谁，就按要求。收件人和抄送都可以是 IPR、发明人、客户联系人的任意组合。2. 客户要求没有指定收件人时，收件人只写著录项目或表格里的技术联系人，身份写 IPR。著录项目里仅仅列出来的发明人、客户联系人，不是发信要求。3. 没有明确要求，也没有技术联系人时，这一行写成拿不准，收件人留空。不要用客户联系人名单、技术负责人或商务去顶。'
   }
-  return '优先级：1. 客户要求里明确写了发给谁、抄送谁，就按要求写全，不要因为本批的兜底规则而漏写。收件人和抄送都可以是 IPR、发明人、客户联系人的任意组合，客户要求点名了技术联系人也照样写。2. 只有客户要求没有指定收件人时，这一行直接写成拿不准，收件人留空，提交时用「全选联系人」兜底。依据只写「客户要求没有指定发给谁」一句，不要去著录项目或表格里对联系人，不要把著录项目里有没有联系人写进依据，也不要用发明人、客户联系人名单、技术负责人或商务来顶。'
+  return '优先级：1. 上面已经判成不用发或只发业务的，保持那种写法，不要改成拿不准。其余客户要求里明确写了发给谁、抄送谁，就按要求写全，不要因为本批的兜底规则而漏写。收件人和抄送都可以是 IPR、发明人、客户联系人的任意组合，客户要求点名了技术联系人也照样写。2. 只有客户要求没有指定收件人时，这一行直接写成拿不准，收件人留空，提交时用「全选联系人」兜底。依据只写「客户要求没有指定发给谁」一句。著录项目或表格里即使有技术联系人，也不要写成收件人，不要写「按著录项目主送技术联系人」，不要把著录项目里有没有联系人写进依据，也不要用发明人、客户联系人名单、技术负责人或商务来顶。'
 }
 
 function waveMessage(units: readonly ArbitrationUnit[], index: number, total: number, demands: Readonly<Record<string, string>>, cases: Readonly<Record<string, string>>, options: Readonly<ArbitrationOptions> = {}): string {
@@ -310,6 +314,7 @@ function waveMessage(units: readonly ArbitrationUnit[], index: number, total: nu
     '每一行单独裁。第一客户联系人不同的，不能收成同一个人，也不能用一条结论盖住同客户的全部文号。',
     'IPR 就是技术联系人。身份只能是：发明人、客户联系人、IPR。多人用顿号，身份与人名一一对应。',
     '不要写商务、登录人、登陆人、密送、技术负责人。抄送商务、抄送登录人、密送登录人由系统在提交时默认追加。仲裁写了也会被丢掉，写抄送无也不会取消这些默认项。',
+    mailKindLine(),
     priorityLine(options.iprOnly === true) + '抄送只写第 1 条里额外要点名的人，没有就写无。',
     '每一行只写一行，用竖线分开，文号原样照抄。没有客户文号就写空。不要加尖括号，不要解释，不要写英文：',
     '客户文号 我方文号｜收件人 人名｜身份 身份｜抄送 人名或无｜抄送身份 身份或无｜依据 一句简体中文',
@@ -343,7 +348,7 @@ export function arbitrationAllowed(phase: 'idle' | 'run' | 'done' | 'fail'): boo
   return phase === 'done'
 }
 
-/** 整表核对结束、开关开着、还有空着的收件人，并且当前没有在交仲裁。补查没查成的不在这里自动开。 */
+/** 整表核对结束、开关开着、还有空着的收件人，并且当前没有在交仲裁。没查成的补查在进入仲裁时先做一轮，补查结束不会从这里再开。 */
 export function shouldAutoArbitrate(input: { fullCheck: boolean; phase: 'idle' | 'run' | 'done' | 'fail'; enabled: boolean; gaps: number; asking: boolean }): boolean {
   return input.fullCheck && arbitrationAllowed(input.phase) && input.enabled && input.gaps > 0 && !input.asking
 }
@@ -375,7 +380,18 @@ export interface ArbitrationDecision {
 const ROLE_WORDS = ['发明人', '客户联系人', 'IPR', '技术联系人', '技术负责人', '商务', '登录人', '登陆人', '密送', '不用发']
 
 function blankParty(value: string): boolean {
-  return !value || /^(无|空|没有|不抄送|拿不准|不用发)/.test(value)
+  return !value || /^(无|空|没有|不抄送|拿不准|不用发|只发业务)/.test(value)
+}
+
+/** 不发这封提醒，或只发给业务、不发给客户。这两种是明确结论，不能当成拿不准。 */
+function closedVerdict(parts: string[]): '' | '不用发' | '只发业务' {
+  for (const part of parts) {
+    if (/^(依据|抄送|身份|抄送身份)/.test(part)) continue
+    const text = unwrapToken(part).replace(/^收件人\s*[：:]?\s*/, '').trim()
+    if (text === '不用发') return '不用发'
+    if (text === '只发业务') return '只发业务'
+  }
+  return ''
 }
 
 function partyText(value: string): string {
@@ -481,6 +497,11 @@ export function readArbitrationDecisions(text: string): ArbitrationDecision[] {
     const parts = line.split(/[｜|│丨]/).map(part => part.trim())
     const unsure = parts.some(part => part === '拿不准' || part.startsWith('拿不准')) || /[：:]\s*拿不准/.test(line)
     const reason = cleanReason(fieldOf(parts, '依据'))
+    const closed = closedVerdict(parts)
+    if (closed) {
+      decisions.push({ volume, recipient: closed, role: '', cc: '', ccRole: '', reason, unsure: false })
+      continue
+    }
     if (unsure) {
       decisions.push({ volume, recipient: '', role: '', cc: '', ccRole: '', reason, unsure: true })
       continue
@@ -508,9 +529,21 @@ export function readArbitrationDecisions(text: string): ArbitrationDecision[] {
   return decisions
 }
 
+/** 没开「只写技术联系人」时，客户要求写了没指定发给谁，却用著录项目里的人来顶，不当成裁决。 */
+function inventedRecordPick(reason: string, recipient: string, iprOnly: boolean): boolean {
+  if (!/未指定|没有指定/.test(reason)) return false
+  if (/不发\s*PCT|不用发涉外|所有邮件只发|不要发给客户|无需再发送/.test(reason)) return false
+  if (recipient === '只发业务') return /著录项目|仅含业务/.test(reason)
+  if (iprOnly || recipient === '不用发') return false
+  return /著录项目|主送技术联系人|技术联系人/.test(reason)
+}
+
 /** 按文号把收件人写回表格。拿不准的不填。 */
-export function applyArbitrationReply(rows: readonly PctTaskRow[], text: string): { rows: PctTaskRow[]; written: number; unsure: number; decisions: ArbitrationDecision[] } {
-  const decisions = readArbitrationDecisions(text)
+export function applyArbitrationReply(rows: readonly PctTaskRow[], text: string, options: Readonly<ArbitrationOptions> = {}): { rows: PctTaskRow[]; written: number; unsure: number; decisions: ArbitrationDecision[] } {
+  const iprOnly = options.iprOnly === true
+  const decisions = readArbitrationDecisions(text).map(item => inventedRecordPick(item.reason, item.recipient, iprOnly)
+    ? { ...item, recipient: '', role: '', cc: '', ccRole: '', unsure: true }
+    : item)
   const byVolume = new Map(decisions.filter(item => !item.unsure).map(item => [volumeKey(item.volume), item]))
   let written = 0
   const next = rows.map(row => {

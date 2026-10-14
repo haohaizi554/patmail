@@ -147,6 +147,22 @@ describe('PCT 联系人追加', () => {
     expect(plan.cc).toContain('韩玉奎(hanyk001@cmhk.com);')
   })
 
+  it('只发业务时收件人和抄送都只放业务人员', () => {
+    const plan = planPctRecipients(
+      [row({ customerName: '三一重能', iprName: '只发业务', iprArbitrated: true, contactName: '王佳' })],
+      [
+        contact({ name: '王佳', email: 'wang@example.com', role: '客户联系人' }),
+        contact({ group: 'sales', name: '蔡健中', email: 'cai@centips.com', role: '' })
+      ],
+      { to: '', cc: '' }
+    )
+    expect(plan.to).toBe('蔡健中(cai@centips.com);')
+    expect(plan.cc).toBe('蔡健中(cai@centips.com);')
+    expect(plan.to).not.toContain('王佳')
+    expect(sheetRecipientNames(row({ iprName: '不用发', iprArbitrated: true }))).toEqual({ to: '不用发', cc: '' })
+    expect(sheetRecipientNames(row({ iprName: '只发业务', iprArbitrated: true }))).toEqual({ to: '只发业务', cc: '' })
+  })
+
   it('全选联系人只写入发文规则里的收件人，去掉括号，丢掉没有邮箱的人', () => {
     const plan = planCheckedRecipients(
       [

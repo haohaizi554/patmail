@@ -178,7 +178,7 @@ export async function loadMailContactText(
       introducer,
       text: formatMailContactText(rows, introducer),
       complete,
-      message: notes.join(' ').slice(0, 400)
+      message: [...new Set(notes)].join(' ').slice(0, 400)
     }
   }
 }

@@ -70,8 +70,8 @@ const totalPages = computed(() => Math.max(1, Math.ceil(totalText.value / props.
 const submitTitle = computed(() => {
   if (!props.writesReady) return '正在读取系统设置里的写开关。'
   if (!props.writesOpen) return '写开关在系统设置里关着。'
-  if (props.iprGap) return '有名字的行按助手写回的收件人和抄送提交；还空着收件人的行，按这封发文规则里要勾选的客户联系人写入收件人，业务人员作为抄送兜底。邮箱不是真实地址的人不写入。'
-  return '按勾选创建发文。同一客户且收件人、抄送相同的几件合成一封。封与封排队提交，同时在途几封看系统设置里的并发数，默认上一封有结果再取下一封。交给当前登录人审核。发文流程交到审核，不在这里结束。完成事项会勾上本封的处理事项，PCT 相关也一样。'
+  if (props.iprGap) return '有仲裁结果或空着的收件人时，用旁边两个按钮：信任 AI 按写回的人提交、空行再按发文规则勾选；直接全选则不采用写回的收件人。'
+  return '按勾选创建发文。勾几件就发几件，每件单独成封，没勾选的不会因为同客户合并被带上。封与封排队提交，同时在途几封看系统设置里的并发数，默认上一封有结果再取下一封。交给当前登录人审核。发文流程交到审核，不在这里结束。完成事项会勾上本封的处理事项，PCT 相关也一样。'
 })
 function blocked(row) {
   if (props.flowByProc[row.procId] === MAILED_UNFINISHED_REVIEW) return props.allowMailedUnfinished === false
@@ -184,10 +184,14 @@ function layoutColumns() {
   const root = host.value
   const table = root?.querySelector('table')
   if (!root || !table || !ruler) return
+  if (!shown.value.length) {
+    colWidths.value = []
+    return
+  }
   const container = root.clientWidth
   if (container <= 0) return
   const header = table.querySelector('thead th') || table
-  const cell = table.querySelector('tbody td') || header
+  const cell = table.querySelector('tbody td:not(.limit-empty)') || header
   colWidths.value = assignColumnWidths(columnSpecs(header, cell), container)
 }
 
@@ -281,7 +285,11 @@ function reset() {
         <span>{{ pageIndex }} / {{ totalPages }}</span>
         <button class="ghost tiny" type="button" :disabled="pageIndex >= totalPages || (loading && !pageWhileLoading)" @click="goPage(pageIndex + 1)">下一页</button>
       </div>
-      <button key="submit-auto" class="ghost tiny" type="button" v-hint="submitTitle" @click="askSubmit('auto')">提交到 EASY</button>
+      <button v-if="!iprGap" key="submit-auto" class="ghost tiny" type="button" v-hint="submitTitle" @click="askSubmit('auto')">提交到 EASY</button>
+      <template v-else>
+        <button key="submit-trust" class="ghost tiny" type="button" v-hint="'信任 AI：有名字的行按助手写回的收件人和抄送提交。还空着的行按这封发文规则勾选客户联系人，业务人员作为抄送。写成「不用发」的不创建发文；写成「只发业务」的只写业务人员。'" @click="askSubmit('auto')">提交到 EASY：信任AI</button>
+        <button key="submit-all" class="ghost tiny" type="button" v-hint="'不信任 AI：不采用助手写回的收件人。勾选的每一行都按这封发文规则把客户联系人全部勾上，业务人员作为抄送。'" @click="askSubmit('all')">提交到 EASY：直接全选</button>
+      </template>
     </div>
     <p v-if="checking" class="hint">正在核对发文审核状态。核对完之前不能勾选。</p>
     <p v-if="message" class="hint">{{ message }}</p>
@@ -293,51 +301,51 @@ function reset() {
       </colgroup>
       <thead>
         <tr>
-          <th v-if="selectable" class="check fit"><label class="page-check"><input type="checkbox" :checked="pageAll" :disabled="!pageIds.length" @change="togglePage" />全选</label></th>
-          <th class="fit">我方文号</th><th class="grow">案件名称</th><th class="fit">处理事项</th><th class="grow">客户</th><th class="fit">申请号</th>
-          <th class="fit">官方期限</th><th class="fit">客户期限</th><th class="fit">内部期限</th><th class="fit flow">流程状态</th>
+          <th v-if="selectable" class="check"><label class="page-check"><input type="checkbox" :checked="pageAll" :disabled="!pageIds.length" @change="togglePage" />全选</label></th>
+          <th>我方文号</th><th>案件名称</th><th>处理事项</th><th>客户</th><th>申请号</th>
+          <th>官方期限</th><th>客户期限</th><th>内部期限</th><th class="flow">流程状态</th>
         </tr>
       </thead>
       <template v-if="cachePages">
         <tbody v-for="n in seenPages" :key="n" v-show="n === pageIndex">
           <tr v-if="!rowsFor(n).length">
-            <td :colspan="selectable ? 10 : 9">{{ loading ? '正在读取期限列表…' : (message ? '查询没有完成，上面有原因。' : '没有可显示的期限记录') }}</td>
+            <td class="limit-empty" :colspan="selectable ? 10 : 9">{{ loading ? '正在读取期限列表…' : (message ? '查询没有完成，上面有原因。' : '没有可显示的期限记录') }}</td>
           </tr>
           <tr v-for="row in rowsFor(n)" :key="row.procId" v-memo="[row, gates[row.procId], flowByProc[row.procId], checking, selected.includes(row.procId), allowMailedUnfinished]" :class="{ 'is-pending': gates[row.procId] === 'pending' || flowByProc[row.procId] === '已提交审核' || flowByProc[row.procId] === MAILED_UNFINISHED_REVIEW || checking }">
-            <td v-if="selectable" class="check fit">
+            <td v-if="selectable" class="check">
               <input type="checkbox" :checked="selected.includes(row.procId)" :disabled="!canPick(row)" @change="toggleRow(row.procId)" />
               <span v-if="gates[row.procId] === 'pending' || flowByProc[row.procId] === '已提交审核'" class="clip" v-hint.clip="'待审核'">待审核</span>
             </td>
-            <td class="fit"><span class="clip" v-hint.clip="row.caseVolume">{{ row.caseVolume }}</span></td>
-            <td class="grow"><span class="clip" v-hint.clip="row.caseName">{{ row.caseName }}</span></td>
-            <td class="fit"><span class="clip" v-hint.clip="row.ctrlProc">{{ row.ctrlProc }}</span></td>
-            <td class="grow"><span class="clip" v-hint.clip="row.customerName">{{ row.customerName }}</span></td>
-            <td class="fit"><span class="clip" v-hint.clip="row.appNo">{{ row.appNo }}</span></td>
-            <td class="fit"><span class="clip" v-hint.clip="row.legalDueDate">{{ row.legalDueDate }}</span></td>
-            <td class="fit"><span class="clip" v-hint.clip="row.cusDueDate">{{ row.cusDueDate }}</span></td>
-            <td class="fit"><span class="clip" v-hint.clip="row.intDueDate">{{ row.intDueDate }}</span></td>
-            <td :class="['fit', 'flow', statusShade(flowStatus(row))]">{{ flowStatus(row) }}</td>
+            <td><span class="clip" v-hint.clip="row.caseVolume">{{ row.caseVolume }}</span></td>
+            <td><span class="clip" v-hint.clip="row.caseName">{{ row.caseName }}</span></td>
+            <td><span class="clip" v-hint.clip="row.ctrlProc">{{ row.ctrlProc }}</span></td>
+            <td><span class="clip" v-hint.clip="row.customerName">{{ row.customerName }}</span></td>
+            <td><span class="clip" v-hint.clip="row.appNo">{{ row.appNo }}</span></td>
+            <td><span class="clip" v-hint.clip="row.legalDueDate">{{ row.legalDueDate }}</span></td>
+            <td><span class="clip" v-hint.clip="row.cusDueDate">{{ row.cusDueDate }}</span></td>
+            <td><span class="clip" v-hint.clip="row.intDueDate">{{ row.intDueDate }}</span></td>
+            <td :class="['flow', statusShade(flowStatus(row))]">{{ flowStatus(row) }}</td>
           </tr>
         </tbody>
       </template>
       <tbody v-else>
         <tr v-if="!shown.length">
-          <td :colspan="selectable ? 10 : 9">{{ loading ? '正在读取期限列表…' : (message ? '查询没有完成，上面有原因。' : '没有可显示的期限记录') }}</td>
+          <td class="limit-empty" :colspan="selectable ? 10 : 9">{{ loading ? '正在读取期限列表…' : (message ? '查询没有完成，上面有原因。' : '没有可显示的期限记录') }}</td>
         </tr>
         <tr v-for="row in shown" :key="row.procId" v-memo="[row, gates[row.procId], flowByProc[row.procId], checking, selected.includes(row.procId), allowMailedUnfinished]" :class="{ 'is-pending': gates[row.procId] === 'pending' || flowByProc[row.procId] === '已提交审核' || flowByProc[row.procId] === MAILED_UNFINISHED_REVIEW || checking }">
-          <td v-if="selectable" class="check fit">
+          <td v-if="selectable" class="check">
             <input type="checkbox" :checked="selected.includes(row.procId)" :disabled="!canPick(row)" @change="toggleRow(row.procId)" />
             <span v-if="gates[row.procId] === 'pending' || flowByProc[row.procId] === '已提交审核'" class="clip" v-hint.clip="'待审核'">待审核</span>
           </td>
-          <td class="fit"><span class="clip" v-hint.clip="row.caseVolume">{{ row.caseVolume }}</span></td>
-          <td class="grow"><span class="clip" v-hint.clip="row.caseName">{{ row.caseName }}</span></td>
-          <td class="fit"><span class="clip" v-hint.clip="row.ctrlProc">{{ row.ctrlProc }}</span></td>
-          <td class="grow"><span class="clip" v-hint.clip="row.customerName">{{ row.customerName }}</span></td>
-          <td class="fit"><span class="clip" v-hint.clip="row.appNo">{{ row.appNo }}</span></td>
-          <td class="fit"><span class="clip" v-hint.clip="row.legalDueDate">{{ row.legalDueDate }}</span></td>
-          <td class="fit"><span class="clip" v-hint.clip="row.cusDueDate">{{ row.cusDueDate }}</span></td>
-          <td class="fit"><span class="clip" v-hint.clip="row.intDueDate">{{ row.intDueDate }}</span></td>
-          <td :class="['fit', 'flow', statusShade(flowStatus(row))]">{{ flowStatus(row) }}</td>
+          <td><span class="clip" v-hint.clip="row.caseVolume">{{ row.caseVolume }}</span></td>
+          <td><span class="clip" v-hint.clip="row.caseName">{{ row.caseName }}</span></td>
+          <td><span class="clip" v-hint.clip="row.ctrlProc">{{ row.ctrlProc }}</span></td>
+          <td><span class="clip" v-hint.clip="row.customerName">{{ row.customerName }}</span></td>
+          <td><span class="clip" v-hint.clip="row.appNo">{{ row.appNo }}</span></td>
+          <td><span class="clip" v-hint.clip="row.legalDueDate">{{ row.legalDueDate }}</span></td>
+          <td><span class="clip" v-hint.clip="row.cusDueDate">{{ row.cusDueDate }}</span></td>
+          <td><span class="clip" v-hint.clip="row.intDueDate">{{ row.intDueDate }}</span></td>
+          <td :class="['flow', statusShade(flowStatus(row))]">{{ flowStatus(row) }}</td>
         </tr>
       </tbody>
     </table>

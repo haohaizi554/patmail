@@ -17,7 +17,7 @@ import { readLimitTimeout } from '../../api/query-timeout'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useWorkflowCatalog } from '../composables/useWorkflowCatalog'
 import { useWorkspace } from '../composables/useWorkspace'
-import { beginProgress, classifySubmitText, endProgress, logProgress, progressSummaryLine, tallyProgress } from '../dialog'
+import { beginProgress, classifySubmitText, endProgress, logProgress, noteProgress, progressSummaryLine, tallyProgress } from '../dialog'
 import { useMailConcurrency } from '../../settings/use-mail-concurrency'
 import { useWriteSwitch } from '../../settings/use-write-switch'
 
@@ -115,7 +115,6 @@ async function markSendGates(items: LimitMonitorRow[]): Promise<void> {
         resolved.set(`${job.caseId}|${job.procId}`, response.payload.data.gate)
       } else {
         failed += 1
-        resolved.set(`${job.caseId}|${job.procId}`, 'pending')
       }
     }
   }
@@ -134,11 +133,14 @@ async function markSendGates(items: LimitMonitorRow[]): Promise<void> {
   }
   gates.value = next
   checkingGates.value = false
-  selected.value = selected.value.filter(id => next[id] === 'open' || next[id] === 'done')
+  selected.value = selected.value.filter(id => {
+    const gate = next[id]
+    return !gate || gate === 'open' || gate === 'done'
+  })
   const pending = items.filter(row => next[row.procId] === 'pending').length
   const bits = [
     pending ? `待审核 ${pending} 个，已标灰，不能勾选。` : '',
-    failed ? `${failed} 件没有读到发文流程，先按待审核处理。` : '',
+    failed ? `${failed} 件没有读到发文流程，没有当成已提交审核。勾选还在，可以再点「提交到 EASY」。` : '',
     unchecked ? `${unchecked} 件没有核对到发文流程，不按还没提交审核计算。` : ''
   ].filter(Boolean)
   if (bits.length) message.value = [message.value, ...bits].filter(Boolean).join('')
@@ -282,7 +284,7 @@ async function onSubmitAsk(address?: string): Promise<void> {
     sheetRows: task?.rows ?? [],
     mode: recipientModeForTask(task, catalog.value.workflows),
     specials: inventorCustomerNames(flow),
-    address: address === 'auto' ? 'auto' : undefined
+    address: address === 'auto' ? 'auto' : address === 'all' ? 'all' : undefined
   })
   if (!planned.ok) {
     message.value = planned.message
@@ -299,6 +301,7 @@ async function onSubmitAsk(address?: string): Promise<void> {
       const text = await runLimitMailSubmit(bridge, connection.value.operatorId, [item], gates.value)
       const kind = classifySubmitText(text)
       tallyProgress(kind, limitMailProcIds(item).length)
+      if (kind !== 'success') noteProgress(kind, label, text)
       finished += 1
       text.split('\n').forEach((line, lineIndex) => logProgress(lineIndex === 0 ? `${label}：${line}` : line, finished))
       if (text.startsWith('已提交')) {
@@ -311,7 +314,15 @@ async function onSubmitAsk(address?: string): Promise<void> {
       confirmedIds.value = confirmedIds.value.filter(keep)
       selected.value = selected.value.filter(keep)
     }
-    if (halted) tallyProgress('skipped', unstarted.reduce((sum, item) => sum + limitMailProcIds(item).length, 0))
+    if (halted) {
+      for (const item of unstarted) {
+        const skipLabel = limitMailLetterLabel(item, id => rows.value.find(entry => entry.procId === id)?.caseVolume ?? '')
+        const reason = '上一封结果无法确认，这一件没有开始。'
+        tallyProgress('skipped', limitMailProcIds(item).length)
+        noteProgress('skipped', skipLabel, reason)
+        logProgress(`${skipLabel}：跳过。${reason}`)
+      }
+    }
     logProgress(progressSummaryLine(), finished)
     message.value = progressSummaryLine()
   } catch (error: unknown) {
@@ -402,7 +413,19 @@ function pokeLimit(): void {
 }
 
 watch(() => connection.value.easyOrigin, (next, previous) => {
-  if (!previous || next === previous) return
+  if (next === previous) return
+  if (!previous) {
+    limitScope = systemScope(next, 'page')
+    if (rows.value.length) return
+    const arriving = limitScope
+    void recallRecovery('limit-query', arriving).then(async saved => {
+      if (!saved) saved = await recallRecovery('limit-query', 'page')
+      if (limitScope !== arriving || rows.value.length) return
+      applyLimitDesk(saved)
+      pokeLimit()
+    }).catch(() => { /* 这个系统还没有账本 */ })
+    return
+  }
   parking = true
   gateToken += 1
   const payload = readLimitDesk()
@@ -475,10 +498,12 @@ watch([rows, selected, confirmedIds, message, pageIndex], () => {
 
 onMounted(() => {
   limitScope = systemScope(connection.value.easyOrigin, 'page')
-  void recallRecovery('limit-query', limitScope).then(async payload => {
-    if (!payload) payload = await recallRecovery('limit-query', 'page')
-    applyLimitDesk(payload)
-  }).catch(() => { /* 没有账本就等下一次查询 */ })
+  if (!limitScope.endsWith('|local')) {
+    void recallRecovery('limit-query', limitScope).then(async payload => {
+      if (!payload) payload = await recallRecovery('limit-query', 'page')
+      applyLimitDesk(payload)
+    }).catch(() => { /* 没有账本就等下一次查询 */ })
+  }
   void resumeQuery()
 })
 onActivated(() => { void resumeQuery() })

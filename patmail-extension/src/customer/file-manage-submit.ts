@@ -1,4 +1,4 @@
-import type { EasyTransport } from '../api/transport'
+import { retryCreatedDraft, transientEasyFailure, type EasyTransport } from '../api/transport'
 import { isRecord } from '../api/response-guards'
 import { appendRecipientField, buildMailCustomerParams, readMailCustomer, readMailInfo, readSaveMailInfo, SAVE_KEYS, saveParams, signatureParams } from '../mail/easy/contracts'
 import { mailBccToSave } from '../mail/easy/bcc'
@@ -380,7 +380,7 @@ async function writeLetter(transport: EasyTransport, mailId: string, item: FileM
   if (!customerId || !isQueryGuid(customerId)) return { ok: false, message: '这封发文没有客户编号，没有写入收件人。' }
   const contacts = await loadMailContactText({ mailId, customerId }, (operation, params) => transport.post(operation, params))
   if (!contacts.ok) return { ok: false, message: '发文联系人没有读到，没有写入收件人，也没有提交。' }
-  if (!contacts.data.complete) return { ok: false, message: contacts.data.message || '发文联系人没有读全，没有写入收件人，也没有提交。' }
+  if (!contacts.data.complete) return { ok: false, message: retryCreatedDraft(contacts.data.message || '发文联系人没有读全，没有写入收件人，也没有提交。') }
   const cases = contacts.data.rows.filter(row => row.group === 'case')
   const sales = contacts.data.rows.filter(row => row.group === 'sales')
   const to = formatPeople(cases)
@@ -442,7 +442,12 @@ async function submitOne(transport: EasyTransport, item: FileManageSubmitItem): 
   }
   const addressed = await writeLetter(transport, mailId, item)
   if (!addressed.ok) return spread(item, { fileId: item.fileId, mailId, state: 'created', message: addressed.message })
-  const held = (message: string, state: FileManageSubmitResult['state'] = 'created'): FileManageSubmitResult[] => spread(item, { fileId: item.fileId, mailId, state, message })
+  const held = (message: string, state: FileManageSubmitResult['state'] = 'created'): FileManageSubmitResult[] => spread(item, {
+    fileId: item.fileId,
+    mailId,
+    state,
+    message: state === 'created' ? retryCreatedDraft(message) : message
+  })
   const infoParams = flowInfoParams(mailId, 'CO')
   if (!infoParams) return held('流程查询参数无效。')
   const infoResult = await transport.post('getFlowInfo', infoParams)
@@ -524,8 +529,11 @@ export function summarizeFileManageSubmit(results: FileManageSubmitResult[], sto
 }
 
 export function fileManageSubmitShouldHalt(text: string): boolean {
+  if (text.startsWith('已提交')) return false
   if (text.includes('不能写成') || text.includes('还在审核里')) return false
-  return /无法确认|没有再次|写开关|没有提交到审核人|登录已失效/.test(text) && !text.startsWith('已提交')
+  if (/无法确认|没有再次|写开关|登录已失效/.test(text)) return true
+  if (transientEasyFailure(text)) return false
+  return /没有提交到审核人/.test(text)
 }
 
 function remember(results: FileManageSubmitResult[]): void {

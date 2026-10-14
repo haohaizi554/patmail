@@ -361,6 +361,12 @@ describe('仲裁交给本地模型时分批', () => {
     expect(byDefault[0]).toContain('不要因为本批的兜底规则而漏写')
     expect(byDefault[0]).toContain('客户要求点名了技术联系人也照样写')
     expect(byDefault[0]).toContain('依据只写「客户要求没有指定发给谁」')
+    expect(byDefault[0]).toContain('不要写「按著录项目主送技术联系人」')
+    expect(byDefault[0]).toContain('只发业务')
+    expect(byDefault[0]).toContain('不用发')
+    expect(byDefault[0]).toContain('不用发涉外提醒')
+    expect(byDefault[0]).toContain('单独写了 PCT 提醒')
+    expect(byDefault[0]).toContain('提醒 PCT')
     expect(byDefault[0]).not.toContain('收件人只写著录项目或表格里的技术联系人')
     const iprOnly = iprArbitrationWaves([gap('A1', '歌尔')], {}, {}, { iprOnly: true })
     expect(iprOnly[0]).toContain('收件人只写著录项目或表格里的技术联系人')
@@ -427,6 +433,37 @@ describe('仲裁交给本地模型时分批', () => {
     expect(applied.rows[3]?.iprName).toBe('余祖')
     expect(applied.rows[3]?.mailCc).toBe('黄萱燕')
     expect(applied.decisions.find(item => item.volume === 'PA4')?.ccRole).toBe('客户联系人')
+  })
+
+  it('不发提醒和只发业务写回表格，不当成拿不准', () => {
+    const rows = [gap('PA1', '三一重能'), gap('PA2', '城市公共安全')]
+    const applied = applyArbitrationReply(rows, [
+      '空 PA1｜只发业务｜依据 客户要求所有邮件只发业务，不要发给客户',
+      '空 PA2｜不用发｜依据 客户要求不发PCT提醒'
+    ].join('\n'))
+    expect(applied.written).toBe(2)
+    expect(applied.unsure).toBe(0)
+    expect(applied.rows[0]?.iprName).toBe('只发业务')
+    expect(applied.rows[0]?.iprArbitrated).toBe(true)
+    expect(applied.rows[1]?.iprName).toBe('不用发')
+    expect(applied.rows[1]?.iprArbitrated).toBe(true)
+    const labeled = applyArbitrationReply(rows, '文号 PA1｜收件人 只发业务｜身份 无｜抄送 无｜抄送身份 无｜依据 只发业务蔡健中')
+    expect(labeled.rows[0]?.iprName).toBe('只发业务')
+    expect(labeled.decisions[0]?.unsure).toBe(false)
+  })
+
+  it('没开只写技术联系人时，未指定却按著录项目写人的行改成拿不准', () => {
+    const reply = [
+      '空 PA25113244CN｜收件人 王金宝｜身份 IPR｜抄送 无｜抄送身份 无｜依据 客户要求未指定此案PCT提醒收件人，按著录项目主送技术联系人',
+      '空 QPA25114402CN｜只发业务｜依据 著录项目仅含业务人员且客户要求未指定PCT提醒收件人'
+    ].join('\n')
+    const held = applyArbitrationReply([gap('PA25113244CN', '深大'), gap('QPA25114402CN', '余昊')], reply)
+    expect(held.written).toBe(0)
+    expect(held.unsure).toBe(2)
+    expect(held.rows.every(row => !row.iprName)).toBe(true)
+    const allowed = applyArbitrationReply([gap('PA25113244CN', '深大')], reply, { iprOnly: true })
+    expect(allowed.written).toBe(1)
+    expect(allowed.rows[0]?.iprName).toBe('王金宝')
   })
 
   it('短总结里的「文号」不盖过真正的裁决行', () => {

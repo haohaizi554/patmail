@@ -1,13 +1,12 @@
 import { buildLimitMailCustomerParams } from '../api/limit-monitor-params'
 import { isRecord, readClientInfo } from '../api/response-guards'
-import type { EasyTransport } from '../api/transport'
+import { retryCreatedDraft, transientEasyFailure, type EasyTransport } from '../api/transport'
 import { loadFinishCtrlProc, readMailInfo, readRuleMailPeople, readSaveMailInfo, ruleParams, SAVE_KEYS, saveParams } from '../mail/easy/contracts'
 import { loadMailContactText } from '../mail/easy/mail-contacts'
 import { normalizeCustomerName } from './skills'
 import { planCheckedRecipients, planPctRecipients, sheetDisplayName, usesInventorSheet } from './pct-recipients'
 import { mailBccToSave } from '../mail/easy/bcc'
 import type { PctTaskRow } from './types'
-import { groupWorkflowRows } from './workflow-mail'
 import { isQueryGuid } from '../query/query-validator'
 import { clampMailConcurrency } from '../settings/mail-concurrency'
 import { isWriteSwitchOpen } from '../settings/write-switch'
@@ -26,10 +25,11 @@ const LEDGER_KEY = 'patmail.limitMailSubmit.v1'
 
 export interface LimitMailSubmitItem {
   procId: string
-  /** 同一封里的全部处理事项。缺省时只有 procId。创建时用分号拼进一次 LimitMailCustomer。 */
+  /** 这一封里的处理事项。现在每封只有勾上的那一件。 */
   procIds?: string[]
   mailTypeId: string
-  mailStyle: '1'
+  /** 固定用 2（单个来文）。同客户合并会让原站把没勾选的事项也并进来。 */
+  mailStyle: '1' | '2'
   /** 上一封已经创建、提交还没发出时沿用，不再调用 LimitMailCustomer。 */
   mailId?: string
   /** ipr：收件人是表格 IPR，抄送是发文页商务。lead：收件人是技术负责人，抄送是 IPR 和商务。 */
@@ -46,6 +46,8 @@ export interface LimitMailSubmitItem {
   ccName?: string
   /** 这一行的收件人来自仲裁。提交时仍追加商务，不按发明人特例改收件人。 */
   arbitrated?: true
+  /** 客户要求这封提醒不用发。不创建发文，也不改走全选联系人。 */
+  hold?: 'skip'
 }
 
 export interface LimitMailSubmitResult {
@@ -202,12 +204,12 @@ export function limitMailItems(input: {
   sheetRows: Array<{ ourVolume: string; mailTypeId?: string; customerName?: string; contactName?: string; iprName?: string; leadName?: string; mailTo?: string; mailCc?: string; iprArbitrated?: true }>
   mode: 'ipr' | 'lead'
   specials?: ReadonlySet<string>
-  /** auto：有名字的行按写回的收件人提交，空着的行按发文规则勾选客户联系人兜底。checked：空着的行按发文规则勾选。named：只提交有名字的行。 */
-  address?: 'named' | 'checked' | 'auto'
+  /** auto：有名字的行按写回的收件人提交，空着的行按发文规则勾选客户联系人兜底。all：不采用写回的收件人，每一行都按发文规则勾选。checked：空着的行按发文规则勾选。named：只提交有名字的行。 */
+  address?: 'named' | 'checked' | 'auto' | 'all'
 }): { ok: true; items: LimitMailSubmitItem[] } | { ok: false; message: string } {
   if (!input.procIds.length) return { ok: false, message: '还没有勾选。先勾选还没提交审核的事项。' }
   const specials = input.specials ?? new Set<string>()
-  const flat: Array<{ item: LimitMailSubmitItem; row: PctTaskRow }> = []
+  const flat: LimitMailSubmitItem[] = []
   for (const procId of input.procIds) {
     if (!isQueryGuid(procId)) return { ok: false, message: '勾选的事项编号无效，没有提交。' }
     const row = input.rows.find(item => item.procId === procId)
@@ -228,11 +230,12 @@ export function limitMailItems(input: {
     const customerName = source?.customerName?.trim() ?? ''
     const iprName = lookupName(source?.iprName)
     const leadName = lookupName(source?.leadName)
-    const checked = input.address === 'checked'
+    const forceAll = input.address === 'all'
+    const checked = forceAll || (input.address === 'checked'
       ? !iprName
       : input.address === 'auto'
         ? (input.mode === 'lead' ? !leadName : !iprName)
-        : false
+        : false)
     if (input.mode === 'lead' && !leadName && !checked) return { ok: false, message: `文号 ${row.caseVolume} 表格里没有技术负责人，没有提交。` }
     const primaryName = input.mode === 'lead' ? leadName : iprName
     if (input.address === 'auto' ? (!primaryName && !checked) : (!iprName && !checked)) continue
@@ -240,60 +243,34 @@ export function limitMailItems(input: {
     const item: LimitMailSubmitItem = {
       procId,
       mailTypeId: types[0],
-      mailStyle: '1',
+      mailStyle: '2',
       mode: input.mode,
       inventor: usesInventorSheet(customerName, specials),
       customerName,
       contactName: source?.contactName?.trim() ?? '',
-      iprName,
-      leadName,
+      iprName: forceAll ? '' : iprName,
+      leadName: forceAll ? '' : leadName,
       ...(checked ? { contacts: 'all' as const } : {}),
-      ...(ccName ? { ccName } : {}),
-      ...(source?.iprArbitrated ? { arbitrated: true as const } : {})
+      ...(!forceAll && ccName ? { ccName } : {}),
+      ...(!forceAll && source?.iprArbitrated ? { arbitrated: true as const } : {}),
+      ...(!forceAll && iprName === '不用发' ? { hold: 'skip' as const } : {})
     }
-    flat.push({
-      item,
-      row: {
-        ourVolume: procId,
-        customerVolume: '',
-        customerName,
-        contactName: source?.contactName ?? '',
-        iprName: source?.iprName ?? '',
-        leadName: source?.leadName ?? '',
-        procLabel: '',
-        mailTypeLabel: '',
-        mailTo: source?.mailTo,
-        mailCc: source?.mailCc,
-        ...(source?.iprArbitrated ? { iprArbitrated: true as const } : {})
-      }
-    })
+    flat.push(item)
   }
   if (!flat.length) {
     return {
       ok: false,
-      message: input.address === 'checked'
-        ? '勾选的行还没有可以提交的收件人。'
-        : '勾选的行还没有收件人。信任 AI 仲裁不会提交这些空行，用「全选联系人」兜底。'
+      message: input.address === 'all'
+        ? '勾选的行没有可以提交的事项。'
+        : input.address === 'checked'
+          ? '勾选的行还没有可以提交的收件人。'
+          : '勾选的行还没有收件人。信任 AI 仲裁不会提交这些空行，用「直接全选」提交。'
     }
   }
-  const byProc = new Map(flat.map(entry => [entry.item.procId.toLowerCase(), entry.item]))
-  const items: LimitMailSubmitItem[] = []
-  for (const group of groupWorkflowRows('1', flat.map(entry => entry.row), specials, input.mode)) {
-    const members = group.flatMap(row => {
-      const found = byProc.get(row.ourVolume.toLowerCase())
-      return found ? [found] : []
-    })
-    if (members.length !== group.length) return { ok: false, message: '合并发文时对不上处理事项，没有提交。' }
-    const types = [...new Set(members.map(item => item.mailTypeId))]
-    if (types.length !== 1) {
-      const name = members[0]?.customerName || '这个客户'
-      return { ok: false, message: `${name}里收件人和抄送相同的几件对上了不同发文类型，没有提交。` }
-    }
-    const first = members[0]
-    if (!first) continue
-    items.push({ ...first, procIds: members.map(item => item.procId) })
+  return {
+    ok: true,
+    items: flat.map(item => ({ ...item, procIds: [item.procId], mailStyle: '2' as const }))
   }
-  return { ok: true, items }
 }
 
 function parseLimitMailLedger(value: unknown): LimitMailMark[] {
@@ -443,22 +420,26 @@ export function watchLimitMailLedger(listener: () => void): () => void {
   return () => chrome.storage.onChanged.removeListener(onChange)
 }
 
-/** 结束流程后回传是还没提交审核时，不再沿用上次的发文。还在审核里才跳过。 */
+/**
+ * 已经提交过、回传是还没提交审核或已结束时，不再沿用那封。
+ * 创建了还没交给审核人的，再点提交仍沿用这封，即使流程读成 open 或 done，也不再新建。
+ * 还在审核里才跳过。创建或提交的响应没确认时停住。
+ */
 export function nextLimitMailAttempt(
   item: LimitMailSubmitItem,
   mark: LimitMailMark | undefined,
   gate: 'open' | 'pending' | 'done' | undefined
 ): { action: 'send'; item: LimitMailSubmitItem } | { action: 'skip'; reason: 'pending' | 'remembered' } | { action: 'stop'; message: string } {
+  if (mark?.state === 'unknown') {
+    return { action: 'stop', message: '有一件发文的创建或提交结果还没确认，没有再次创建，也没有再次提交。' }
+  }
+  if (mark?.state === 'created' && mark.mailId) return { action: 'send', item: { ...item, mailId: mark.mailId } }
   if (gate === 'open' || gate === 'done') {
     const fresh = { ...item }
     delete fresh.mailId
     return { action: 'send', item: fresh }
   }
   if (mark?.state === 'submitted') return { action: 'skip', reason: gate === 'pending' ? 'pending' : 'remembered' }
-  if (mark?.state === 'unknown') {
-    return { action: 'stop', message: '有一件发文的创建或提交结果还没确认，没有再次创建，也没有再次提交。' }
-  }
-  if (mark?.state === 'created' && mark.mailId) return { action: 'send', item: { ...item, mailId: mark.mailId } }
   return { action: 'send', item }
 }
 
@@ -599,7 +580,7 @@ async function writeRecipients(transport: EasyTransport, mailId: string, item: L
   if (!customerId || !isQueryGuid(customerId)) return { ok: false, message: '这封发文没有客户编号，没有写入收件人。' }
   const contacts = await loadMailContactText({ mailId, customerId }, (operation, params) => transport.post(operation, params))
   if (!contacts.ok) return { ok: false, message: '发文联系人没有读到，没有写入收件人，也没有提交。' }
-  if (!contacts.data.complete) return { ok: false, message: contacts.data.message || '发文联系人没有读全，没有写入收件人，也没有提交。' }
+  if (!contacts.data.complete) return { ok: false, message: retryCreatedDraft(contacts.data.message || '发文联系人没有读全，没有写入收件人，也没有提交。') }
   const sales = contacts.data.rows.filter(row => row.group === 'sales' && row.email.includes('@') && !/[();；]/.test(row.email))
   if (!sales.length) return { ok: false, message: '发文页没有商务邮箱，没有提交。' }
   const existingTo = cellText(info.row, 'mail_to', true)
@@ -655,6 +636,9 @@ function spread(item: LimitMailSubmitItem, result: LimitMailSubmitResult): Limit
 }
 
 async function submitOne(transport: EasyTransport, userId: string, item: LimitMailSubmitItem): Promise<LimitMailSubmitResult[]> {
+  if (item.hold === 'skip') {
+    return spread(item, { procId: item.procId, mailId: '', state: 'failed', message: '客户要求这封提醒不用发，没有创建发文。' })
+  }
   let mailId = item.mailId ?? ''
   if (!mailId) {
     const params = buildLimitMailCustomerParams({ procIds: limitMailProcIds(item), mailTypeId: item.mailTypeId, mailStyle: item.mailStyle })
@@ -676,7 +660,12 @@ async function submitOne(transport: EasyTransport, userId: string, item: LimitMa
   const addressed = await writeRecipients(transport, mailId, item)
   if (!addressed.ok) return spread(item, { procId: item.procId, mailId, state: 'created', message: addressed.message })
 
-  const held = (message: string, state: LimitMailSubmitResult['state'] = 'created'): LimitMailSubmitResult[] => spread(item, { procId: item.procId, mailId, state, message })
+  const held = (message: string, state: LimitMailSubmitResult['state'] = 'created'): LimitMailSubmitResult[] => spread(item, {
+    procId: item.procId,
+    mailId,
+    state,
+    message: state === 'created' ? retryCreatedDraft(message) : message
+  })
   const infoParams = flowInfoParams(mailId, 'CO')
   if (!infoParams) return held('流程查询参数无效。')
   const infoResult = await transport.post('getFlowInfo', infoParams)
@@ -756,9 +745,12 @@ export function summarizeLimitMailSubmit(results: LimitMailSubmitResult[], stopp
   return stopped ? `${head}${last.message}` : head
 }
 
-/** 结果没确认、写开关关掉或登录失效时，还没开始的封不再开始。 */
+/** 结果没确认、写开关关掉或登录失效时，还没开始的封不再开始。网关、超时、连不上只算这一封失败，后面的封继续，再点提交会重试。 */
 export function limitMailSubmitShouldHalt(text: string): boolean {
-  return /无法确认|没有再次|写开关|没有提交到审核人|登录已失效/.test(text) && !text.startsWith('已提交')
+  if (text.startsWith('已提交')) return false
+  if (/无法确认|没有再次|写开关|登录已失效/.test(text)) return true
+  if (transientEasyFailure(text)) return false
+  return /没有提交到审核人/.test(text)
 }
 
 /** 按封并发。一封内部仍由 submitOne 按顺序走。width 为 1 时，上一封返回之后才取下一封。 */
@@ -812,7 +804,7 @@ export async function runLimitMailSubmit(
         blocked = true
         continue
       }
-      if (mark && (gates[procId] === 'open' || gates[procId] === 'done')) forgetLimitMailMark(procId)
+      if (mark && mark.state !== 'created' && (gates[procId] === 'open' || gates[procId] === 'done')) forgetLimitMailMark(procId)
       if (next.item.mailId) {
         const list = reused.get(next.item.mailId) ?? []
         list.push(procId)

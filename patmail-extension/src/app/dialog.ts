@@ -32,6 +32,12 @@ export interface ProgressCounts {
   skipped: number
 }
 
+export interface ProgressNote {
+  kind: 'failed' | 'abnormal' | 'skipped'
+  label: string
+  reason: string
+}
+
 export const progressDialog = reactive({
   open: false,
   title: '',
@@ -39,7 +45,8 @@ export const progressDialog = reactive({
   done: 0,
   total: 1,
   finished: false,
-  counts: { success: 0, failed: 0, abnormal: 0, skipped: 0 } as ProgressCounts
+  counts: { success: 0, failed: 0, abnormal: 0, skipped: 0 } as ProgressCounts,
+  notes: [] as ProgressNote[]
 })
 
 function progressClock(date = new Date()): string {
@@ -57,6 +64,7 @@ export function beginProgress(title: string, total: number): void {
   progressDialog.counts.failed = 0
   progressDialog.counts.abnormal = 0
   progressDialog.counts.skipped = 0
+  progressDialog.notes = []
   progressDialog.open = true
 }
 
@@ -73,11 +81,20 @@ export function tallyProgress(kind: keyof ProgressCounts, count = 1): void {
   progressDialog.counts[kind] += count
 }
 
+/** 失败、异常、跳过记下文号和原因，结束时跟在件数后面。 */
+export function noteProgress(kind: ProgressNote['kind'], label: string, reason: string): void {
+  const text = reason.replace(/^没有提交到审核人。/, '').split('\n').map(item => item.trim()).filter(Boolean)[0] ?? ''
+  progressDialog.notes.push({ kind, label: label.trim() || '这一件', reason: text.slice(0, 180) || '没有写明原因。' })
+}
+
 export function progressSummaryLine(): string {
   const counts = progressDialog.counts
   const parts = [`成功 ${counts.success} 件`, `失败 ${counts.failed} 件`, `异常 ${counts.abnormal} 件`]
   if (counts.skipped) parts.push(`跳过 ${counts.skipped} 件`)
-  return `统计：${parts.join('，')}。`
+  const head = `统计：${parts.join('，')}。`
+  const names = { failed: '失败', abnormal: '异常', skipped: '跳过' } as const
+  const details = progressDialog.notes.map(note => `${names[note.kind]} ${note.label}：${note.reason}`)
+  return details.length ? `${head}${details.join('')}` : head
 }
 
 export function logProgress(line: string, done?: number): void {

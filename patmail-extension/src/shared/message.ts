@@ -156,7 +156,7 @@ export type ContentRequest =
   | Request<'CHECK_SESSION'> | Request<'CANCEL_SESSION_CHECK'>
   | Request<'CANCEL_FILE_SEARCH'> | Request<'CANCEL_LIMIT_MONITOR'> | Response<'SEARCH_FILES', { query: FileSearchQuery; continuation?: { querySessionId: string }; timeoutMs?: number }>
   | Response<'SEARCH_LIMIT_MONITOR', { query: LimitMonitorQuery; timeoutMs?: number }>
-  | Response<'SUBMIT_LIMIT_MAIL', { userId: string; items: Array<{ procId: string; procIds?: string[]; mailTypeId: string; mailStyle: '1'; mailId?: string; mode: 'ipr' | 'lead'; inventor?: boolean; customerName: string; contactName: string; iprName: string; leadName: string }> }>
+  | Response<'SUBMIT_LIMIT_MAIL', { userId: string; items: Array<{ procId: string; procIds?: string[]; mailTypeId: string; mailStyle: '1' | '2'; mailId?: string; mode: 'ipr' | 'lead'; inventor?: boolean; customerName: string; contactName: string; iprName: string; leadName: string }> }>
   | Response<'SUBMIT_FILE_MANAGE', { userId: string; items: Array<{ fileId: string; fileIds: string[]; fileNames: string[]; mailTypeId: string; mailStyle: '1'; mailId?: string; recall?: boolean; subject: string; senderId: string; senderName: string; senderEmail: string; reviewerId: string; reviewerName: string; signature: string }> }>
   | Response<'RESOLVE_DOWNLOAD_NAMES', { fileIds: string[]; selection: FileDownloadSelection }>
   | Response<'EXPORT_CASE_CONTACTS', { volumes: string[] }>
@@ -430,8 +430,8 @@ function isIcFlowResult(value: unknown): value is ApiResult<{ items: IcFlowHit[]
     if (item.skipSend !== undefined && item.skipSend !== true) return false
     if (item.correctedOur !== undefined && !isLibraryVolume(item.correctedOur)) return false
     if (item.correctedCustomer !== undefined && !isLibraryVolume(item.correctedCustomer)) return false
-    if (item.customerInfo !== undefined && (!isShortText(item.customerInfo, 1600) || !item.customerInfo.trim())) return false
-    if (item.recordInfo !== undefined && (!isShortText(item.recordInfo, 1600) || !item.recordInfo.trim())) return false
+    if (item.customerInfo !== undefined && (!isShortText(item.customerInfo, 4000) || !item.customerInfo.trim())) return false
+    if (item.recordInfo !== undefined && (!isShortText(item.recordInfo, 4000) || !item.recordInfo.trim())) return false
     const allowed = ['caseVolume', 'procLabel', 'found', 'gate', 'uncontrolled', 'unread', 'statusUnread', 'skipSend', 'correctedOur', 'correctedCustomer', 'customerInfo', 'recordInfo']
     if (!Object.keys(item).every(key => allowed.includes(key))) return false
     if (item.unread === true) {
@@ -542,7 +542,7 @@ function isLimitMailSubmitItem(value: unknown): boolean {
   if (value.ccName !== undefined && !isShortText(value.ccName, 200)) return false
   if (value.contacts !== 'all' && !value.iprName.trim()) return false
   if (value.contacts !== 'all' && value.mode === 'lead' && !value.leadName.trim()) return false
-  if (!isQueryGuid(String(value.procId)) || !isQueryGuid(String(value.mailTypeId)) || value.mailStyle !== '1') return false
+  if (!isQueryGuid(String(value.procId)) || !isQueryGuid(String(value.mailTypeId)) || (value.mailStyle !== '1' && value.mailStyle !== '2')) return false
   if (value.mailId !== undefined && !isQueryGuid(String(value.mailId))) return false
   if (value.procIds === undefined) return true
   return Array.isArray(value.procIds) && value.procIds.length > 0 && value.procIds.length <= 500 &&

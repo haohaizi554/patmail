@@ -47,6 +47,9 @@ export function sheetRecipientNames(
   specials: ReadonlySet<string> = new Set(),
   mode: PctRecipientMode = 'ipr'
 ): { to: string; cc: string } {
+  const ipr = sheetDisplayName(row.iprName)
+  if (row.iprArbitrated && ipr === '不用发') return { to: '不用发', cc: '' }
+  if (row.iprArbitrated && ipr === '只发业务') return { to: '只发业务', cc: '' }
   if (mode !== 'lead' && row.iprArbitrated && addressName(row.iprName, true)) return { to: addressName(row.iprName, true), cc: (row.mailCc ?? '').trim() }
   if (mode === 'lead') return { to: sheetDisplayName(row.leadName ?? ''), cc: addressName(row.iprName, row.iprArbitrated) }
   if (usesInventorSheet(row.customerName, specials)) return { to: row.contactName, cc: addressName(row.iprName, row.iprArbitrated) }
@@ -166,7 +169,7 @@ function personByName(
 }
 
 function listedNames(raw: string): string[] {
-  return [...new Set(raw.split(/[、,，;；]/).map(item => item.trim()).filter(item => item && !/^(无|空|没有|不抄送|拿不准|不用发)$/.test(item)))]
+  return [...new Set(raw.split(/[、,，;；]/).map(item => item.trim()).filter(item => item && !/^(无|空|没有|不抄送|拿不准|不用发|只发业务)$/.test(item)))]
 }
 
 function addSales(
@@ -196,6 +199,15 @@ export function planPctRecipients(
   const ccAdded: Array<{ name: string; email: string }> = []
   const seenTo = new Set<string>()
   const seenCc = new Set<string>()
+  if (rows.length && rows.every(row => row.iprArbitrated && sheetDisplayName(row.iprName) === '只发业务')) {
+    addSales(contacts, toAdded, seenTo)
+    addSales(contacts, ccAdded, seenCc)
+    return withSheetCopies({
+      to: appendRecipientField(existing.to, people(toAdded)),
+      cc: appendRecipientField(existing.cc, people(ccAdded)),
+      notes
+    }, rows, contacts)
+  }
   if (mode === 'lead') {
     for (const name of [...new Set(rows.map(row => sheetDisplayName(row.leadName ?? '')).filter(Boolean))]) {
       const found = personByName(contacts, name, '技术负责人')

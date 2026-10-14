@@ -23,7 +23,8 @@ import type { MailRuleBundle, SelectedPatentFile } from '../../mail/types'
 import { joinCaseVolumes } from '../../customer/volume-list'
 import type { LimitMonitorRow } from '../../api/limit-monitor-types'
 import { isQueryGuid } from '../../query/query-validator'
-import { flushRecovery, holdRecovery, peekRecovery, recallLatest, recallRecovery, scheduleRecovery, systemScope } from '../../recovery/wal-ledger'
+import { flushRecovery, holdRecovery, peekRecovery, recallRecovery, scheduleRecovery, systemScope } from '../../recovery/wal-ledger'
+import { assignColumnWidths } from '../../shell/column-fit'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { scopeFromConnection } from '../../shared/connection'
 import { useWorkspace } from '../composables/useWorkspace'
@@ -88,7 +89,7 @@ const arbitrateIprOnly = ref(false)
 const carryAcrossBreaks = ref(false)
 const arbitrationReady = computed(() => arbitrationAllowed(icPhase.value))
 const arbitrationHint = computed(() => arbitrationReady.value
-  ? '用核对时暂存的客户要求和著录项目仲裁。已经提交、审核通过的行不交；未管制完成日的行跟着「已发文未管制的行允许发文」开关。不再另查接口。'
+  ? '用核对时暂存的客户要求和著录项目仲裁。已经提交、审核通过的行不交；未管制完成日的行跟着「已发文未管制的行允许发文」开关。若还有没查成的，先把这些行重新查一遍，查完再交给仲裁。已经查成的行不再查。'
   : '核对还没结束。客户要求和著录项目是跟着核对带回来的，齐了才能仲裁。')
 const arbitrationOpen = ref(false)
 const arbitrationBoard = ref<Array<ArbitrationDecision & { customer: string }>>([])
@@ -146,11 +147,10 @@ const styleNotes = computed(() => {
     const profile = props.customers.find(item => item.enabled !== false && item.name.trim() === name)
     if (!profile?.limitMailStyle || profile.limitMailStyle === '1') return []
     const label = packaged.value?.modes.find(item => item.id === 'mail_style')?.options?.find(item => item.value === profile.limitMailStyle)?.label
-    return [`「${name}」在客户管理里保存的发文方式是${label ? `「${label}」` : '另一种'}。发到原网站时会按保存的方式。`]
+    return [`「${name}」在客户管理里保存的发文方式是${label ? `「${label}」` : '另一种'}。提交仍按勾选逐件单个来文，不会按那种方式把没勾的并进来。`]
   })
 })
 const procGaps = computed(() => procGapNotes(rows.value, runtime.value.procLabel))
-const pendingRows = computed(() => rows.value.filter(row => sheetStatus(row).review === '还没提交审核'))
 const outcomePack = computed(() => {
   const empty = { text: '', bars: [] as Array<{ key: string; label: string; count: number; color: string; percent: number }> }
   if (!rows.value.length) return empty
@@ -181,9 +181,8 @@ const outcomePack = computed(() => {
     else if (icPhase.value === 'run') checking += 1
     else missing += 1
   }
-  const letters = pending && icPhase.value !== 'run' ? groupWorkflowRows('1', rows.value.filter(row => sheetStatus(row).review === '还没提交审核'), specials.value, recipientMode.value).length : 0
   const text = [
-    pending ? (letters ? `还有 ${pending} 行待处理，会分成 ${letters} 封。` : `还有 ${pending} 行待处理。`) : '没有待处理的行。',
+    pending ? `还有 ${pending} 行待处理。提交时只发勾上的，一件一封。` : '没有待处理的行。',
     submitted ? `已提交审核 ${submitted} 行。` : '',
     mailed ? `${MAILED_UNFINISHED_REVIEW} ${mailed} 行。` : '',
     skipped ? `${SKIP_SEND_REVIEW} ${skipped} 行。` : '',
@@ -216,17 +215,6 @@ const outcomePack = computed(() => {
 })
 const outcome = computed(() => outcomePack.value.text)
 const outcomeBars = computed(() => outcomePack.value.bars)
-const outcomeGroups = computed(() => {
-  if (icPhase.value === 'run') return []
-  const groups = groupWorkflowRows('1', pendingRows.value, specials.value, recipientMode.value)
-  if (groups.length < 2 || groups.length > 6) return []
-  return groups.map(group => {
-    const to = people(group, 'to')
-    const cc = people(group, 'cc')
-    const who = cc && cc !== '表格里没有' ? `${to}，抄送 ${cc}` : to
-    return `${who} ${group.length} 行`
-  })
-})
 
 const unmatched = computed(() => rows.value.filter(row => !row.mailTypeId))
 const sheetPages = computed(() => Math.max(1, Math.ceil(rows.value.length / SHEET_PAGE_SIZE)))
@@ -249,6 +237,86 @@ function resetSheetPages(): void {
 function setSheetPage(page: number): void {
   sheetPage.value = Math.min(Math.max(1, page), sheetPages.value)
 }
+
+const sheetHost = ref<HTMLElement | null>(null)
+const sheetColWidths = ref<number[]>([])
+const sheetTableStyle = computed(() => {
+  const total = sheetColWidths.value.reduce((sum, width) => sum + width, 0)
+  if (!total) return undefined
+  return { width: `${total}px`, minWidth: '100%' }
+})
+let sheetRuler: HTMLSpanElement | null = null
+let sheetObserver: ResizeObserver | null = null
+let sheetObserved: HTMLElement | null = null
+
+function sheetTextWidth(text: string, source: Element): number {
+  if (!sheetRuler) return 0
+  sheetRuler.style.font = getComputedStyle(source).font
+  sheetRuler.textContent = text
+  return Math.ceil(sheetRuler.offsetWidth) + 2
+}
+
+function layoutSheet(): void {
+  const root = sheetHost.value
+  if (!root || !sheetRuler) return
+  if (sheetObserved !== root) {
+    if (sheetObserved) sheetObserver?.unobserve(sheetObserved)
+    sheetObserver?.observe(root)
+    sheetObserved = root
+  }
+  const pageRows = rowsOnSheetPage(sheetPageSafe.value)
+  if (!pageRows.length) {
+    sheetColWidths.value = []
+    return
+  }
+  const container = root.clientWidth
+  if (container <= 0) return
+  const table = root.querySelector('table')
+  if (!table) return
+  const header = table.querySelector('thead th') || table
+  const cell = table.querySelector('tbody td') || header
+  const pad = 16
+  const minOf = (title: string) => sheetTextWidth(title, header) + pad
+  const widest = (title: string, values: string[]) => {
+    let content = minOf(title)
+    for (const value of values) content = Math.max(content, sheetTextWidth(value, cell) + pad)
+    return { min: minOf(title), content }
+  }
+  const volume = widest('我方文号', pageRows.map(row => row.ourVolume))
+  const customer = widest('客户', pageRows.map(row => row.customerName || '表格里没有'))
+  const customerVolume = widest('客户文号', pageRows.map(row => row.customerVolume || '无'))
+  const proc = widest('处理事项', pageRows.map(row => row.procLabel))
+  const typeMin = minOf('发文类型')
+  let typeContent = typeMin
+  for (const row of pageRows) {
+    const label = row.mailTypeId ? (row.mailTypeLabel || '') : '选择发文类型'
+    let width = sheetTextWidth(label, row.mailTypeId ? cell : header) + pad
+    if (!row.mailTypeId) width += 22
+    typeContent = Math.max(typeContent, width)
+  }
+  const to = widest('收件人', pageRows.flatMap(row => [shownTo(row), carriedContactNote(row)].filter(Boolean)))
+  const cc = widest('抄送', pageRows.map(row => shownCc(row)))
+  const found = widest('查询结果', pageRows.map(row => sheetStatus(row).found))
+  const review = widest('审核状态', pageRows.map(row => sheetStatus(row).review))
+  sheetColWidths.value = assignColumnWidths([
+    volume,
+    { ...customer, grow: true },
+    customerVolume,
+    proc,
+    { min: typeMin, content: typeContent },
+    { ...to, grow: true },
+    cc,
+    found,
+    { ...review, lock: true }
+  ], container)
+}
+
+const sheetMeasureKey = computed(() => rowsOnSheetPage(sheetPageSafe.value).map(row => [
+  row.ourVolume, row.customerName, row.customerVolume, row.procLabel, row.mailTypeId ?? '', row.mailTypeLabel,
+  shownTo(row), carriedContactNote(row), shownCc(row), sheetStatus(row).found, sheetStatus(row).review
+].join('\u0001')).join('\u0002'))
+
+watch(sheetMeasureKey, () => layoutSheet(), { flush: 'post' })
 
 watch(workflowId, () => {
   rows.value = []
@@ -431,7 +499,18 @@ watch(() => `${connection.value.easyOrigin}\n${connection.value.operatorId}`, (n
   const originChanged = prevOrigin !== connection.value.easyOrigin
   const operatorChanged = isQueryGuid(prevOperator) && isQueryGuid(connection.value.operatorId) && prevOperator.toLowerCase() !== connection.value.operatorId.toLowerCase()
   if (!originChanged && !operatorChanged) {
-    if (isQueryGuid(connection.value.operatorId)) deskOwner = connection.value.operatorId.toLowerCase()
+    if (isQueryGuid(connection.value.operatorId)) {
+      const hadOwner = Boolean(deskOwner)
+      deskOwner = connection.value.operatorId.toLowerCase()
+      if (!hadOwner && !rows.value.length) {
+        const arriving = deskScope()
+        void recallRecovery('workflow-desk', arriving).then(saved => {
+          if (deskScope() !== arriving || rows.value.length) return
+          applyDesk(saved)
+          pokeDesk()
+        }).catch(() => { /* 这个账号还没有账本 */ })
+      }
+    }
     return
   }
   parking = true
@@ -925,7 +1004,15 @@ function onLimitResult(payload: { items: LimitMonitorRow[]; gates: Record<string
     const key = icKey(item.caseVolume, item.ctrlProc)
     seen.add(key)
     const gate = payload.gates[item.procId]
-    const review = gate === 'pending' ? '已提交审核' : gate === 'open' || gate === 'done' ? '还没提交审核' : payload.checking ? '…' : ''
+    if (!gate) {
+      if (payload.checking) {
+        if (!limitByKey[key]) limitByKey[key] = '…'
+      } else if (!limitByKey[key] || limitByKey[key] === '…' || limitByKey[key] === '已提交审核' || limitByKey[key] === '还没提交审核') {
+        delete limitByKey[key]
+      }
+      continue
+    }
+    const review = gate === 'pending' ? '已提交审核' : '还没提交审核'
     if (limitByKey[key] !== review) limitByKey[key] = review
   }
   if (!payload.checking) {
@@ -1379,7 +1466,7 @@ function onArbitrationResult(event: Event): void {
     if (open && arbitrationBoard.value.length) arbitrationOpen.value = true
     return
   }
-  const applied = applyArbitrationReply(rows.value, text)
+  const applied = applyArbitrationReply(rows.value, text, { iprOnly: arbitrateIprOnly.value })
   rows.value = applied.rows
   gapWaves.value = iprArbitrationWaves(rowsForArbitration(), {}, {}, { iprOnly: arbitrateIprOnly.value })
   const known = new Map(arbitrationBoard.value.map(item => [volumeKey(item.volume), item]))
@@ -1440,7 +1527,7 @@ onMounted(() => {
   const legacy = deskOwner || props.operatorId || connection.value.operatorId
   const legacyScope = isQueryGuid(legacy) ? legacy.toLowerCase() : 'local'
   const saved = scope.endsWith('|local')
-    ? recallLatest('workflow-desk').then(head => head?.payload ?? null)
+    ? Promise.resolve(null)
     : recallRecovery('workflow-desk', scope).then(payload => payload ?? recallRecovery('workflow-desk', legacyScope))
   void saved.then(payload => { if (!rows.value.length) applyDesk(payload) }).catch(() => { /* 没有账本就从空表开始 */ })
   if (typeof chrome === 'undefined' || !chrome.storage?.local) return
@@ -1456,21 +1543,41 @@ onMounted(() => {
       applyCarryMode()
     }
   }).catch(() => { /* 读不到就保持默认 */ })
+  sheetRuler = document.createElement('span')
+  sheetRuler.style.cssText = 'position:absolute;left:-9999px;top:0;white-space:nowrap;visibility:hidden;pointer-events:none;'
+  document.body.appendChild(sheetRuler)
+  sheetObserver = new ResizeObserver(() => layoutSheet())
+  layoutSheet()
 })
 onUnmounted(() => {
   window.removeEventListener('patmail-arbitration-result', onArbitrationResult)
   window.removeEventListener('pagehide', hideDesk)
   void flushRecovery('workflow-desk', deskScope(), readDesk)
+  sheetObserver?.disconnect()
+  sheetRuler?.remove()
+  sheetRuler = null
+  sheetObserved = null
 })
 
-async function askGaps(): Promise<void> {
-  const gaps = rows.value.filter(row => !row.iprName.trim() && reviewNeedsArbitration(sheetStatus(row).review, allowMailedUnfinished.value))
-  const settled = rows.value.filter(row => !row.iprName.trim() && !reviewNeedsArbitration(sheetStatus(row).review, allowMailedUnfinished.value)).length
-  if (!gaps.length || askingGap.value) return
+async function askGaps(retried = false): Promise<void> {
+  if (askingGap.value) return
   if (!arbitrationReady.value) {
-    sheetNotice.value = '核对还没结束，客户要求和著录项目还没齐，没有交给仲裁。'
+    sheetNotice.value = retried
+      ? '没查成的重新查没有完成，没有交给仲裁。'
+      : '核对还没结束，客户要求和著录项目还没齐，没有交给仲裁。'
     return
   }
+  const missed = retried ? [] : jobsByFound('没查成')
+  if (missed.length) {
+    const token = ++sheetQueryToken
+    sheetNotice.value = `还有 ${missed.length} 行没查成，先重新查一遍，查完再交给仲裁。`
+    await lookupCases(token, missed, 'unread')
+    if (token !== sheetQueryToken || icPhase.value !== 'done') return
+    return askGaps(true)
+  }
+  const gaps = rows.value.filter(row => !row.iprName.trim() && reviewNeedsArbitration(sheetStatus(row).review, allowMailedUnfinished.value))
+  const settled = rows.value.filter(row => !row.iprName.trim() && !reviewNeedsArbitration(sheetStatus(row).review, allowMailedUnfinished.value)).length
+  if (!gaps.length) return
   askingGap.value = true
   try {
     const customerInfo: Record<string, string> = {}
@@ -1496,7 +1603,7 @@ async function askGaps(): Promise<void> {
     const settledNote = settled ? `${settled} 行已经提交、审核通过${allowMailedUnfinished.value ? '' : '，或未管制完成日不允许发文'}，没有交给仲裁。` : ''
     const modeNote = arbitrateIprOnly.value
       ? '开了「没要求时仲裁只写技术联系人」：客户没写发给谁的行，仲裁会把技术联系人写成收件人。'
-      : '这一批没开「没要求时仲裁只写技术联系人」：客户没写发给谁的行一律拿不准留空，交给「全选联系人」，但客户要求明确写了发给谁的行照要求写。'
+      : '这一批没开「没要求时仲裁只写技术联系人」：客户没写发给谁的行一律拿不准留空，提交时走「信任AI」的圈选兜底。客户要求明确写了发给谁的行照要求写。'
     sheetNotice.value = [`用核对时暂存的材料，${eligible.length} 行分 ${waves.length} 批交给仲裁。助手只看这些文字，不再查接口。`, modeNote, heldNote, settledNote].filter(Boolean).join('')
     window.dispatchEvent(new CustomEvent('patmail-arbitrate', { detail: waves }))
   } finally {
@@ -1545,11 +1652,12 @@ function definitionHint(item: WorkflowDefinition | null): string {
           </span>
         </label>
       </div>
-      <p v-for="note in styleNotes" :key="note" class="hint">这张表按同一客户、同一收件人和抄送合成一封。{{ note }}</p>
+      <p class="hint">勾上的事项一件一封。没勾选的不会因为同客户、同收件人被并进来。</p>
+      <p v-for="note in styleNotes" :key="note" class="hint">{{ note }}</p>
       <p v-if="sheetNotice" class="hint">{{ sheetNotice }}</p>
       <div class="arbitrate-bar">
         <span v-if="gapWaves.length" v-hint="arbitrationHint">
-          <button type="button" class="ghost" :disabled="askingGap || !arbitrationReady" @click="askGaps">交给助手仲裁空着的收件人和抄送{{ gapWaves.length > 1 ? `（分 ${gapWaves.length} 批）` : '' }}</button>
+          <button type="button" class="ghost" :disabled="askingGap || !arbitrationReady" @click="askGaps()">交给助手仲裁空着的收件人和抄送{{ gapWaves.length > 1 ? `（分 ${gapWaves.length} 批）` : '' }}</button>
         </span>
         <button v-if="icPhase === 'done' && rows.length" type="button" class="ghost" @click="exportChecked">导出核对表</button>
         <button v-if="arbitrationBoard.length" type="button" class="ghost" @click="arbitrationOpen = true">仲裁结果 {{ arbitrationBoard.length }}</button>
@@ -1558,7 +1666,7 @@ function definitionHint(item: WorkflowDefinition | null): string {
             <input type="checkbox" :checked="autoArbitrate" @change="setAutoArbitrate" />
             核对完状态之后自动开始仲裁（如果有缺失）
           </label>
-          <label class="arbitrate-auto" v-hint="'状态是「已发文，事项未管制完成日」的行也允许勾选提交。提交时这些行会先弹出警示框，列出文号要仔细核对。去掉勾选后这类行不能勾选，也不进仲裁。核对中和仲裁中这一项固定，都结束后到发文阶段才能改。'">
+          <label class="arbitrate-auto" v-hint="'状态是「已发文，事项未管制完成日」的行也允许勾选，并且允许提交。提交时这些行会先弹出警示框，列出文号要仔细核对。去掉勾选后这类行不能勾选，也不能提交，也不进仲裁。核对中和仲裁中这一项固定，都结束后到发文阶段才能改。'">
             <input type="checkbox" :checked="allowMailedUnfinished" :disabled="mailToggleLocked" @change="setAllowMailedUnfinished" />
             已发文未管制的行允许发文
           </label>
@@ -1605,11 +1713,11 @@ function definitionHint(item: WorkflowDefinition | null): string {
           <button class="ghost tiny" type="button" :disabled="sheetPageSafe >= sheetPages" @click="setSheetPage(sheetPageSafe + 1)">下一页</button>
         </div>
       </div>
-      <div v-for="n in sheetSeen" v-show="n === sheetPageSafe && rows.length" :key="n" class="fit-table">
-      <table class="grid">
+      <div ref="sheetHost" v-if="rows.length" class="fit-table sheet-cols">
+      <div v-for="n in sheetSeen" v-show="n === sheetPageSafe" :key="n">
+      <table class="grid" :style="sheetTableStyle">
         <colgroup>
-          <col style="width: 11%" /><col style="width: 11%" /><col style="width: 11%" /><col style="width: 10%" />
-          <col style="width: 16%" /><col style="width: 14%" /><col style="width: 12%" /><col style="width: 8%" /><col style="width: 7%" />
+          <col v-for="(width, index) in sheetColWidths" :key="index" :style="{ width: width + 'px' }" />
         </colgroup>
         <thead><tr><th>我方文号</th><th>客户</th><th>客户文号</th><th>处理事项</th><th>发文类型</th><th>收件人</th><th>抄送</th><th>查询结果</th><th>审核状态</th></tr></thead>
         <tbody>
@@ -1633,6 +1741,7 @@ function definitionHint(item: WorkflowDefinition | null): string {
         </tbody>
       </table>
       </div>
+      </div>
       <p v-if="status" class="save-status" role="status">{{ status }}</p>
       <section v-if="rows.length && icPhase !== 'idle'" class="card inset">
         <h2>{{ outcome }}</h2>
@@ -1642,7 +1751,6 @@ function definitionHint(item: WorkflowDefinition | null): string {
             <span class="outcome-bar-track"><span :style="{ width: bar.percent + '%', background: bar.color }"></span></span>
           </li>
         </ul>
-        <p v-if="outcomeGroups.length" class="hint">{{ outcomeGroups.join('，') }}。</p>
         <div class="outcome-actions">
           <button v-if="missingCount" type="button" class="ghost tiny" @click="exportMissing">导出库里没有 {{ missingCount }}</button>
           <button v-if="unreadCount" type="button" class="ghost tiny" @click="exportUnread">导出没查成 {{ unreadCount }}</button>
@@ -1669,7 +1777,7 @@ function definitionHint(item: WorkflowDefinition | null): string {
           <button type="button" class="ghost tiny" @click="exportArbitration">导出仲裁结果</button>
           <button type="button" aria-label="关闭" @click="arbitrationOpen = false">×</button>
         </header>
-        <p>收件人只在 IPR（技术联系人）、发明人和客户联系人里选。商务、登录人、密送登录人仍按默认追加，不在这张表里改。没有要求也没有技术联系人的行留空，提交时用「全选联系人」兜底。拿不准的行没有填进表格。</p>
+        <p>收件人只在 IPR（技术联系人）、发明人和客户联系人里选。商务、登录人、密送登录人仍按默认追加，不在这张表里改。没有要求也没有技术联系人的行留空，拿不准的行没有填进表格。「信任AI」按写回的人提交，空行再按发文规则勾选；「直接全选」不采用写回的收件人。</p>
         <div class="arbitration-scroll">
           <table class="grid">
             <thead>

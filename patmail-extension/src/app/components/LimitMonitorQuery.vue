@@ -7,7 +7,7 @@ import { isLimitMonitorType, type LimitMonitorQuery } from '../../api/limit-moni
 import { MAILED_UNFINISHED_REVIEW, SKIP_SEND_REVIEW } from '../../customer/pct-flow-status'
 import { clonePctTask, readWorkflowTask, writeWorkflowTask } from '../../customer/pct-sheet'
 import { limitMailItems, limitMailLetterLabel, limitMailProcIds, limitMailSubmitShouldHalt, runLimitMailSubmit, runMailLetterPool, selectionNeedsAddressChoice } from '../../customer/limit-mail-submit'
-import { beginProgress, classifySubmitText, confirmDialog, endProgress, logProgress, progressSummaryLine, tallyProgress } from '../dialog'
+import { beginProgress, classifySubmitText, confirmDialog, endProgress, logProgress, noteProgress, progressSummaryLine, tallyProgress } from '../dialog'
 import { splitCaseVolumes } from '../../customer/volume-list'
 import { isQueryGuid } from '../../query/query-validator'
 import { flushRecovery, holdRecovery, peekRecovery, recallRecovery, scheduleRecovery, systemScope } from '../../recovery/wal-ledger'
@@ -151,7 +151,19 @@ function pokeQuery(): void {
 }
 
 watch(() => connection.value.easyOrigin, (next, previous) => {
-  if (!previous || next === previous) return
+  if (next === previous) return
+  if (!previous) {
+    queryScope = systemScope(next, 'workflow')
+    if (rows.value.length) return
+    const arriving = queryScope
+    void recallRecovery('limit-query', arriving).then(async saved => {
+      if (!saved) saved = await recallRecovery('limit-query', 'workflow')
+      if (queryScope !== arriving || rows.value.length) return
+      applyQueryDesk(saved)
+      pokeQuery()
+    }).catch(() => { /* 这个系统还没有账本 */ })
+    return
+  }
   parkingQuery = true
   const payload = readQueryDesk()
   holdRecovery('limit-query', systemScope(previous, 'workflow'), payload)
@@ -175,8 +187,8 @@ watch([rows, selected, confirmedIds, message, pageIndex], pokeQuery, { deep: tru
 
 onMounted(() => {
   queryScope = systemScope(connection.value.easyOrigin, 'workflow')
-  void recallRecovery('limit-query', queryScope).then(async payload => {
-    if (!payload) payload = await recallRecovery('limit-query', 'workflow')
+  if (queryScope.endsWith('|local')) return
+  void recallRecovery('limit-query', queryScope).then(payload => payload ?? recallRecovery('limit-query', 'workflow')).then(payload => {
     applyQueryDesk(payload)
   }).catch(() => { /* 没有账本就等下一次查询 */ })
 })
@@ -237,7 +249,6 @@ async function markSendGates(items: LimitMonitorRow[], merge = false): Promise<v
         resolved.set(`${job.caseId}|${job.procId}`, response.payload.data.gate)
       } else {
         failed += 1
-        resolved.set(`${job.caseId}|${job.procId}`, 'pending')
       }
     }
   }
@@ -260,11 +271,14 @@ async function markSendGates(items: LimitMonitorRow[], merge = false): Promise<v
     publish()
     return
   }
-  selected.value = selected.value.filter(id => next[id] === 'open' || next[id] === 'done')
+  selected.value = selected.value.filter(id => {
+    const gate = next[id]
+    return !gate || gate === 'open' || gate === 'done'
+  })
   const pending = items.filter(row => next[row.procId] === 'pending').length
   const bits = [
     pending ? `待审核 ${pending} 个，已标灰，不能勾选。` : '',
-    failed ? `${failed} 件没有读到发文流程，先按待审核处理。` : '',
+    failed ? `${failed} 件没有读到发文流程，没有当成已提交审核。勾选还在，可以再点「提交到 EASY」。` : '',
     unchecked ? `${unchecked} 件没有核对到发文流程，不按还没提交审核计算。` : ''
   ].filter(Boolean)
   if (bits.length) message.value = [message.value, ...bits].filter(Boolean).join('')
@@ -431,18 +445,39 @@ function rowCanConfirm(procId: string): boolean {
   return true
 }
 
+function blockMessage(ids: string[], verb: '提交' | '勾选'): string {
+  if (checkingGates.value) {
+    return verb === '提交' ? '还在核对发文审核状态，先不能提交。' : '还在核对发文审核状态，先不能确认。'
+  }
+  const reasons = ids.filter(id => isQueryGuid(id) && !rowCanConfirm(id)).map(id => {
+    if (closedIds.value.has(id.toLowerCase())) return 'closed'
+    const flow = flowByProc.value[id]
+    if (flow === MAILED_UNFINISHED_REVIEW && props.allowMailedUnfinished === false) return 'mailed'
+    if (flow === SKIP_SEND_REVIEW) return 'skip'
+    return 'review'
+  })
+  if (reasons.length && reasons.every(item => item === 'mailed')) {
+    return verb === '提交'
+      ? '已发文、事项还没写完成日的不能提交。上面的「已发文未管制的行允许发文」同时管勾选和提交，勾上之后再点提交，会先弹出警示框。'
+      : '已发文、事项还没写完成日的不能勾选。先勾上上面的「已发文未管制的行允许发文」，这个开关同时管勾选和提交。'
+  }
+  if (reasons.length && reasons.every(item => item === 'skip')) {
+    return verb === '提交' ? '不用发的不能提交。' : '不用发的不能勾选。'
+  }
+  if (reasons.length && reasons.every(item => item === 'closed')) return '这几件这次已经提交过，没有再提交。'
+  return verb === '提交' ? '已提交审核的不能提交。' : '已提交审核的不能勾选。'
+}
+
+watch(() => props.allowMailedUnfinished, allow => {
+  if (allow !== false) return
+  const next = selected.value.filter(id => flowByProc.value[id] !== MAILED_UNFINISHED_REVIEW)
+  if (next.length !== selected.value.length) selected.value = next
+})
+
 function onConfirm(ids: string[]): void {
   const procIds = ids.filter(item => isQueryGuid(item) && rowCanConfirm(item))
   if (!procIds.length && ids.length) {
-    const mailed = ids.some(item => flowByProc.value[item] === MAILED_UNFINISHED_REVIEW)
-    const skipped = ids.some(item => flowByProc.value[item] === SKIP_SEND_REVIEW)
-    message.value = checkingGates.value
-      ? '还在核对发文审核状态，先不能确认。'
-      : mailed
-        ? '已发文、事项还没写完成日的不能勾选。'
-        : skipped
-          ? '不用发的不能勾选。'
-          : '已提交审核的不能勾选。'
+    message.value = blockMessage(ids, '勾选')
     return
   }
   confirmedIds.value = procIds
@@ -473,15 +508,7 @@ async function onSubmitAsk(address?: string): Promise<void> {
   }
   const live = selected.value.filter(item => isQueryGuid(item) && rowCanConfirm(item))
   if (!live.length) {
-    const mailed = selected.value.some(item => flowByProc.value[item] === MAILED_UNFINISHED_REVIEW)
-    const skipped = selected.value.some(item => flowByProc.value[item] === SKIP_SEND_REVIEW)
-    message.value = checkingGates.value
-      ? '还在核对发文审核状态，先不能提交。'
-      : mailed
-        ? '已发文、事项还没写完成日的不能提交。'
-        : skipped
-          ? '不用发的不能提交。'
-          : '已提交审核的不能提交。'
+    message.value = blockMessage(selected.value, '提交')
     return
   }
   const procIds = live
@@ -509,7 +536,7 @@ async function onSubmitAsk(address?: string): Promise<void> {
     sheetRows: props.sheetRows?.length ? props.sheetRows : (task?.rows ?? []),
     mode: props.recipientMode ?? (task?.recipientMode === 'lead' || task?.recipientMode === 'ipr' ? task.recipientMode : 'ipr'),
     specials: new Set(props.inventorCustomers ?? []),
-    address: address === 'auto' ? 'auto' : address === 'checked' ? 'checked' : 'named'
+    address: address === 'auto' ? 'auto' : address === 'all' ? 'all' : address === 'checked' ? 'checked' : 'named'
   })
   if (!planned.ok) {
     message.value = planned.message
@@ -534,6 +561,7 @@ async function onSubmitAsk(address?: string): Promise<void> {
       const text = await runLimitMailSubmit(bridge, props.userId, [item], gates.value)
       const kind = classifySubmitText(text)
       tallyProgress(kind, limitMailProcIds(item).length)
+      if (kind !== 'success') noteProgress(kind, label, text)
       if (kind === 'abnormal') {
         for (const row of letterRows) abnormal.push({ caseVolume: row.caseVolume, procLabel: row.ctrlProc })
       }
@@ -552,7 +580,15 @@ async function onSubmitAsk(address?: string): Promise<void> {
       for (const id of sent) nextClosed.add(id)
       closedIds.value = nextClosed
     }
-    if (halted) tallyProgress('skipped', unstarted.reduce((sum, item) => sum + limitMailProcIds(item).length, 0))
+    if (halted) {
+      for (const item of unstarted) {
+        const skipLabel = limitMailLetterLabel(item, id => rows.value.find(entry => entry.procId === id)?.caseVolume ?? '')
+        const reason = '上一封结果无法确认，这一件没有开始。'
+        tallyProgress('skipped', limitMailProcIds(item).length)
+        noteProgress('skipped', skipLabel, reason)
+        logProgress(`${skipLabel}：跳过。${reason}`)
+      }
+    }
     emit('confirm', confirmedIds.value)
     logProgress('正在回传所涉及案件的审核状态。', planned.items.length)
     await markSendGates(involved, true)

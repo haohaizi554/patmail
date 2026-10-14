@@ -106,6 +106,17 @@ function looksLikeLoggedOutHtml(body: string): boolean {
   return looksLikeLoginHtml(body) || (body.length <= 500 && /出错了/.test(body) && !/<html[\s>]/i.test(body))
 }
 
+/** 网关、超时、连不上。这种失败可以再点提交；写请求结果没确认时仍不能当成已经成功。 */
+export function transientEasyFailure(message: string): boolean {
+  return /网关异常|服务暂不可用|请求超时|无法连接 EASY/.test(message)
+}
+
+/** 发文已经创建、后面的读取失败时，再点提交应沿用这封，而不是再创建一封。 */
+export function retryCreatedDraft(message: string): string {
+  if (!transientEasyFailure(message) || message.includes('再点')) return message
+  return `${message}再点「提交到 EASY」会沿用这封发文，不会重新创建。`
+}
+
 export class EasyTransport {
   private readonly origin: string | null
   private readonly fetcher: typeof fetch

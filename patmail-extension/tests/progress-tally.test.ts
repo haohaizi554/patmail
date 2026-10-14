@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { beginProgress, classifySubmitText, logProgress, progressDialog, progressSummaryLine, tallyProgress } from '../src/app/dialog'
+import { beginProgress, classifySubmitText, logProgress, noteProgress, progressDialog, progressSummaryLine, tallyProgress } from '../src/app/dialog'
 
 describe('提交进度统计', () => {
   it('对不上邮箱算异常，已提交算成功', () => {
@@ -25,6 +25,10 @@ describe('提交进度统计', () => {
     expect(progressSummaryLine()).toBe('统计：成功 3 件，失败 1 件，异常 2 件。')
     tallyProgress('skipped', 4)
     expect(progressSummaryLine()).toBe('统计：成功 3 件，失败 1 件，异常 2 件，跳过 4 件。')
+    noteProgress('failed', 'CPA2529550CN', '没有提交到审核人。创建发文的响应无法确认，没有再次创建。')
+    noteProgress('skipped', 'CW1PZ2528275CN', '上一封结果无法确认，这一件没有开始。')
+    expect(progressSummaryLine()).toContain('失败 CPA2529550CN：创建发文的响应无法确认，没有再次创建。')
+    expect(progressSummaryLine()).toContain('跳过 CW1PZ2528275CN：上一封结果无法确认，这一件没有开始。')
   })
 
   it('较小的完成数不会把进度条拉回去', () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { formatCustomerInfo, formatRecordInfo, loadCaseRecord } from '../src/customer/case-record'
+import { isMessage, MessageType } from '../src/shared/message'
 import { lookupIcFlow } from '../src/customer/ic-flow-lookup'
 import type { ApiResult } from '../src/api/types'
 
@@ -20,6 +21,19 @@ describe('核对时带上的客户要求和著录项目', () => {
       { ...client, TableRows: [{ contact_name: '姜颖', contact_type: 'IPR', email: 'jiang@example.com' }] }
     )).toContain('姜颖｜IPR｜jiang@example.com')
     expect(formatCustomerInfo({ ...client, CustomerDemand: null })).toBe('')
+    const html = `&lt;p&gt;主送技术联系人&lt;/p&gt;&lt;p&gt;${'甲'.repeat(5000)}&lt;/p&gt;`
+    const brief = formatCustomerInfo({ ...client, CustomerDemand: [{ demand_name: '发邮要求', demand_desc: html }] })
+    expect(brief).toContain('主送技术联系人')
+    expect(brief).not.toContain('<p>')
+    expect(brief).not.toContain('&lt;')
+    expect(brief.length).toBeLessThanOrEqual(4000)
+    expect(isMessage({
+      type: MessageType.LookupIcFlowResult,
+      payload: {
+        ok: true,
+        data: { items: [{ caseVolume: 'PA1', procLabel: '提醒申请PCT', found: true, gate: 'open', customerInfo: brief }] }
+      }
+    })).toBe(true)
   })
 
   it('IPR 空着的行在核对时读一次著录，已经填了 IPR 的不再读', async () => {
@@ -45,7 +59,7 @@ describe('核对时带上的客户要求和著录项目', () => {
     }
   })
 
-  it('三个接口按案件编号读取，不重新查文号', async () => {
+  it('按案件编号读取客户要求、发明人、联系人、申请人和备注，不重新查文号', async () => {
     const calls: string[] = []
     const loaded = await loadCaseRecord('aaaaaaaa-1111-4111-8111-111111111111', async (operation, params) => {
       calls.push(`${operation}:${params.get('case_id') || params.get('apply_id') || params.get('id')}`)
@@ -55,13 +69,21 @@ describe('核对时带上的客户要求和著录项目', () => {
       if (operation === 'caseInventor') {
         return { ok: true, data: { ...client, TableRows: [{ inventor_name_cn: '艾桥' }] } }
       }
+      if (operation === 'caseManageInfo') {
+        return { ok: true, data: { ...client, CaseInfo: [{ applicant: '旗滨玻璃', case_remark: '技术联系人黄静林' }] } }
+      }
       return { ok: true, data: { ...client, TableRows: [{ contact_name: '姜颖', contact_type: '技术联系人' }] } }
     })
     expect(calls).toEqual([
       'casePageDemand:aaaaaaaa-1111-4111-8111-111111111111',
       'caseInventor:aaaaaaaa-1111-4111-8111-111111111111',
-      'caseRecordContact:aaaaaaaa-1111-4111-8111-111111111111'
+      'caseRecordContact:aaaaaaaa-1111-4111-8111-111111111111',
+      'caseManageInfo:aaaaaaaa-1111-4111-8111-111111111111'
     ])
     expect(loaded).toMatchObject({ customerInfo: expect.stringContaining('发给发明人'), recordInfo: expect.stringContaining('艾桥') })
+    if (loaded !== 'login') {
+      expect(loaded.recordInfo).toContain('申请人：旗滨玻璃')
+      expect(loaded.recordInfo).toContain('案件备注：技术联系人黄静林')
+    }
   })
 })
