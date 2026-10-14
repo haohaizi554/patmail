@@ -23,7 +23,7 @@ import type { MailRuleBundle, SelectedPatentFile } from '../../mail/types'
 import { joinCaseVolumes } from '../../customer/volume-list'
 import type { LimitMonitorRow } from '../../api/limit-monitor-types'
 import { isQueryGuid } from '../../query/query-validator'
-import { flushRecovery, recallLatest, recallRecovery, scheduleRecovery } from '../../recovery/wal-ledger'
+import { flushRecovery, holdRecovery, peekRecovery, recallLatest, recallRecovery, scheduleRecovery, systemScope } from '../../recovery/wal-ledger'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { scopeFromConnection } from '../../shared/connection'
 import { useWorkspace } from '../composables/useWorkspace'
@@ -389,7 +389,7 @@ function clearHits(): void {
   for (const key of Object.keys(limitByKey)) delete limitByKey[key]
 }
 
-function leaveSystem(): void {
+function blankDesk(): void {
   sheetImportToken += 1
   saving.value = false
   sheetName.value = ''
@@ -407,22 +407,51 @@ function leaveSystem(): void {
   status.value = ''
   senderTouched.value = false
   resetLimit()
-  queryToken.value += 1
   try { sessionStorage.removeItem(PCT_WORKFLOW_TASK_KEY) } catch { /* 当前页面没有会话存储时略过 */ }
-  void flushRecovery('workflow-desk', deskScope(), () => null)
 }
-
-watch(() => connection.value.easyOrigin, (next, previous) => {
-  if (!previous || next === previous) return
-  leaveSystem()
-})
 
 let deskOwner = ''
+let parking = false
+
+function scopeOf(origin: string, operator: string): string {
+  const id = operator.trim()
+  const who = isQueryGuid(id) ? id.toLowerCase() : 'local'
+  return systemScope(origin, who)
+}
 
 function deskScope(): string {
-  const id = deskOwner || props.operatorId || connection.value.operatorId
-  return isQueryGuid(id) ? id.toLowerCase() : 'local'
+  return scopeOf(connection.value.easyOrigin, deskOwner || props.operatorId || connection.value.operatorId)
 }
+
+watch(() => `${connection.value.easyOrigin}\n${connection.value.operatorId}`, (next, previous) => {
+  if (!previous || next === previous) return
+  const splitAt = previous.indexOf('\n')
+  const prevOrigin = splitAt < 0 ? previous : previous.slice(0, splitAt)
+  const prevOperator = splitAt < 0 ? '' : previous.slice(splitAt + 1)
+  const originChanged = prevOrigin !== connection.value.easyOrigin
+  const operatorChanged = isQueryGuid(prevOperator) && isQueryGuid(connection.value.operatorId) && prevOperator.toLowerCase() !== connection.value.operatorId.toLowerCase()
+  if (!originChanged && !operatorChanged) {
+    if (isQueryGuid(connection.value.operatorId)) deskOwner = connection.value.operatorId.toLowerCase()
+    return
+  }
+  parking = true
+  const payload = readDesk()
+  holdRecovery('workflow-desk', scopeOf(prevOrigin, deskOwner || prevOperator), payload)
+  blankDesk()
+  deskOwner = isQueryGuid(connection.value.operatorId) ? connection.value.operatorId.toLowerCase() : ''
+  const arriving = deskScope()
+  const cached = peekRecovery('workflow-desk', arriving)
+  if (cached) applyDesk(cached)
+  parking = false
+  pokeDesk()
+  if (cached === undefined) {
+    void recallRecovery('workflow-desk', arriving).then(saved => {
+      if (deskScope() !== arriving || rows.value.length) return
+      applyDesk(saved)
+      pokeDesk()
+    }).catch(() => { /* 这个系统还没有账本 */ })
+  }
+})
 
 function phaseOf(value: unknown): 'idle' | 'run' | 'done' | 'fail' {
   return value === 'run' || value === 'done' || value === 'fail' || value === 'idle' ? value : 'idle'
@@ -509,22 +538,16 @@ function applyDesk(payload: unknown): void {
   queryCaseVolume.value = typeof desk.queryCaseVolume === 'string' ? desk.queryCaseVolume : ''
   icEpoch.value += 1
   deskOwner = owner
-  if (!sheetNotice.value) sheetNotice.value = '登录中断前的工作已经从本机恢复账本找回。'
+  if (!sheetNotice.value) sheetNotice.value = '已从本机恢复账本找回这个系统上次留下的工作。'
   gapWaves.value = iprArbitrationWaves(rowsForArbitration(), {}, {}, { iprOnly: arbitrateIprOnly.value })
 }
 
 function pokeDesk(): void {
+  if (parking) return
   scheduleRecovery('workflow-desk', deskScope(), readDesk)
 }
 
 watch([rows, icPhase, limitPhase, progress, arbitrationBoard, confirmedProcIds, sheetName, status, queryOpen], pokeDesk, { deep: true })
-
-watch(() => connection.value.operatorId, next => {
-  if (!isQueryGuid(next)) return
-  const id = next.toLowerCase()
-  if (deskOwner && deskOwner !== id) leaveSystem()
-  deskOwner = id
-})
 
 function resetLimit(): void {
   sheetQueryToken += 1
@@ -1287,7 +1310,7 @@ const liveTask = computed(() => {
   const detail = labels.map(label => `${label} ${rows.value.filter(row => row.mailTypeLabel.trim() === label).length} 件`).join('，')
   return {
     customer,
-    detail: `${rows.value.length} 行。发文类型：${detail || '还没对上'}。已确认勾选 ${confirmedProcIds.value.length} 件。`
+    detail: `${rows.value.length} 行。发文类型：${detail || '还没对上'}。已勾选 ${confirmedProcIds.value.length} 件。`
   }
 })
 const emit = defineEmits<{ liveTask: [value: { customer: string; detail: string } | null] }>()
@@ -1414,7 +1437,11 @@ onMounted(() => {
   window.addEventListener('patmail-arbitration-result', onArbitrationResult)
   window.addEventListener('pagehide', hideDesk)
   const scope = deskScope()
-  const saved = scope === 'local' ? recallLatest('workflow-desk').then(head => head?.payload ?? null) : recallRecovery('workflow-desk', scope)
+  const legacy = deskOwner || props.operatorId || connection.value.operatorId
+  const legacyScope = isQueryGuid(legacy) ? legacy.toLowerCase() : 'local'
+  const saved = scope.endsWith('|local')
+    ? recallLatest('workflow-desk').then(head => head?.payload ?? null)
+    : recallRecovery('workflow-desk', scope).then(payload => payload ?? recallRecovery('workflow-desk', legacyScope))
   void saved.then(payload => { if (!rows.value.length) applyDesk(payload) }).catch(() => { /* 没有账本就从空表开始 */ })
   if (typeof chrome === 'undefined' || !chrome.storage?.local) return
   void chrome.storage.local.get([AUTO_ARBITRATE_KEY, ALLOW_MAILED_UNFINISHED_KEY, ARBITRATE_IPR_ONLY_KEY, CARRY_ACROSS_BREAKS_KEY]).then(stored => {
@@ -1578,28 +1605,34 @@ function definitionHint(item: WorkflowDefinition | null): string {
           <button class="ghost tiny" type="button" :disabled="sheetPageSafe >= sheetPages" @click="setSheetPage(sheetPageSafe + 1)">下一页</button>
         </div>
       </div>
-      <table v-for="n in sheetSeen" v-show="n === sheetPageSafe && rows.length" :key="n" class="grid">
+      <div v-for="n in sheetSeen" v-show="n === sheetPageSafe && rows.length" :key="n" class="fit-table">
+      <table class="grid">
+        <colgroup>
+          <col style="width: 11%" /><col style="width: 11%" /><col style="width: 11%" /><col style="width: 10%" />
+          <col style="width: 16%" /><col style="width: 14%" /><col style="width: 12%" /><col style="width: 8%" /><col style="width: 7%" />
+        </colgroup>
         <thead><tr><th>我方文号</th><th>客户</th><th>客户文号</th><th>处理事项</th><th>发文类型</th><th>收件人</th><th>抄送</th><th>查询结果</th><th>审核状态</th></tr></thead>
         <tbody>
           <tr v-for="row in rowsOnSheetPage(n)" :key="row.ourVolume + '\n' + row.procLabel" v-memo="[row, sheetMemo(row)]" :class="{ 'is-pending': sheetStatus(row).review === MAILED_UNFINISHED_REVIEW }">
-            <td :class="{ 'volume-corrected': row.ourVolumeCorrected }">{{ row.ourVolume }}</td>
-            <td>{{ row.customerName || '表格里没有' }}</td>
-            <td :class="{ 'volume-corrected': row.customerVolumeCorrected }">{{ row.customerVolume || '无' }}</td>
-            <td>{{ row.procLabel }}</td>
+            <td :class="{ 'volume-corrected': row.ourVolumeCorrected }"><span class="clip" v-hint.clip="row.ourVolume">{{ row.ourVolume }}</span></td>
+            <td><span class="clip" v-hint.clip="row.customerName || '表格里没有'">{{ row.customerName || '表格里没有' }}</span></td>
+            <td :class="{ 'volume-corrected': row.customerVolumeCorrected }"><span class="clip" v-hint.clip="row.customerVolume || '无'">{{ row.customerVolume || '无' }}</span></td>
+            <td><span class="clip" v-hint.clip="row.procLabel">{{ row.procLabel }}</span></td>
             <td>
-              <span v-if="row.mailTypeId">{{ row.mailTypeLabel }}</span>
+              <span v-if="row.mailTypeId" class="clip" v-hint.clip="row.mailTypeLabel">{{ row.mailTypeLabel }}</span>
               <MailTypeTreeSelect v-else :model-value="row.mailTypeId ?? ''" :options="mailTypeOptions" :disabled="mailTypes.length === 0" @update:model-value="setRowType(row.ourVolume, String($event))" />
             </td>
             <td>
-              <div>{{ shownTo(row) }}</div>
-              <div v-if="carriedContactNote(row)">{{ carriedContactNote(row) }}</div>
+              <span class="clip" v-hint.clip="shownTo(row)">{{ shownTo(row) }}</span>
+              <span v-if="carriedContactNote(row)" class="clip" v-hint.clip="carriedContactNote(row)">{{ carriedContactNote(row) }}</span>
             </td>
-            <td>{{ shownCc(row) }}</td>
-            <td :class="statusShade(sheetStatus(row).found)">{{ sheetStatus(row).found }}</td>
-            <td :class="statusShade(sheetStatus(row).review)">{{ sheetStatus(row).review }}</td>
+            <td><span class="clip" v-hint.clip="shownCc(row)">{{ shownCc(row) }}</span></td>
+            <td :class="statusShade(sheetStatus(row).found)"><span class="clip" v-hint.clip="sheetStatus(row).found">{{ sheetStatus(row).found }}</span></td>
+            <td :class="statusShade(sheetStatus(row).review)"><span class="clip" v-hint.clip="sheetStatus(row).review">{{ sheetStatus(row).review }}</span></td>
           </tr>
         </tbody>
       </table>
+      </div>
       <p v-if="status" class="save-status" role="status">{{ status }}</p>
       <section v-if="rows.length && icPhase !== 'idle'" class="card inset">
         <h2>{{ outcome }}</h2>

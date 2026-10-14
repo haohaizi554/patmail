@@ -11,8 +11,9 @@ import { limitMailItems, limitMailLetterLabel, limitMailProcIds, limitMailSubmit
 import { inventorCustomerNames, recipientModeForTask } from '../../workflow/catalog'
 import { joinCaseVolumes, splitCaseVolumes } from '../../customer/volume-list'
 import { isQueryGuid } from '../../query/query-validator'
-import { flushRecovery, recallRecovery, scheduleRecovery } from '../../recovery/wal-ledger'
+import { flushRecovery, holdRecovery, peekRecovery, recallRecovery, scheduleRecovery, systemScope } from '../../recovery/wal-ledger'
 import { scopeFromConnection } from '../../shared/connection'
+import { readLimitTimeout } from '../../api/query-timeout'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useWorkflowCatalog } from '../composables/useWorkflowCatalog'
 import { useWorkspace } from '../composables/useWorkspace'
@@ -58,7 +59,8 @@ const boundFields = computed(() => {
 })
 const shownPageSize = computed(() => sheetMerged.value ? Math.max(rows.value.length, 1) : pageSize.value)
 
-function textFor(code: string, fallback: string): string {
+function textFor(code: string, fallback: string, timeoutMs = 60_000): string {
+  if (code === 'REQUEST_TIMEOUT') return `原网站查询太慢，没有在 ${timeoutMs / 60_000} 分钟内返回。可以把超时时间调长后再查。`
   if (code === 'SESSION_EXPIRED') return 'EASY 登录已失效，请在原网站重新登录后检测。'
   if (code === 'HTTP_ERROR') return 'EASY 暂时没有返回列表，可以再查一次。'
   if (code === 'INVALID_QUERY') return fallback || '请输入查询条件。'
@@ -79,10 +81,11 @@ function remember(input: { caseVolume?: string; applicationNo?: string; customer
 
 async function requestPage(query: LimitMonitorQuery): Promise<LimitMonitorResult> {
   if (!bridge || !connected.value) throw '尚未连接 EASY。'
-  const response = await bridge.request({ type: MessageType.SearchLimitMonitor, payload: { query } })
+  const timeoutMs = await readLimitTimeout()
+  const response = await bridge.request({ type: MessageType.SearchLimitMonitor, payload: { query, timeoutMs } })
   if (response.type === MessageType.Error) throw response.payload.message
   if (response.type !== MessageType.SearchLimitMonitorResult) throw '期限查询返回了意外结果。'
-  if (!response.payload.ok) throw textFor(response.payload.error.code, response.payload.error.message)
+  if (!response.payload.ok) throw textFor(response.payload.error.code, response.payload.error.message, timeoutMs)
   return response.payload.data
 }
 
@@ -259,8 +262,22 @@ async function onSubmitAsk(address?: string): Promise<void> {
   }
   const task = readWorkflowTask()
   const flow = catalog.value.workflows.find(item => item.id === task?.workflowId) ?? pctDefinition.value
+  const open = new Set(rows.value.filter(row => {
+    const gate = gates.value[row.procId]
+    return gate === 'open' || gate === 'done'
+  }).map(row => row.procId))
+  const procIds = selected.value.filter(item => isQueryGuid(item) && open.has(item))
+  if (!selected.value.length) {
+    message.value = '先勾选要提交的事项。'
+    return
+  }
+  if (!procIds.length) {
+    message.value = checkingGates.value ? '还在核对发文审核状态，先不能提交。' : '已提交审核的不能提交。'
+    return
+  }
+  confirmedIds.value = procIds
   const planned = limitMailItems({
-    procIds: confirmedIds.value.length ? confirmedIds.value : (task?.confirmedProcIds ?? []),
+    procIds,
     rows: rows.value,
     sheetRows: task?.rows ?? [],
     mode: recipientModeForTask(task, catalog.value.workflows),
@@ -289,7 +306,11 @@ async function onSubmitAsk(address?: string): Promise<void> {
       }
       return limitMailSubmitShouldHalt(text)
     })
-    if (sent.size) confirmedIds.value = confirmedIds.value.filter(id => !sent.has(id.toLowerCase()))
+    if (sent.size) {
+      const keep = (id: string) => !sent.has(id.toLowerCase())
+      confirmedIds.value = confirmedIds.value.filter(keep)
+      selected.value = selected.value.filter(keep)
+    }
     if (halted) tallyProgress('skipped', unstarted.reduce((sum, item) => sum + limitMailProcIds(item).length, 0))
     logProgress(progressSummaryLine(), finished)
     message.value = progressSummaryLine()
@@ -372,9 +393,20 @@ async function resumeQuery(): Promise<void> {
   await search({ type: 'all', caseVolume, ctrlProcId: ctrl, fields: { case_volume: caseVolume, ctrl_proc: ctrl } })
 }
 
+let limitScope = systemScope(connection.value.easyOrigin, 'page')
+let parking = false
+
+function pokeLimit(): void {
+  if (parking) return
+  scheduleRecovery('limit-query', limitScope, readLimitDesk)
+}
+
 watch(() => connection.value.easyOrigin, (next, previous) => {
   if (!previous || next === previous) return
+  parking = true
   gateToken += 1
+  const payload = readLimitDesk()
+  holdRecovery('limit-query', systemScope(previous, 'page'), payload)
   rows.value = []
   gates.value = {}
   checkingGates.value = false
@@ -388,6 +420,19 @@ watch(() => connection.value.easyOrigin, (next, previous) => {
   draftFields.value = {}
   seed.value = null
   seedToken.value += 1
+  limitScope = systemScope(next, 'page')
+  const cached = peekRecovery('limit-query', limitScope)
+  const arriving = limitScope
+  if (cached) applyLimitDesk(cached)
+  parking = false
+  pokeLimit()
+  if (cached === undefined) {
+    void recallRecovery('limit-query', arriving).then(saved => {
+      if (limitScope !== arriving || rows.value.length) return
+      applyLimitDesk(saved)
+      pokeLimit()
+    }).catch(() => { /* 这个系统还没有账本 */ })
+  }
 })
 
 function readLimitDesk(): unknown | null {
@@ -425,15 +470,19 @@ function applyLimitDesk(payload: unknown): void {
 }
 
 watch([rows, selected, confirmedIds, message, pageIndex], () => {
-  scheduleRecovery('limit-query', 'page', readLimitDesk)
+  pokeLimit()
 }, { deep: true })
 
 onMounted(() => {
-  void recallRecovery('limit-query', 'page').then(payload => applyLimitDesk(payload)).catch(() => { /* 没有账本就等下一次查询 */ })
+  limitScope = systemScope(connection.value.easyOrigin, 'page')
+  void recallRecovery('limit-query', limitScope).then(async payload => {
+    if (!payload) payload = await recallRecovery('limit-query', 'page')
+    applyLimitDesk(payload)
+  }).catch(() => { /* 没有账本就等下一次查询 */ })
   void resumeQuery()
 })
 onActivated(() => { void resumeQuery() })
-onUnmounted(() => { void flushRecovery('limit-query', 'page', readLimitDesk) })
+onUnmounted(() => { void flushRecovery('limit-query', limitScope, readLimitDesk) })
 
 </script>
 
@@ -443,8 +492,7 @@ onUnmounted(() => { void flushRecovery('limit-query', 'page', readLimitDesk) })
     <template v-else>
       <LimitQuerySection :bridge="bridge" :user-id="connection.operatorId" :can-search="connected && !loading" :seed="seed" :seed-token="seedToken" @search="search" @draft="draftFields = $event" />
       <BindQueryBar surface="limit" show-load :fields="boundFields" :template-id="templateId" @load="loadBound" />
-      <p v-if="confirmedIds.length" class="hint">已确认勾选 {{ confirmedIds.length }} 件。</p>
-      <p v-else-if="selected.length" class="hint">已勾选 {{ selected.length }} 件。点结果表上的「确认勾选」才会记下来。记在插件里的任务不会因此提交到 EASY。</p>
+      <p v-if="selected.length" class="hint">已勾选 {{ selected.length }} 件。点「提交到 EASY」会按这些行创建发文。</p>
     </template>
   </LimitPage>
 </template>

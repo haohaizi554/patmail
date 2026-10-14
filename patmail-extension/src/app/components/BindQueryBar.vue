@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import ThemeSelect from '../../shell/components/ThemeSelect.vue'
+import { sameOptionValue } from '../../shell/components/theme-select'
 import EmptyGuide from './EmptyGuide.vue'
 import { applyBoundQuery, PENDING_CUSTOMER_KEY, querySnapshot, summarizeBoundQuery } from '../../customer/mail-flow'
 import { downloadNameText, type FileDownloadSelection } from '../../mail/download-name'
@@ -19,18 +20,21 @@ const emit = defineEmits<{ load: [fields: Record<string, string>] }>()
 
 const { connection, customers, call } = useWorkspace()
 const picked = ref('')
-const reviewSelf = ref(true)
 const message = ref('')
 const saving = ref(false)
 
 watch(customers, () => {
-  if (picked.value && customers.value.some(item => item.id === picked.value)) return
+  const hit = customers.value.find(item => sameOptionValue(item.id, picked.value))
+  if (picked.value && hit) {
+    if (hit.id !== picked.value) picked.value = hit.id
+    return
+  }
   const pending = sessionStorage.getItem(PENDING_CUSTOMER_KEY) || ''
-  const pendingHit = customers.value.find(item => item.id === pending)
+  const pendingHit = customers.value.find(item => sameOptionValue(item.id, pending))
   picked.value = pendingHit?.id ?? customers.value[0]?.id ?? ''
 }, { immediate: true })
 
-const current = computed(() => customers.value.find(item => item.id === picked.value) ?? null)
+const current = computed(() => customers.value.find(item => sameOptionValue(item.id, picked.value)) ?? null)
 const ready = computed(() => Object.keys(querySnapshot(props.fields)).length > 0)
 const choices = computed(() => customers.value.map(item => ({ value: item.id, label: item.name })))
 
@@ -55,7 +59,6 @@ async function bind(): Promise<void> {
     surface: props.surface,
     fields: props.fields,
     templateId: props.templateId,
-    reviewSelf: props.surface === 'limit' && reviewSelf.value,
     ...(props.surface === 'file' ? { downloadName: props.downloadName } : {})
   })
   const result = await call({
@@ -87,10 +90,6 @@ async function bind(): Promise<void> {
       <p class="hint">{{ ready ? `将绑定：${summarizeBoundQuery(fields)}` : '还没有可绑定的条件。填写我方文号，或从列表选择处理事项，也可以传入 PCT 表格。' }}</p>
       <p v-if="surface === 'file' && downloadNameText(downloadName)" class="hint">发文文件名：{{ downloadNameText(downloadName) }}</p>
       <p v-if="current?.boundQuery" class="hint">当前绑定：{{ summarizeBoundQuery(current.boundQuery) }}</p>
-      <label v-if="surface === 'limit'" class="check-line">
-        <input v-model="reviewSelf" type="checkbox" />
-        发文最后提交给当前登录人审核
-      </label>
       <div class="filters">
         <button class="solid" type="button" :disabled="saving" @click="bind">{{ saving ? '正在绑定…' : `将查询条件绑定到${current?.name || '所选客户'}` }}</button>
         <button v-if="showLoad" class="ghost" type="button" :disabled="!current" @click="loadBound">载入已绑定条件</button>

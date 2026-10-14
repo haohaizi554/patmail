@@ -1,6 +1,6 @@
 <script setup lang="ts" generic="T extends string | number">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { filterSelectOptions, highlightAfterKey, menuBoxStyle, menuWidthForLabels, placeMenu, selectNeedsSearch, showsGroup, type ThemeSelectOption } from './theme-select'
+import { filterSelectOptions, highlightAfterKey, menuBoxStyle, menuWidthForLabels, placeMenu, sameOptionValue, selectNeedsSearch, selectTriggerText, showsGroup, type ThemeSelectOption } from './theme-select'
 
 interface Option extends ThemeSelectOption { value: T }
 
@@ -38,17 +38,27 @@ const listId = `theme-select-${Math.random().toString(36).slice(2, 9)}`
 const owner = Symbol('theme-select')
 
 const current = computed(() => props.modelValue !== undefined ? props.modelValue : internal.value)
-const selected = computed(() => props.options.find(item => item.value === current.value))
+const selected = computed(() => props.options.find(item => sameOptionValue(item.value, current.value ?? '')))
 const searchable = computed(() => selectNeedsSearch(props.options.length))
 /** 选项再多也只渲染前 100 条，靠搜索缩小范围。量大的名单（如中小客户三万家）全渲染会卡死。 */
 const filtered = computed(() => searchable.value ? filterSelectOptions(props.options, query.value) : props.options)
 const listed = computed(() => filtered.value.slice(0, 100))
 const hiddenCount = computed(() => Math.max(0, filtered.value.length - listed.value.length))
-const shown = computed(() => selected.value?.label || props.valueLabel || (current.value === '' || current.value == null ? props.placeholder : String(current.value)))
-const placeholderShown = computed(() => !selected.value && !props.valueLabel)
+const triggerText = computed(() => selectTriggerText({
+  label: selected.value?.label,
+  valueLabel: props.valueLabel,
+  value: current.value,
+  placeholder: props.placeholder
+}))
+const shown = computed(() => triggerText.value.text)
+const placeholderShown = computed(() => triggerText.value.placeholder)
 
 function optionId(index: number): string {
   return `${listId}-${index}`
+}
+
+function optionSelected(value: string | number): boolean {
+  return current.value != null && current.value !== '' && sameOptionValue(value, current.value)
 }
 
 function toneClass(tone: string | undefined): string {
@@ -100,7 +110,7 @@ function show(): void {
   if (props.disabled || opened.value) return
   portal.value = resolvePortal()
   query.value = ''
-  const index = props.options.findIndex(item => item.value === current.value && item.value !== '')
+  const index = props.options.findIndex(item => current.value != null && item.value !== '' && sameOptionValue(item.value, current.value))
   // 已选的那条不在当前显示的前 100 条里时不高亮，避免高亮到错行。
   highlight.value = index >= 0 && index < listed.value.length ? index : (index >= 0 ? -1 : 0)
   opened.value = true
@@ -229,8 +239,8 @@ onBeforeUnmount(() => {
           <li
             :id="optionId(index)"
             role="option"
-            :aria-selected="option.value === current"
-            :class="[toneClass(option.tone), { 'is-selected': option.value === current, 'is-active': index === highlight, 'is-disabled': option.disabled }]"
+            :aria-selected="optionSelected(option.value)"
+            :class="[toneClass(option.tone), { 'is-selected': optionSelected(option.value), 'is-active': index === highlight, 'is-disabled': option.disabled }]"
             @mouseenter="highlight = index"
             @click="choose(option)"
           >

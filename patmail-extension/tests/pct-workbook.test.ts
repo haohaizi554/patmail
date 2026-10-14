@@ -465,6 +465,8 @@ describe('仲裁交给本地模型时分批', () => {
     ])
     expect(applied.decisions.filter(item => item.unsure)).toHaveLength(4)
     expect(applied.decisions[0]?.reason).toBe('客户要求没有指定发给谁')
+    const leaked = "HYMI0089 PA25213828CN｜拿不准｜依据 客户要求没有指定发给谁` to be precise, but the prompt says `文号 我方文号`. I'll just output exactly as formatted in the successful previous batch."
+    expect(readArbitrationDecisions(leaked)[0]?.reason).toBe('客户要求没有指定发给谁')
     expect(applied.written).toBe(1)
     expect(applied.rows[2]?.iprName).toBe('金超、陈垣静')
     expect(applied.rows[2]?.mailCc).toBe('黄慧燕')

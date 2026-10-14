@@ -177,7 +177,6 @@ export function applyBoundQuery(profile: CustomerQueryProfile, input: {
   surface: QuerySurfaceId
   fields: Record<string, string>
   templateId?: string
-  reviewSelf?: boolean
   /** 只在文件查询绑定时读取。null 表示这次没有选下载名称，清掉上次的。 */
   downloadName?: FileDownloadSelection | null
 }): CustomerQueryProfile {
@@ -194,8 +193,6 @@ export function applyBoundQuery(profile: CustomerQueryProfile, input: {
     if (input.downloadName && isFileDownloadSelection(input.downloadName)) next.fileDownloadName = input.downloadName
     else delete next.fileDownloadName
   }
-  if (input.reviewSelf) next.reviewTarget = 'self'
-  else delete next.reviewTarget
   if (profile.pctTask) {
     next.pctTask = {
       workflowId: 'pct-reminder',

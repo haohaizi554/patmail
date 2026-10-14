@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, onUnmounted, ref, watch } from 'vue'
 import ThemeSelect from '../../shell/components/ThemeSelect.vue'
+import { sameOptionValue } from '../../shell/components/theme-select'
 import EmptyGuide from './EmptyGuide.vue'
 import { assessQueryScope } from '../../api/file-search-params'
 import { coerceFileSearchQuery } from '../../api/message-guards'
@@ -18,7 +19,7 @@ import { defaultSignatureChoice, signatureChoices } from '../../mail/signature-c
 import { fetchMailboxSignature } from '../../mail/signature-load'
 import type { MailRuleBundle } from '../../mail/types'
 import { isQueryGuid } from '../../query/query-validator'
-import { flushRecovery, recallRecovery, scheduleRecovery } from '../../recovery/wal-ledger'
+import { flushRecovery, holdRecovery, peekRecovery, recallRecovery, scheduleRecovery, systemScope } from '../../recovery/wal-ledger'
 import { scopeFromConnection } from '../../shared/connection'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useMailConcurrency } from '../../settings/use-mail-concurrency'
@@ -51,7 +52,7 @@ const options = computed(() => bound.value.map(item => ({
   value: item.id,
   label: item.workflowRemark?.trim() ? `${item.name}（${item.workflowRemark.trim()}）` : item.name
 })))
-const customer = computed(() => bound.value.find(item => item.id === customerId.value) ?? null)
+const customer = computed(() => bound.value.find(item => sameOptionValue(item.id, customerId.value)) ?? null)
 const pickedSender = computed(() => {
   const saved = props.rules?.defaultSender
   if (!saved || !isQueryGuid(saved.mailsetId)) return null
@@ -107,14 +108,59 @@ function applyFileDesk(payload: unknown): void {
   if (!notice.value && (letters.value.length || foundFiles.value.length)) notice.value = '登录中断前的发文已经从本机恢复账本找回。'
 }
 
+watch([bound, customerId], () => {
+  if (!customerId.value || props.customers.length === 0) return
+  const next = bound.value.find(item => sameOptionValue(item.id, customerId.value))?.id ?? ''
+  if (next !== customerId.value) customerId.value = next
+})
+
+let fileScope = systemScope(connection.value.easyOrigin, 'file')
+let parkingFile = false
+
+function pokeFile(): void {
+  if (parkingFile) return
+  scheduleRecovery('file-desk', fileScope, readFileDesk)
+}
+
+watch(() => connection.value.easyOrigin, (next, previous) => {
+  if (!previous || next === previous) return
+  parkingFile = true
+  const payload = readFileDesk()
+  holdRecovery('file-desk', systemScope(previous, 'file'), payload)
+  customerId.value = ''
+  notice.value = ''
+  letters.value = []
+  notes.value = []
+  outcomes.value = {}
+  foundFiles.value = []
+  picked.value = []
+  fileScope = systemScope(next, 'file')
+  const cached = peekRecovery('file-desk', fileScope)
+  const arriving = fileScope
+  if (cached) applyFileDesk(cached)
+  parkingFile = false
+  pokeFile()
+  if (cached === undefined) {
+    void recallRecovery('file-desk', arriving).then(saved => {
+      if (fileScope !== arriving || letters.value.length || foundFiles.value.length) return
+      applyFileDesk(saved)
+      pokeFile()
+    }).catch(() => { /* 这个系统还没有账本 */ })
+  }
+})
+
 watch([letters, foundFiles, picked, outcomes, notice, customerId], () => {
-  scheduleRecovery('file-desk', 'file', readFileDesk)
+  pokeFile()
 }, { deep: true })
 
 onMounted(() => {
-  void recallRecovery('file-desk', 'file').then(payload => applyFileDesk(payload)).catch(() => { /* 没有账本就重新查 */ })
+  fileScope = systemScope(connection.value.easyOrigin, 'file')
+  void recallRecovery('file-desk', fileScope).then(async payload => {
+    if (!payload) payload = await recallRecovery('file-desk', 'file')
+    applyFileDesk(payload)
+  }).catch(() => { /* 没有账本就重新查 */ })
 })
-onUnmounted(() => { void flushRecovery('file-desk', 'file', readFileDesk) })
+onUnmounted(() => { void flushRecovery('file-desk', fileScope, readFileDesk) })
 
 function asFile(file: PatentFile): FileManageFile {
   return {

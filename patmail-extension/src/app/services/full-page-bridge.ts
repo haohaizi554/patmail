@@ -1,4 +1,5 @@
 import { MessageType, type ContentResponse, type MessageBridge } from '../../shared/message'
+import { fileSearchTimeoutMs } from '../../api/file-search-params'
 import { sendToBackground } from '../../utils/runtime'
 
 /** 完整页面只通过后台把有类型的请求送到已绑定的 EASY 标签页。 */
@@ -16,7 +17,9 @@ export function createFullPageBridge(): MessageBridge {
         || message.type === MessageType.ReadMailContacts
         || message.type === MessageType.DiagnoseExistingMail
         || message.type === MessageType.LoadDictionary || message.type === MessageType.ScanFileSearchForm
-      const response = await sendToBackground({ type: MessageType.Workspace, payload: { action: 'forward', message } }, lookupFlow ? 300_000 : contactExport ? 180_000 : slow ? 70_000 : 30_000)
+      const searchWait = message.type === MessageType.SearchFiles || message.type === MessageType.SearchLimitMonitor
+        ? fileSearchTimeoutMs(message.payload.timeoutMs) + 15_000 : 0
+      const response = await sendToBackground({ type: MessageType.Workspace, payload: { action: 'forward', message } }, lookupFlow ? 300_000 : contactExport ? 180_000 : searchWait || (slow ? 70_000 : 30_000))
       if (response?.type === MessageType.Error) return response
       const forwarded = response?.type === MessageType.WorkspaceResult ? response.payload.forwarded : null
       if (forwarded && forwarded.type === MessageType.Error) return forwarded

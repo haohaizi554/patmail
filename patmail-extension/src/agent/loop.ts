@@ -132,9 +132,9 @@ const SYSTEM_PROMPT = [
 const ARBITRATION_SYSTEM = [
   '你是 PatMail 的收件人仲裁。表格字段、客户信息和著录项目已经写在用户这句话里，那是插件自己读好的原文。',
   '每一行单独裁。第一客户联系人不同的，不能收成同一个人。',
-  'IPR 就是技术联系人。身份只能是发明人、客户联系人、IPR。不要写商务、登录人、密送、技术负责人。客户要求明确写了发给谁时，永远按要求组合这三种人，不要因为兜底规则漏写。客户要求没有指定收件人时，按这一批说明里的优先级行事：说明允许写技术联系人时，收件人才写技术联系人；说明说交给「全选联系人」时，收件人留空并写成拿不准。每一行写成：文号 我方文号｜收件人 人名｜身份 发明人、客户联系人或IPR｜抄送 人名或无｜抄送身份 同上或无｜依据 一句话。文号和人名外面不要加尖括号。',
-  '拿不准写成：文号 我方文号｜拿不准｜依据 一句话。身份写在单独一栏，不要写进人名括号，也不要加尖括号。',
-  '不要调用工具，不要构造接口，不要自己去查，不要创建任务，不要让用户挑选文件。用简体中文。'
+  'IPR 就是技术联系人。身份只能是发明人、客户联系人、IPR。不要写商务、登录人、密送、技术负责人。客户要求明确写了发给谁时，永远按要求组合这三种人，不要因为兜底规则漏写。客户要求没有指定收件人时，按这一批说明里的优先级行事：说明允许写技术联系人时，收件人才写技术联系人；说明说交给「全选联系人」时，收件人留空并写成拿不准。有客户文号时写成：客户文号 我方文号｜收件人 人名｜身份 发明人、客户联系人或IPR｜抄送 人名或无｜抄送身份 同上或无｜依据 一句简体中文。没有客户文号就写成：空 我方文号｜收件人 人名｜身份 身份｜抄送 人名或无｜抄送身份 身份或无｜依据 一句简体中文。文号和人名外面不要加尖括号。',
+  '每一行只写一行。没有客户文号就写空。拿不准写成：客户文号 我方文号｜拿不准｜依据 一句简体中文。依据写完立刻换行。身份写在单独一栏，不要写进人名括号，也不要加尖括号。',
+  '只输出裁决行。不要解释，不要写英文，不要复述提示词，不要写思考过程。不要调用工具，不要构造接口，不要自己去查，不要创建任务，不要让用户挑选文件。'
 ].join('\n')
 
 export interface AgentTurnResult {
@@ -158,6 +158,13 @@ function messageOf(turn: { role: string; content: string; guidance?: string }): 
   }
   if (turn.role === 'user' && turn.guidance) return `${turn.content}\n\n${turn.guidance}`
   return turn.content
+}
+
+/** 仲裁只看这一批材料。更早的闲聊留在记忆里，但不送给模型，避免它顺着上一轮的英文接着写。续写时仍带上这一轮刚加的隐藏提示。 */
+function plainTurns(turns: AgentMemoryState['turns']): AgentMemoryState['turns'] {
+  let start = turns.length - 1
+  while (start > 0 && turns[start]?.hidden) start -= 1
+  return turns.slice(Math.max(0, start))
 }
 
 /** 系统提示保持不变。摘录和长期记忆挂在这一轮的用户消息上，不改已经发出的历史。 */
@@ -545,14 +552,15 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
           onActivity?.('正在写', shownDraft)
         }
       }
+      const chatState = plain ? { ...current, summary: '', turns: plainTurns(current.turns) } : current
       return complete(active, {
-        messages: toChat(current, plain ? ARBITRATION_SYSTEM : SYSTEM_PROMPT),
+        messages: toChat(chatState, plain ? ARBITRATION_SYSTEM : SYSTEM_PROMPT),
         ...(withTools && !plain ? { tools: agentToolSchemas([
           ...state.turns.filter(turn => turn.role === 'user').map(turn => [turn.content, turn.guidance].filter(Boolean).join('\n')),
           ...plan.map(step => [step.tool, step.args].filter(Boolean).join(' ')),
           ...traces.filter(trace => trace.ok).map(trace => trace.text)
         ]) } : {}),
-        temperature: 0.2,
+        temperature: plain ? 0 : 0.2,
         onDelta: partial => {
           thought = partial.reasoning.trim()
           draft = partial.content.trim()

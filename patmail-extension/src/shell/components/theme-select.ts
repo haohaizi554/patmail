@@ -33,6 +33,42 @@ export function selectNeedsSearch(count: number): boolean {
   return count > SELECT_SEARCH_THRESHOLD
 }
 
+const GUID_ONLY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const PREFIXED_ID = /^(?:customer|session|mail|file)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const SAVED_ID = /^saved:(?:customer-)?(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
+
+/** 选项还没到，或大小写不一致时，不要把内部编号画进触发器。 */
+export function sameOptionValue(left: string | number, right: string | number): boolean {
+  if (left === right) return true
+  if (typeof left === 'string' && typeof right === 'string') return left.trim().toLowerCase() === right.trim().toLowerCase()
+  return false
+}
+
+export function isOpaqueSelectValue(value: string | number | null | undefined): boolean {
+  if (typeof value !== 'string') return false
+  const text = value.trim()
+  return GUID_ONLY.test(text) || PREFIXED_ID.test(text) || SAVED_ID.test(text)
+}
+
+function readableLabel(text: string | undefined): string {
+  const label = text?.trim() ?? ''
+  return label && !isOpaqueSelectValue(label) ? label : ''
+}
+
+export function selectTriggerText(input: {
+  label?: string
+  valueLabel?: string
+  value: string | number | null | undefined
+  placeholder: string
+}): { text: string; placeholder: boolean } {
+  const label = readableLabel(input.label) || readableLabel(input.valueLabel)
+  if (label) return { text: label, placeholder: false }
+  if (input.value === '' || input.value == null || isOpaqueSelectValue(input.value)) {
+    return { text: input.placeholder, placeholder: true }
+  }
+  return { text: String(input.value), placeholder: false }
+}
+
 export function filterSelectOptions<T extends ThemeSelectOption>(options: T[], query: string): T[] {
   const text = query.trim().toLowerCase()
   if (!text) return options

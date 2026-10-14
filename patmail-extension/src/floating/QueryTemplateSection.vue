@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { fileSearchValueLimit, hasExplicitFileSearchFilter, isFileSearchBusinessField, FILE_SEARCH_REQUEST_FIELDS, FILE_SEARCH_SYSTEM_FIELDS, type FileSearchQuery } from '../api/file-search-params'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { fileSearchValueLimit, fileSearchTimeoutMs, hasExplicitFileSearchFilter, isFileSearchBusinessField, FILE_SEARCH_REQUEST_FIELDS, FILE_SEARCH_SYSTEM_FIELDS, type FileSearchQuery, type FileSearchTimeoutMs } from '../api/file-search-params'
 import type { NormalizedDictionary } from '../api/dictionaries'
 import type { HistoryQueryOption } from '../api/query-history'
 import type { CustomerQueryProfile } from '../customer/types'
@@ -27,6 +27,7 @@ import { hasOptionTree } from '../query/option-tree'
 import { describePickerReceipt, FILE_PICKER_FIELDS } from '../api/dictionaries/picker-catalog'
 import { selectionFromControls, type FileDownloadSelection } from '../mail/download-name'
 import ThemeSelect from '../shell/components/ThemeSelect.vue'
+import { sameOptionValue } from '../shell/components/theme-select'
 import TreeOptionSelect from '../shell/components/TreeOptionSelect.vue'
 
 const props = withDefaults(defineProps<{
@@ -42,9 +43,28 @@ const props = withDefaults(defineProps<{
   seedToken?: number
 }>(), { manage: true, seed: null, seedToken: 0 })
 const emit = defineEmits<{
-  search: [query: FileSearchQuery]
+  search: [query: FileSearchQuery, timeoutMs: FileSearchTimeoutMs]
   'download-name': [selection: FileDownloadSelection | null]
 }>()
+
+const TIMEOUT_KEY = 'patmail.fileSearch.timeoutMs'
+const queryTimeoutMs = ref<FileSearchTimeoutMs>(60_000)
+const timeoutOptions = [
+  { value: 60_000, label: '1 分钟' },
+  { value: 120_000, label: '2 分钟' },
+  { value: 300_000, label: '5 分钟' },
+  { value: 600_000, label: '10 分钟' }
+]
+onMounted(() => {
+  if (!globalThis.chrome?.storage?.local) return
+  void chrome.storage.local.get(TIMEOUT_KEY).then(stored => {
+    queryTimeoutMs.value = fileSearchTimeoutMs(stored[TIMEOUT_KEY])
+  }).catch(() => { /* 读不到就用 1 分钟 */ })
+})
+watch(queryTimeoutMs, value => {
+  if (!globalThis.chrome?.storage?.local) return
+  void chrome.storage.local.set({ [TIMEOUT_KEY]: fileSearchTimeoutMs(value) })
+})
 
 const historyOptions = ref<HistoryQueryOption[]>([])
 const localTemplates = ref<QueryTemplate[]>([])
@@ -190,7 +210,7 @@ const baseChoices = computed(() => [
   ...historyOptions.value.map(item => ({ id: item.id, name: easyLabel(item), source: 'easy' as const })),
   ...localTemplates.value.map(item => ({ id: item.id, name: item.name, source: 'local' as const }))
 ])
-const selectedCustomer = computed(() => customers.value.find(item => item.id === selectedCustomerId.value) ?? null)
+const selectedCustomer = computed(() => customers.value.find(item => sameOptionValue(item.id, selectedCustomerId.value)) ?? null)
 const selectedLocal = computed(() => localTemplates.value.find(item => item.id === selectedBaseId.value) ?? null)
 const selectedEasy = computed(() => historyOptions.value.find(item => item.id === selectedBaseId.value) ?? null)
 const unknownCount = computed(() => Object.keys(unknownFields.value).length)
@@ -1021,7 +1041,7 @@ function search(): void {
   if (fields.is_close !== undefined) fields.is_close = fields.is_close.trim() === '1' || fields.is_close.trim() === '否' ? '1' : ''
   const size = Number(props.pageSize)
   const pageSize = Number.isSafeInteger(size) && size >= 1 && size <= 100 ? size : 20
-  emit('search', { resolvedFields: fields, pageIndex: 1, pageSize })
+  emit('search', { resolvedFields: fields, pageIndex: 1, pageSize }, fileSearchTimeoutMs(queryTimeoutMs.value))
 }
 
 function applySeed(): void {
@@ -1198,6 +1218,9 @@ watch(selectedCustomerId, () => {
           <button type="button" class="search-submit" :disabled="savingTemplate" @click="saveBoth">{{ savingTemplate ? '正在保存…' : '保存到本地和网站' }}</button>
         </span>
         <span class="inline-actions">
+          <label class="query-timeout">超时时间
+            <ThemeSelect v-model="queryTimeoutMs" :options="timeoutOptions" />
+          </label>
           <button type="button" class="text-button" :disabled="checkingForm" @click="checkAgainstPage">校对最新字段</button>
           <button type="button" class="text-button" @click="restoreTemplate">恢复模板</button>
         </span>

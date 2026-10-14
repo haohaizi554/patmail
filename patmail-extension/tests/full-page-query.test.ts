@@ -118,7 +118,7 @@ describe('full-page query message chain', () => {
     vi.useFakeTimers()
     runtimeChrome({ sendMessage() {} })
     const pending = createFullPageBridge().request(query)
-    await vi.advanceTimersByTimeAsync(70_000)
+    await vi.advanceTimersByTimeAsync(75_000)
     expect(await pending).toMatchObject({ type: MessageType.Error, payload: { message: expect.stringContaining('时限') } })
   })
 })

@@ -191,6 +191,19 @@ img { max-width: 100%; }
 .metric.tall { align-items: flex-start; min-height: 132px; }
 .metric.tall button { border: 0; background: transparent; color: #8ea0bd; font-size: 12px; padding: 0; }
 .grid { width: 100%; border-collapse: collapse; font-size: 13px; }
+.fit-table { overflow: hidden; max-width: 100%; }
+.fit-table table.grid { width: 100%; table-layout: fixed; }
+.fit-table table.grid th,
+.fit-table table.grid td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fit-table table.grid col.check { width: 7%; }
+.fit-table table.grid th.check,
+.fit-table table.grid td.check { padding-left: 6px; padding-right: 4px; }
+.fit-table table.grid .clip { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fit-table .theme-select { display: block; width: 100%; max-width: 100%; min-width: 0; }
+.fit-table .theme-select-trigger { min-width: 0; height: 31px; }
+/* 期限表列宽由 column-fit 按文字测量后写到 col 上。这里只负责放不下时省略。 */
+.fit-table.limit-cols { overflow-x: auto; }
+.fit-table.limit-cols table.grid { table-layout: fixed; }
 .grid th { text-align: left; color: #8b95ad; font-weight: 650; height: 36px; background: #fafbfe; }
 .grid td { height: 48px; border-top: 1px solid #f4f6fb; white-space: nowrap; }
 .grid th, .grid td { padding: 0 8px; }

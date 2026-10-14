@@ -26,6 +26,14 @@ describe('期限监控', () => {
       payload: { action: 'forward', message: { type: MessageType.SearchLimitMonitor, payload: { query } } }
     })).toBe(true)
     expect(isMessage({
+      type: MessageType.SearchLimitMonitor,
+      payload: { query, timeoutMs: 120_000 }
+    })).toBe(true)
+    expect(isMessage({
+      type: MessageType.SearchLimitMonitor,
+      payload: { query, timeoutMs: 90_000 }
+    })).toBe(false)
+    expect(isMessage({
       type: MessageType.Workspace,
       payload: { action: 'forward', message: { type: MessageType.LoadDictionary, payload: { kind: 'picker', force: true } } }
     })).toBe(true)

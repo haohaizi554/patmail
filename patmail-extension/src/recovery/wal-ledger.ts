@@ -29,6 +29,13 @@ export interface RecoveryHead {
 }
 
 const SLOTS = new Set<RecoverySlot>(['workflow-desk', 'limit-query', 'limit-mail', 'file-mail', 'file-desk', 'workflow-exec', 'mail-exec'])
+
+/** 两个系统各留一份。origin 用站点地址，leaf 是页面里的槽。 */
+export function systemScope(origin: string, leaf: string): string {
+  const base = origin.trim().replace(/\/+$/, '').toLowerCase() || 'local'
+  const scope = `${base}|${leaf}`
+  return scope.length > 200 ? scope.slice(0, 200) : scope
+}
 const SECRET = /^(cookie|authorization|password|set-cookie)$/i
 
 let wasmOverride: ArrayBuffer | null = null
@@ -368,6 +375,29 @@ interface Scheduled {
 }
 
 const scheduled = new Map<string, Scheduled>()
+const held = new Map<string, unknown | null>()
+
+function holdKey(slot: RecoverySlot, scope: string): string {
+  return `${slot}\n${scope}`
+}
+
+/**
+ * 切系统时先把这一侧放进内存，再异步写进恢复账本。
+ * 回来时先读内存，没有再读账本，不用等原网站重查。
+ */
+export function holdRecovery(slot: RecoverySlot, scope: string, payload: unknown | null): void {
+  const key = holdKey(slot, scope)
+  held.set(key, payload)
+  const previous = scheduled.get(key)
+  if (previous) window.clearTimeout(previous.timer)
+  scheduled.delete(key)
+  void (payload == null ? forgetRecovery(slot, scope) : rememberRecovery(slot, scope, payload)).catch(() => { /* 内存里还有，下一轮再写账本 */ })
+}
+
+export function peekRecovery(slot: RecoverySlot, scope: string): unknown | null | undefined {
+  const key = holdKey(slot, scope)
+  return held.has(key) ? held.get(key) ?? null : undefined
+}
 
 async function commitScheduled(key: string, item: Scheduled): Promise<void> {
   scheduled.delete(key)

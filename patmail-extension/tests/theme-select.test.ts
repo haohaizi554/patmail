@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { filterSelectOptions, highlightAfterKey, menuWidthForLabels, placeMenu, selectNeedsSearch, showsGroup, textOptions, treeMenuWidth } from '../src/shell/components/theme-select'
+import { filterSelectOptions, highlightAfterKey, isOpaqueSelectValue, menuWidthForLabels, placeMenu, sameOptionValue, selectNeedsSearch, selectTriggerText, showsGroup, textOptions, treeMenuWidth } from '../src/shell/components/theme-select'
 
 describe('theme select', () => {
   it('opens downward and flips upward when the lower space is tight', () => {
@@ -50,6 +50,22 @@ describe('theme select', () => {
     const longer = textOptions([...options.map(item => item.label), '欧洲专利局'])
     expect(filterSelectOptions(longer, ' 美 ')).toEqual([{ value: '美国', label: '美国' }])
     expect(filterSelectOptions(longer, '')).toHaveLength(11)
+  })
+
+  it('hides an internal id until the option label is ready', () => {
+    const id = 'customer-c4bc70fc-2b1f-44db-b813-fb799fa59d36'
+    expect(isOpaqueSelectValue(id)).toBe(true)
+    expect(isOpaqueSelectValue('c4bc70fc-2b1f-44db-b813-fb799fa59d36')).toBe(true)
+    expect(isOpaqueSelectValue('saved:' + id)).toBe(true)
+    expect(isOpaqueSelectValue('广汽丰田汽车有限公司')).toBe(false)
+    expect(isOpaqueSelectValue('pct-reminder')).toBe(false)
+    expect(isOpaqueSelectValue('张三 · ' + id)).toBe(false)
+    expect(selectTriggerText({ value: id, placeholder: '选择客户' })).toEqual({ text: '选择客户', placeholder: true })
+    expect(selectTriggerText({ value: id, label: id, placeholder: '选择客户' })).toEqual({ text: '选择客户', placeholder: true })
+    expect(selectTriggerText({ value: id, label: '广汽丰田汽车有限公司', placeholder: '选择客户' })).toEqual({ text: '广汽丰田汽车有限公司', placeholder: false })
+    expect(selectTriggerText({ value: '不限', placeholder: '请选择' })).toEqual({ text: '不限', placeholder: false })
+    expect(sameOptionValue(id, id.toUpperCase())).toBe(true)
+    expect(sameOptionValue('A', 'b')).toBe(false)
   })
 
   it('shows a group heading when the group changes', () => {

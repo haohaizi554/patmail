@@ -129,6 +129,7 @@ function alignCustomerPick(): void {
   }
 }
 
+const catalogCache = new Map<string, EasyCustomerOption[]>()
 let customerListTicket = 0
 async function loadCustomerList(force: boolean): Promise<void> {
   await hydrateCustomerMode()
@@ -494,8 +495,13 @@ const stopCustomerModeWatch = watchCustomerMode(() => { void loadCustomerList(fa
 onUnmounted(stopCustomerModeWatch)
 watch(() => `${connection.value.easyOrigin}\n${connection.value.operatorId}`, (next, previous) => {
   if (!previous || next === previous) return
-  customerCatalog.value = []
-  void loadCustomerList(true)
+  const prevOrigin = previous.split('\n')[0] ?? ''
+  const nextOrigin = next.split('\n')[0] ?? ''
+  if (prevOrigin !== nextOrigin) {
+    if (customerCatalog.value.length) catalogCache.set(prevOrigin, customerCatalog.value)
+    customerCatalog.value = catalogCache.get(nextOrigin) ?? []
+  }
+  void loadCustomerList(false)
   mailNodes.value = []
   mailsets.value = []
   reviewers.value = []

@@ -1,8 +1,9 @@
 <script setup>
-import { computed, inject, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import PageHead from '../components/PageHead.vue'
 import { bg } from '../assets'
 import { limitRows as samples } from '../data'
+import { assignColumnWidths } from '../column-fit'
 import { MAILED_UNFINISHED_REVIEW, SKIP_SEND_REVIEW } from '../../customer/pct-flow-status'
 
 const props = defineProps({
@@ -70,7 +71,7 @@ const submitTitle = computed(() => {
   if (!props.writesReady) return '正在读取系统设置里的写开关。'
   if (!props.writesOpen) return '写开关在系统设置里关着。'
   if (props.iprGap) return '有名字的行按助手写回的收件人和抄送提交；还空着收件人的行，按这封发文规则里要勾选的客户联系人写入收件人，业务人员作为抄送兜底。邮箱不是真实地址的人不写入。'
-  return '按已确认勾选的事项创建发文，并提交给当前登录人审核。一次一件，不会结束流程。'
+  return '按勾选创建发文。同一客户且收件人、抄送相同的几件合成一封。封与封排队提交，同时在途几封看系统设置里的并发数，默认上一封有结果再取下一封。交给当前登录人审核。发文流程交到审核，不在这里结束。完成事项会勾上本封的处理事项，PCT 相关也一样。'
 })
 function blocked(row) {
   if (props.flowByProc[row.procId] === MAILED_UNFINISHED_REVIEW) return props.allowMailedUnfinished === false
@@ -114,17 +115,6 @@ function selectPlain() {
   emit('select', [...new Set(plainIds.value)])
 }
 
-function confirmSelection() {
-  const source = props.live ? props.rows : demoRows.value
-  const onPage = new Set(source.map(row => row.procId))
-  const allowed = new Set(source.filter(canPick).map(row => row.procId))
-  emit('confirm', props.selected.filter(id => !onPage.has(id) || allowed.has(id)))
-}
-
-function clearSelection() {
-  emit('select', [])
-}
-
 function askSubmit(mode) {
   emit('submit', mode)
 }
@@ -143,6 +133,89 @@ function flowStatus(row) {
   if (gate === 'done' || gate === 'open') return '还没提交审核'
   return props.checking ? '正在核对' : '—'
 }
+
+const host = ref(null)
+const colWidths = ref([])
+const tableStyle = computed(() => {
+  const total = colWidths.value.reduce((sum, width) => sum + width, 0)
+  if (!total) return undefined
+  return { width: `${total}px`, minWidth: '100%' }
+})
+let ruler
+let observer
+
+function textWidth(text, source) {
+  if (!ruler || !source) return 0
+  ruler.style.font = getComputedStyle(source).font
+  ruler.textContent = String(text ?? '')
+  return Math.ceil(ruler.offsetWidth) + 2
+}
+
+function columnSpecs(header, body) {
+  const rows = shown.value
+  const specs = []
+  const add = (title, values, mode) => {
+    const min = textWidth(title, header) + 16
+    let content = min
+    for (const value of values) content = Math.max(content, textWidth(value, body) + 16)
+    specs.push({ min, content, lock: mode === 'lock', grow: mode === 'grow' })
+  }
+  if (props.selectable) {
+    const pending = rows.some(row => props.gates[row.procId] === 'pending' || props.flowByProc[row.procId] === '已提交审核')
+    const head = textWidth('全选', header) + 4 + 16 + 10
+    const box = 16 + 10
+    const mark = pending ? textWidth('待审核', body) + 10 : box
+    const content = Math.max(head, mark, box)
+    specs.push({ min: content, content, lock: true, grow: false })
+  }
+  add('我方文号', rows.map(row => row.caseVolume))
+  add('案件名称', rows.map(row => row.caseName), 'grow')
+  add('处理事项', rows.map(row => row.ctrlProc))
+  add('客户', rows.map(row => row.customerName), 'grow')
+  add('申请号', rows.map(row => row.appNo))
+  add('官方期限', rows.map(row => row.legalDueDate), 'lock')
+  add('客户期限', rows.map(row => row.cusDueDate), 'lock')
+  add('内部期限', rows.map(row => row.intDueDate), 'lock')
+  add('流程状态', rows.map(row => flowStatus(row)), 'lock')
+  return specs
+}
+
+function layoutColumns() {
+  const root = host.value
+  const table = root?.querySelector('table')
+  if (!root || !table || !ruler) return
+  const container = root.clientWidth
+  if (container <= 0) return
+  const header = table.querySelector('thead th') || table
+  const cell = table.querySelector('tbody td') || header
+  colWidths.value = assignColumnWidths(columnSpecs(header, cell), container)
+}
+
+const measureKey = computed(() => {
+  const rows = shown.value
+  const body = rows.map(row => [
+    row.caseVolume, row.caseName, row.ctrlProc, row.customerName, row.appNo,
+    row.legalDueDate, row.cusDueDate, row.intDueDate, flowStatus(row)
+  ].join('\u0001')).join('\u0002')
+  return `${props.selectable ? 1 : 0}\u0002${body}`
+})
+
+watch(measureKey, () => layoutColumns(), { flush: 'post' })
+
+onMounted(() => {
+  ruler = document.createElement('span')
+  ruler.style.cssText = 'position:absolute;left:-9999px;top:0;white-space:nowrap;visibility:hidden;pointer-events:none;'
+  document.body.appendChild(ruler)
+  layoutColumns()
+  observer = new ResizeObserver(() => layoutColumns())
+  if (host.value) observer.observe(host.value)
+})
+
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  ruler?.remove()
+  ruler = null
+})
 
 function statusShade(text) {
   if (text === '还没提交审核') return 'shade-open'
@@ -203,8 +276,6 @@ function reset() {
       <button v-if="selectable" class="ghost tiny" type="button" :disabled="checking || !pageIds.length" @click="togglePage">{{ pageAll ? '取消全选' : '全选本页' }} {{ pageIds.length }}</button>
       <button v-if="selectable && cachePages" class="ghost tiny" type="button" :disabled="checking || !everyIds.length" @click="selectEvery">全选所有 {{ everyIds.length }}</button>
       <button v-if="selectable && cachePages" class="ghost tiny" type="button" :disabled="checking || !plainIds.length" @click="selectPlain">全选所有（非补非仲） {{ plainIds.length }}</button>
-      <button v-if="selectable" class="ghost tiny" type="button" :disabled="!selected.length" @click="confirmSelection">确认勾选 {{ selected.length }}</button>
-      <button v-if="selectable" class="ghost tiny" type="button" :disabled="!selected.length" @click="clearSelection">取消勾选</button>
       <div v-if="live && totalPages > 1" class="pagination">
         <button class="ghost tiny" type="button" :disabled="pageIndex <= 1 || (loading && !pageWhileLoading)" @click="goPage(pageIndex - 1)">上一页</button>
         <span>{{ pageIndex }} / {{ totalPages }}</span>
@@ -215,12 +286,16 @@ function reset() {
     <p v-if="checking" class="hint">正在核对发文审核状态。核对完之前不能勾选。</p>
     <p v-if="message" class="hint">{{ message }}</p>
     <p v-else-if="live && !connected" class="hint">尚未连接 EASY。连接后在这里查询期限，不会使用本页地址发请求。</p>
-    <table class="grid">
+    <div ref="host" class="fit-table limit-cols">
+    <table class="grid" :style="tableStyle">
+      <colgroup>
+        <col v-for="(width, index) in colWidths" :key="index" :style="{ width: width + 'px' }" />
+      </colgroup>
       <thead>
         <tr>
-          <th v-if="selectable"><label class="page-check"><input type="checkbox" :checked="pageAll" :disabled="!pageIds.length" @change="togglePage" />全选</label></th>
-          <th>我方文号</th><th>案件名称</th><th>处理事项</th><th>客户</th><th>申请号</th>
-          <th>官方期限</th><th>客户期限</th><th>内部期限</th><th>流程状态</th>
+          <th v-if="selectable" class="check fit"><label class="page-check"><input type="checkbox" :checked="pageAll" :disabled="!pageIds.length" @change="togglePage" />全选</label></th>
+          <th class="fit">我方文号</th><th class="grow">案件名称</th><th class="fit">处理事项</th><th class="grow">客户</th><th class="fit">申请号</th>
+          <th class="fit">官方期限</th><th class="fit">客户期限</th><th class="fit">内部期限</th><th class="fit flow">流程状态</th>
         </tr>
       </thead>
       <template v-if="cachePages">
@@ -229,19 +304,19 @@ function reset() {
             <td :colspan="selectable ? 10 : 9">{{ loading ? '正在读取期限列表…' : (message ? '查询没有完成，上面有原因。' : '没有可显示的期限记录') }}</td>
           </tr>
           <tr v-for="row in rowsFor(n)" :key="row.procId" v-memo="[row, gates[row.procId], flowByProc[row.procId], checking, selected.includes(row.procId), allowMailedUnfinished]" :class="{ 'is-pending': gates[row.procId] === 'pending' || flowByProc[row.procId] === '已提交审核' || flowByProc[row.procId] === MAILED_UNFINISHED_REVIEW || checking }">
-            <td v-if="selectable">
+            <td v-if="selectable" class="check fit">
               <input type="checkbox" :checked="selected.includes(row.procId)" :disabled="!canPick(row)" @change="toggleRow(row.procId)" />
-              <span v-if="gates[row.procId] === 'pending' || flowByProc[row.procId] === '已提交审核'">待审核</span>
+              <span v-if="gates[row.procId] === 'pending' || flowByProc[row.procId] === '已提交审核'" class="clip" v-hint.clip="'待审核'">待审核</span>
             </td>
-            <td>{{ row.caseVolume }}</td>
-            <td>{{ row.caseName }}</td>
-            <td>{{ row.ctrlProc }}</td>
-            <td>{{ row.customerName }}</td>
-            <td>{{ row.appNo }}</td>
-            <td>{{ row.legalDueDate }}</td>
-            <td>{{ row.cusDueDate }}</td>
-            <td>{{ row.intDueDate }}</td>
-            <td :class="statusShade(flowStatus(row))">{{ flowStatus(row) }}</td>
+            <td class="fit"><span class="clip" v-hint.clip="row.caseVolume">{{ row.caseVolume }}</span></td>
+            <td class="grow"><span class="clip" v-hint.clip="row.caseName">{{ row.caseName }}</span></td>
+            <td class="fit"><span class="clip" v-hint.clip="row.ctrlProc">{{ row.ctrlProc }}</span></td>
+            <td class="grow"><span class="clip" v-hint.clip="row.customerName">{{ row.customerName }}</span></td>
+            <td class="fit"><span class="clip" v-hint.clip="row.appNo">{{ row.appNo }}</span></td>
+            <td class="fit"><span class="clip" v-hint.clip="row.legalDueDate">{{ row.legalDueDate }}</span></td>
+            <td class="fit"><span class="clip" v-hint.clip="row.cusDueDate">{{ row.cusDueDate }}</span></td>
+            <td class="fit"><span class="clip" v-hint.clip="row.intDueDate">{{ row.intDueDate }}</span></td>
+            <td :class="['fit', 'flow', statusShade(flowStatus(row))]">{{ flowStatus(row) }}</td>
           </tr>
         </tbody>
       </template>
@@ -250,21 +325,22 @@ function reset() {
           <td :colspan="selectable ? 10 : 9">{{ loading ? '正在读取期限列表…' : (message ? '查询没有完成，上面有原因。' : '没有可显示的期限记录') }}</td>
         </tr>
         <tr v-for="row in shown" :key="row.procId" v-memo="[row, gates[row.procId], flowByProc[row.procId], checking, selected.includes(row.procId), allowMailedUnfinished]" :class="{ 'is-pending': gates[row.procId] === 'pending' || flowByProc[row.procId] === '已提交审核' || flowByProc[row.procId] === MAILED_UNFINISHED_REVIEW || checking }">
-          <td v-if="selectable">
+          <td v-if="selectable" class="check fit">
             <input type="checkbox" :checked="selected.includes(row.procId)" :disabled="!canPick(row)" @change="toggleRow(row.procId)" />
-            <span v-if="gates[row.procId] === 'pending' || flowByProc[row.procId] === '已提交审核'">待审核</span>
+            <span v-if="gates[row.procId] === 'pending' || flowByProc[row.procId] === '已提交审核'" class="clip" v-hint.clip="'待审核'">待审核</span>
           </td>
-          <td>{{ row.caseVolume }}</td>
-          <td>{{ row.caseName }}</td>
-          <td>{{ row.ctrlProc }}</td>
-          <td>{{ row.customerName }}</td>
-          <td>{{ row.appNo }}</td>
-          <td>{{ row.legalDueDate }}</td>
-          <td>{{ row.cusDueDate }}</td>
-          <td>{{ row.intDueDate }}</td>
-          <td :class="statusShade(flowStatus(row))">{{ flowStatus(row) }}</td>
+          <td class="fit"><span class="clip" v-hint.clip="row.caseVolume">{{ row.caseVolume }}</span></td>
+          <td class="grow"><span class="clip" v-hint.clip="row.caseName">{{ row.caseName }}</span></td>
+          <td class="fit"><span class="clip" v-hint.clip="row.ctrlProc">{{ row.ctrlProc }}</span></td>
+          <td class="grow"><span class="clip" v-hint.clip="row.customerName">{{ row.customerName }}</span></td>
+          <td class="fit"><span class="clip" v-hint.clip="row.appNo">{{ row.appNo }}</span></td>
+          <td class="fit"><span class="clip" v-hint.clip="row.legalDueDate">{{ row.legalDueDate }}</span></td>
+          <td class="fit"><span class="clip" v-hint.clip="row.cusDueDate">{{ row.cusDueDate }}</span></td>
+          <td class="fit"><span class="clip" v-hint.clip="row.intDueDate">{{ row.intDueDate }}</span></td>
+          <td :class="['fit', 'flow', statusShade(flowStatus(row))]">{{ flowStatus(row) }}</td>
         </tr>
       </tbody>
     </table>
+    </div>
   </section>
 </template>

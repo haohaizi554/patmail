@@ -209,7 +209,7 @@ export class EasyRuntime {
     this.activeSession = null
   }
 
-  searchFiles(query: FileSearchQuery): Promise<ApiResult<FileSearchResult>> {
+  searchFiles(query: FileSearchQuery, timeoutMs?: number): Promise<ApiResult<FileSearchResult>> {
     if (this.session.status !== 'authenticated') {
       return Promise.resolve(apiError(
         this.session.status === 'expired' || this.session.status === 'unauthenticated' ? 'SESSION_EXPIRED' : 'AUTH_UNKNOWN',
@@ -236,7 +236,7 @@ export class EasyRuntime {
     this.searchController = controller
     const requestNumber = ++this.searchSequence
     const promise = (async (): Promise<ApiResult<FileSearchResult>> => {
-      const response = await this.transport.post('fileSearch', params.data, controller.signal)
+      const response = await this.transport.post('fileSearch', params.data, controller.signal, timeoutMs)
       if (requestNumber !== this.searchSequence) return apiError('REQUEST_ABORTED', '旧查询已取消。')
       const result = response.ok ? normalizeFileSearch(response.data, query) : response
       if (!result.ok && result.error.code === 'SESSION_EXPIRED') {
@@ -613,7 +613,7 @@ export class EasyRuntime {
     })()
   }
 
-  searchLimitMonitor(query: LimitMonitorQuery): Promise<ApiResult<LimitMonitorResult>> {
+  searchLimitMonitor(query: LimitMonitorQuery, timeoutMs?: number): Promise<ApiResult<LimitMonitorResult>> {
     this.cancelLimitMonitor()
     const controller = new AbortController()
     this.limitController = controller
@@ -624,7 +624,7 @@ export class EasyRuntime {
       }
       const params = buildLimitMonitorParams(query)
       if (!params.ok) return params
-      const response = await this.transport.post('limitMonitor', params.data, controller.signal)
+      const response = await this.transport.post('limitMonitor', params.data, controller.signal, timeoutMs)
       if (requestNumber !== this.limitSequence) return apiError('REQUEST_ABORTED', '旧查询已取消。')
       const result = response.ok ? normalizeLimitMonitor(response.data, query) : response
       if (!result.ok && result.error.code === 'SESSION_EXPIRED') {

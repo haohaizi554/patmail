@@ -10,9 +10,11 @@ import { limitMailItems, limitMailLetterLabel, limitMailProcIds, limitMailSubmit
 import { beginProgress, classifySubmitText, confirmDialog, endProgress, logProgress, progressSummaryLine, tallyProgress } from '../dialog'
 import { splitCaseVolumes } from '../../customer/volume-list'
 import { isQueryGuid } from '../../query/query-validator'
-import { flushRecovery, recallRecovery, scheduleRecovery } from '../../recovery/wal-ledger'
+import { flushRecovery, holdRecovery, peekRecovery, recallRecovery, scheduleRecovery, systemScope } from '../../recovery/wal-ledger'
+import { readLimitTimeout } from '../../api/query-timeout'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useMailConcurrency } from '../../settings/use-mail-concurrency'
+import { useWorkspace } from '../composables/useWorkspace'
 import { isWriteSwitchOpen, isWriteSwitchReady } from '../../settings/write-switch'
 import { useWriteSwitch } from '../../settings/use-write-switch'
 
@@ -139,16 +141,46 @@ function applyQueryDesk(payload: unknown): void {
   publish()
 }
 
+const { connection } = useWorkspace()
+let queryScope = systemScope(connection.value.easyOrigin, 'workflow')
+let parkingQuery = false
+
 function pokeQuery(): void {
-  scheduleRecovery('limit-query', 'workflow', readQueryDesk)
+  if (parkingQuery) return
+  scheduleRecovery('limit-query', queryScope, readQueryDesk)
 }
+
+watch(() => connection.value.easyOrigin, (next, previous) => {
+  if (!previous || next === previous) return
+  parkingQuery = true
+  const payload = readQueryDesk()
+  holdRecovery('limit-query', systemScope(previous, 'workflow'), payload)
+  clearProcQuery()
+  queryScope = systemScope(next, 'workflow')
+  const cached = peekRecovery('limit-query', queryScope)
+  const arriving = queryScope
+  if (cached) applyQueryDesk(cached)
+  parkingQuery = false
+  pokeQuery()
+  if (cached === undefined) {
+    void recallRecovery('limit-query', arriving).then(saved => {
+      if (queryScope !== arriving || rows.value.length) return
+      applyQueryDesk(saved)
+      pokeQuery()
+    }).catch(() => { /* 这个系统还没有账本 */ })
+  }
+})
 
 watch([rows, selected, confirmedIds, message, pageIndex], pokeQuery, { deep: true })
 
 onMounted(() => {
-  void recallRecovery('limit-query', 'workflow').then(payload => applyQueryDesk(payload)).catch(() => { /* 没有账本就等下一次查询 */ })
+  queryScope = systemScope(connection.value.easyOrigin, 'workflow')
+  void recallRecovery('limit-query', queryScope).then(async payload => {
+    if (!payload) payload = await recallRecovery('limit-query', 'workflow')
+    applyQueryDesk(payload)
+  }).catch(() => { /* 没有账本就等下一次查询 */ })
 })
-onUnmounted(() => { void flushRecovery('limit-query', 'workflow', readQueryDesk) })
+onUnmounted(() => { void flushRecovery('limit-query', queryScope, readQueryDesk) })
 
 function publish(): void {
   emit('result', {
@@ -159,7 +191,8 @@ function publish(): void {
   })
 }
 
-function textFor(code: string, fallback: string): string {
+function textFor(code: string, fallback: string, timeoutMs = 60_000): string {
+  if (code === 'REQUEST_TIMEOUT') return `原网站查询太慢，没有在 ${timeoutMs / 60_000} 分钟内返回。可以把超时时间调长后再查。`
   if (code === 'SESSION_EXPIRED') return 'EASY 登录已失效，请在原网站重新登录后检测。'
   if (code === 'HTTP_ERROR') return 'EASY 暂时没有返回列表，可以再查一次。'
   if (code === 'INVALID_QUERY') return fallback || '请输入查询条件。'
@@ -168,10 +201,11 @@ function textFor(code: string, fallback: string): string {
 
 async function requestPage(query: LimitMonitorQuery): Promise<LimitMonitorResult> {
   if (!props.bridge || !props.connected) throw '尚未连接 EASY。'
-  const response = await props.bridge.request({ type: MessageType.SearchLimitMonitor, payload: { query } })
+  const timeoutMs = await readLimitTimeout()
+  const response = await props.bridge.request({ type: MessageType.SearchLimitMonitor, payload: { query, timeoutMs } })
   if (response.type === MessageType.Error) throw response.payload.message
   if (response.type !== MessageType.SearchLimitMonitorResult) throw '期限查询返回了意外结果。'
-  if (!response.payload.ok) throw textFor(response.payload.error.code, response.payload.error.message)
+  if (!response.payload.ok) throw textFor(response.payload.error.code, response.payload.error.message, timeoutMs)
   return response.payload.data
 }
 
@@ -433,8 +467,12 @@ async function onSubmitAsk(address?: string): Promise<void> {
   }
   const bridge = props.bridge
   const task = readWorkflowTask()
+  if (!selected.value.length) {
+    message.value = '先勾选要提交的事项。'
+    return
+  }
   const live = selected.value.filter(item => isQueryGuid(item) && rowCanConfirm(item))
-  if (selected.value.length && !live.length) {
+  if (!live.length) {
     const mailed = selected.value.some(item => flowByProc.value[item] === MAILED_UNFINISHED_REVIEW)
     const skipped = selected.value.some(item => flowByProc.value[item] === SKIP_SEND_REVIEW)
     message.value = checkingGates.value
@@ -446,8 +484,7 @@ async function onSubmitAsk(address?: string): Promise<void> {
           : '已提交审核的不能提交。'
     return
   }
-  const remembered = (confirmedIds.value.length ? confirmedIds.value : (task?.confirmedProcIds ?? [])).filter(id => rowCanConfirm(id))
-  const procIds = live.length ? live : remembered
+  const procIds = live
   const mailedPending = rows.value.filter(row => procIds.includes(row.procId) && flowByProc.value[row.procId] === MAILED_UNFINISHED_REVIEW)
   if (mailedPending.length) {
     const lines = mailedPending.map(row => `${row.caseVolume}｜${row.ctrlProc}｜${row.customerName}`).join('\n')
@@ -463,13 +500,9 @@ async function onSubmitAsk(address?: string): Promise<void> {
       return
     }
   }
-  if (live.length || remembered.length !== (confirmedIds.value.length || (task?.confirmedProcIds.length ?? 0))) {
-    const nextIds = live.length ? live : remembered
-    confirmedIds.value = nextIds
-    const stored = readWorkflowTask()
-    if (stored) writeWorkflowTask(clonePctTask({ ...stored, confirmedProcIds: nextIds }))
-    emit('confirm', nextIds)
-  }
+  confirmedIds.value = procIds
+  if (task) writeWorkflowTask(clonePctTask({ ...task, confirmedProcIds: procIds }))
+  emit('confirm', procIds)
   const planned = limitMailItems({
     procIds,
     rows: rows.value,

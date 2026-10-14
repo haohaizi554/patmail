@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ThemeSelect from '../shell/components/ThemeSelect.vue'
 import TreeOptionSelect from '../shell/components/TreeOptionSelect.vue'
 import type { HistoryQueryOption } from '../api/query-history'
@@ -10,6 +10,8 @@ import { activateOptionFallback, hydrateOptionFallback, optionFallbackEpoch, rem
 import type { NormalizedDictionary } from '../api/dictionaries'
 import { choicesFromDictionary, describePickerReceipt, LIMIT_PICKER_FIELDS } from '../api/dictionaries/picker-catalog'
 import { hasOptionTree } from '../query/option-tree'
+import { fileSearchTimeoutMs, type FileSearchTimeoutMs } from '../api/file-search-params'
+import { readLimitTimeout, writeLimitTimeout } from '../api/query-timeout'
 import { isLimitMonitorInputField, splitCtrlProcIds, type LimitMonitorQuery } from '../api/limit-monitor-params'
 import { isQueryGuid } from '../query/query-validator'
 import { joinCaseVolumes, splitCaseVolumes } from '../customer/volume-list'
@@ -23,6 +25,24 @@ const emit = defineEmits<{
   search: [query: Omit<LimitMonitorQuery, 'pageIndex' | 'pageSize'> & { reset?: boolean; templateId?: string }]
   draft: [fields: Record<string, string>]
 }>()
+
+const queryTimeoutMs = ref<FileSearchTimeoutMs>(60_000)
+const timeoutOptions = [
+  { value: 60_000, label: '1 分钟' },
+  { value: 120_000, label: '2 分钟' },
+  { value: 300_000, label: '5 分钟' },
+  { value: 600_000, label: '10 分钟' }
+]
+let timeoutDirty = false
+onMounted(() => {
+  void readLimitTimeout().then(value => {
+    if (!timeoutDirty) queryTimeoutMs.value = value
+  })
+})
+watch(queryTimeoutMs, value => {
+  timeoutDirty = true
+  writeLimitTimeout(value)
+}, { flush: 'sync' })
 
 const values = ref<Record<string, string>>({})
 const displayValues = ref<Record<string, string>>({})
@@ -465,6 +485,9 @@ watch(() => [valueOf('case_type'), valueOf('proc_type'), valueOf('country')].joi
       <div class="section-heading">
         <strong>查询条件</strong>
         <span class="inline-actions">
+          <label class="query-timeout">超时时间
+            <ThemeSelect v-model="queryTimeoutMs" :options="timeoutOptions" />
+          </label>
           <button type="button" class="text-button" :disabled="!canRead || checking" @click="loadPickers(true)">校对最新字段</button>
           <button type="button" class="text-button" @click="showMore = !showMore">{{ showMore ? '收起更多条件' : '更多条件' }}</button>
         </span>

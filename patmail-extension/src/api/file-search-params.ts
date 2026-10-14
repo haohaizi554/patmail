@@ -79,6 +79,14 @@ export function fileSearchValueLimit(key: string): number {
   return key === 'filetype' ? FILETYPE_VALUE_MAX : FIELD_VALUE_MAX
 }
 
+/** 文件查询在原网站上的等待时间。页面下拉只允许这四档，别的值按 1 分钟。 */
+export const FILE_SEARCH_TIMEOUT_MS = [60_000, 120_000, 300_000, 600_000] as const
+export type FileSearchTimeoutMs = (typeof FILE_SEARCH_TIMEOUT_MS)[number]
+
+export function fileSearchTimeoutMs(value: unknown): FileSearchTimeoutMs {
+  return (FILE_SEARCH_TIMEOUT_MS as readonly number[]).includes(Number(value)) ? Number(value) as FileSearchTimeoutMs : 60_000
+}
+
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function validInternalIds(value: string): boolean {

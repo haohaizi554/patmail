@@ -155,7 +155,14 @@ function annotateSearch<T extends AppMessage>(response: T, recorded: QueryObserv
 
 function stripSearchContinuation(message: AppMessage): AppMessage {
   if (message.type !== MessageType.SearchFiles) return message
-  return { type: MessageType.SearchFiles, payload: { query: message.payload.query } }
+  const timeoutMs = message.payload.timeoutMs
+  return {
+    type: MessageType.SearchFiles,
+    payload: {
+      query: message.payload.query,
+      ...(timeoutMs === undefined ? {} : { timeoutMs })
+    }
+  }
 }
 
 function createdOf(task: AutomationTask): CreatedTaskResult {

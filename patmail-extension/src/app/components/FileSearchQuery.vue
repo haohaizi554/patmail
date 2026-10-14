@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { inject, nextTick, onBeforeUnmount, ref, watch, computed } from 'vue'
 import type { FileSearchQuery } from '../../api/file-search-params'
+import { fileSearchTimeoutMs, type FileSearchTimeoutMs } from '../../api/file-search-params'
 import { assessQueryScope, fileSearchValueLimit, isFileSearchBusinessField } from '../../api/file-search-params'
 import { coerceFileSearchQuery } from '../../api/message-guards'
 import type { FileSearchResult, PatentFile } from '../../api/file-search-types'
@@ -30,6 +31,7 @@ const emit = defineEmits<{
 }>()
 
 const bridge = inject<MessageBridge>('bridge')
+const searchTimeoutMs = ref<FileSearchTimeoutMs>(60_000)
 const pageSize = ref(20)
 const pageSizeOptions = [
   { value: 20, label: '20' },
@@ -37,17 +39,17 @@ const pageSizeOptions = [
   { value: 100, label: '100' }
 ]
 const resultColumns = [
-  { key: 'fileName', label: '附件名称' },
-  { key: 'fileStatus', label: '处理状态' },
-  { key: 'caseVolume', label: '我方文号' },
-  { key: 'customerVolume', label: '客户文号' },
-  { key: 'caseName', label: '案件名称' },
-  { key: 'officialPostDate', label: '官方发文日' },
-  { key: 'fileDescription', label: '文件描述' },
-  { key: 'ctrlProc', label: '处理事项' },
-  { key: 'applicationType', label: '申请类型' },
-  { key: 'fileType', label: '文件类型' },
-  { key: 'uploadTime', label: '上传时间' }
+  { key: 'fileName', label: '附件名称', width: '15%' },
+  { key: 'fileStatus', label: '处理状态', width: '6%' },
+  { key: 'caseVolume', label: '我方文号', width: '10%' },
+  { key: 'customerVolume', label: '客户文号', width: '10%' },
+  { key: 'caseName', label: '案件名称', width: '11%' },
+  { key: 'officialPostDate', label: '官方发文日', width: '8%' },
+  { key: 'fileDescription', label: '文件描述', width: '10%' },
+  { key: 'ctrlProc', label: '处理事项', width: '6%' },
+  { key: 'applicationType', label: '申请类型', width: '5%' },
+  { key: 'fileType', label: '文件类型', width: '5%' },
+  { key: 'uploadTime', label: '上传时间', width: '7%' }
 ] as const
 const querySessionId = ref('')
 const sourceNotice = ref('')
@@ -65,7 +67,7 @@ let generation = 0
 function messageForError(code: string, message: string): string {
   if (code === 'SESSION_EXPIRED') return 'EASY 登录已失效，请在原网站重新登录后检测。'
   if (code === 'AUTH_UNKNOWN') return '无法确认当前登录状态，请重试。'
-  if (code === 'REQUEST_TIMEOUT') return '原网站查询太慢，没有在一分钟内返回。把我方文号或申请号写具体一点再查。'
+  if (code === 'REQUEST_TIMEOUT') return `原网站查询太慢，没有在 ${searchTimeoutMs.value / 60_000} 分钟内返回。可以把超时时间调长，或把我方文号、申请号写具体一点再查。`
   if (code === 'NETWORK_ERROR') return '网络异常，请检查 EASY 网站连接。'
   return message || '请求失败，请稍后重试。'
 }
@@ -101,7 +103,8 @@ async function showResults(): Promise<void> {
   }
 }
 
-async function executeSearch(query: FileSearchQuery, run: 'start' | 'continue' = 'start'): Promise<void> {
+async function executeSearch(query: FileSearchQuery, run: 'start' | 'continue' = 'start', timeoutMs?: FileSearchTimeoutMs): Promise<void> {
+  if (timeoutMs !== undefined) searchTimeoutMs.value = fileSearchTimeoutMs(timeoutMs)
   if (!bridge || !props.canSearch) return
   const fields = fieldsFor(query)
   const resolvedEnough = assessQueryScope(fields).sufficient
@@ -124,7 +127,7 @@ async function executeSearch(query: FileSearchQuery, run: 'start' | 'continue' =
   result.value = null
   try {
     const continuation = run === 'continue' && querySessionId.value ? { querySessionId: querySessionId.value } : undefined
-    const response = await bridge.request({ type: MessageType.SearchFiles, payload: continuation ? { query: next, continuation } : { query: next } })
+    const response = await bridge.request({ type: MessageType.SearchFiles, payload: continuation ? { query: next, continuation, timeoutMs: searchTimeoutMs.value } : { query: next, timeoutMs: searchTimeoutMs.value } })
     if (current !== generation) return
     if (response.type !== MessageType.SearchFilesResult) {
       searchState.value = 'error'
@@ -203,7 +206,7 @@ watch(() => props.seedToken, () => {
     }
     fields[key] = text
   }
-  void executeSearch({ resolvedFields: fields, pageIndex: 1, pageSize: pageSize.value })
+  void executeSearch({ resolvedFields: fields, pageIndex: 1, pageSize: pageSize.value }, 'start', searchTimeoutMs.value)
 })
 
 onBeforeUnmount(() => {
@@ -225,7 +228,7 @@ onBeforeUnmount(() => {
       :page-size="pageSize"
       :seed="seed"
       :seed-token="seedToken"
-      @search="executeSearch"
+      @search="(query, timeoutMs) => executeSearch(query, 'start', timeoutMs)"
       @download-name="emit('download-name', $event)"
     />
     <slot />
@@ -256,6 +259,11 @@ onBeforeUnmount(() => {
         </div>
         <div class="table-scroll">
           <table class="grid">
+            <colgroup>
+              <col v-if="selectable" class="check" />
+              <col class="seq" />
+              <col v-for="column in resultColumns" :key="column.key" :style="{ width: column.width }" />
+            </colgroup>
             <thead>
               <tr>
                 <th v-if="selectable" class="check">
@@ -271,7 +279,9 @@ onBeforeUnmount(() => {
                   <input type="checkbox" :aria-label="file.fileName" :checked="Boolean(selected[file.fileId])" @change="selected = toggleSelected(selected, toSelectedFile(file, selected[file.fileId]?.customerProfileId, querySessionId))" />
                 </td>
                 <td class="seq">{{ rowNo(index) }}</td>
-                <td v-for="column in resultColumns" :key="column.key">{{ cellText(file, column.key) }}</td>
+                <td v-for="column in resultColumns" :key="column.key">
+                  <span class="clip" v-hint.clip="cellText(file, column.key)">{{ cellText(file, column.key) }}</span>
+                </td>
               </tr>
             </tbody>
           </table>

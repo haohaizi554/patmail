@@ -1,4 +1,5 @@
 import { documentedCallAllowed } from './documented-call'
+import { fileSearchTimeoutMs } from './file-search-params'
 import { trustedOrigin } from './config'
 import { apiError, type ApiResult } from './types'
 
@@ -118,34 +119,35 @@ export class EasyTransport {
   }
 
   /** 只读请求遇到网关 502/503 时再试。写请求不重试，避免一次 502 后面又创建出第二封。 */
-  async post(operation: EasyOperation, params: URLSearchParams, signal?: AbortSignal): Promise<ApiResult<unknown>> {
+  async post(operation: EasyOperation, params: URLSearchParams, signal?: AbortSignal, timeoutMs?: number): Promise<ApiResult<unknown>> {
     const retryable = operation !== 'mailCustomer' && operation !== 'saveMailInfo' && operation !== 'saveMailRelatedFiles' && operation !== 'historySave' && operation !== 'historyDelete' && operation !== 'limitMailCustomer' && operation !== 'mailSubmit'
-    let result = await this.postOnce(operation, params, signal)
+    let result = await this.postOnce(operation, params, signal, timeoutMs)
     for (let attempt = 1; retryable && !result.ok && (result.error.status === 502 || result.error.status === 503) && attempt < 3; attempt += 1) {
       if (signal?.aborted) return apiError('REQUEST_ABORTED', '请求已取消。')
       await new Promise(resolve => setTimeout(resolve, 200 * attempt))
       if (signal?.aborted) return apiError('REQUEST_ABORTED', '请求已取消。')
-      result = await this.postOnce(operation, params, signal)
+      result = await this.postOnce(operation, params, signal, timeoutMs)
     }
     return result
   }
 
-  /** 文件查询和期限监控在这套原网站上经常超过 15 秒。测试传入的短超时仍然生效。 */
-  private waitMs(operation: EasyOperation): number {
+  /** 文件查询和期限监控在这套原网站上经常超过 15 秒。测试传入的短超时仍然生效。文件查询可以按页面选择拉长。 */
+  private waitMs(operation: EasyOperation, timeoutMs?: number): number {
     if (this.timeoutMs < 15_000) return this.timeoutMs
-    if (operation === 'fileSearch' || operation === 'limitMonitor' || operation === 'limitMailCustomer' || operation === 'mailProcess' || operation === 'processAP' || operation === 'processEF' || operation === 'agencySearchCase' || operation === 'icSearch' || operation === 'caseBusFlow' || operation === 'casePageDemand' || operation === 'caseInventor' || operation === 'caseRecordContact' || operation === 'customerList') return 60_000
+    if (operation === 'fileSearch' || operation === 'limitMonitor') return fileSearchTimeoutMs(timeoutMs)
+    if (operation === 'limitMailCustomer' || operation === 'mailProcess' || operation === 'processAP' || operation === 'processEF' || operation === 'agencySearchCase' || operation === 'icSearch' || operation === 'caseBusFlow' || operation === 'casePageDemand' || operation === 'caseInventor' || operation === 'caseRecordContact' || operation === 'customerList') return 60_000
     return this.timeoutMs
   }
 
   /** Handler、Call、方法和目标 Origin 由内部白名单固定，页面消息不能提供 URL。 */
-  private async postOnce(operation: EasyOperation, params: URLSearchParams, signal?: AbortSignal): Promise<ApiResult<unknown>> {
+  private async postOnce(operation: EasyOperation, params: URLSearchParams, signal?: AbortSignal, timeoutMs?: number): Promise<ApiResult<unknown>> {
     if (!this.origin) return apiError('INVALID_ORIGIN', '当前页面不属于受信任的 EASY 站点。')
     const route = ROUTES[operation]
     if (!route || params.getAll('Call').length !== 1 || params.get('Call') !== route.call) {
       return apiError('INVALID_QUERY', '业务请求类型无效。')
     }
     if (signal?.aborted) return apiError('REQUEST_ABORTED', '请求已取消。')
-    return this.sendForm(route.path, params, this.waitMs(operation), signal)
+    return this.sendForm(route.path, params, this.waitMs(operation, timeoutMs), signal)
   }
 
   /** 用当前页面的登录会话调用文档里的只读接口。入口和 Call 由调用方先校验。 */

@@ -3,6 +3,7 @@ import { computed, inject, onMounted, ref, watch } from 'vue'
 import PageHead from '../../shell/components/PageHead.vue'
 import MailTypeTreeSelect from '../../shell/components/MailTypeTreeSelect.vue'
 import ThemeSelect from '../../shell/components/ThemeSelect.vue'
+import { sameOptionValue } from '../../shell/components/theme-select'
 import { bg } from '../../shell/assets'
 import type { PatentFile } from '../../api/file-search-types'
 import { fetchMailSenders } from '../../customer/mailset-load'
@@ -57,7 +58,7 @@ const signatureId = ref('')
 const signatureTouched = ref(false)
 const signatureNotice = ref('')
 
-const customer = computed(() => customers.value.find(item => item.id === customerId.value) ?? null)
+const customer = computed(() => customers.value.find(item => sameOptionValue(item.id, customerId.value)) ?? null)
 const mailTypeName = computed(() => mailTypes.value.find(item => item.id === mailTypeId.value)?.name ?? '')
 const mailTypeOptions = computed(() => mailTypes.value.map(item => ({
   value: item.id,
@@ -258,8 +259,8 @@ watch(() => connection.value.easyOrigin, (next, previous) => {
   preview.value = null
   detail.value = null
   void loadMailTypes()
-  void loadSenders(true)
-  void loadSignatures(true)
+  void loadSenders(false)
+  void loadSignatures(false)
 })
 
 watch(signatureDefaultKey, (key) => {

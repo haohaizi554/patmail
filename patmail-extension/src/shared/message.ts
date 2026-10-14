@@ -20,6 +20,7 @@ import type { AccountReviewerList } from '../workflow/contracts'
 import type { LimitMonitorResult } from '../api/limit-monitor-types'
 import type { DictionaryLoadRequest, DictionarySnapshot } from '../api/dictionaries'
 import type { FileSearchQuery } from '../api/file-search-params'
+import { fileSearchTimeoutMs } from '../api/file-search-params'
 import type { FileSearchResult } from '../api/file-search-types'
 import type { HistoryQueryDetail, HistoryQueryOption } from '../api/query-history'
 import type { SessionSummary } from '../api/session'
@@ -153,8 +154,8 @@ type Response<T extends string, P> = Message<P> & { type: T; payload: P }
 export type ContentRequest =
   | Request<'SCAN_PAGE'> | Request<'GET_PAGE_INFO'> | Request<'SHOW_PANEL'> | Request<'PING'>
   | Request<'CHECK_SESSION'> | Request<'CANCEL_SESSION_CHECK'>
-  | Request<'CANCEL_FILE_SEARCH'> | Request<'CANCEL_LIMIT_MONITOR'> | Response<'SEARCH_FILES', { query: FileSearchQuery; continuation?: { querySessionId: string } }>
-  | Response<'SEARCH_LIMIT_MONITOR', { query: LimitMonitorQuery }>
+  | Request<'CANCEL_FILE_SEARCH'> | Request<'CANCEL_LIMIT_MONITOR'> | Response<'SEARCH_FILES', { query: FileSearchQuery; continuation?: { querySessionId: string }; timeoutMs?: number }>
+  | Response<'SEARCH_LIMIT_MONITOR', { query: LimitMonitorQuery; timeoutMs?: number }>
   | Response<'SUBMIT_LIMIT_MAIL', { userId: string; items: Array<{ procId: string; procIds?: string[]; mailTypeId: string; mailStyle: '1'; mailId?: string; mode: 'ipr' | 'lead'; inventor?: boolean; customerName: string; contactName: string; iprName: string; leadName: string }> }>
   | Response<'SUBMIT_FILE_MANAGE', { userId: string; items: Array<{ fileId: string; fileIds: string[]; fileNames: string[]; mailTypeId: string; mailStyle: '1'; mailId?: string; recall?: boolean; subject: string; senderId: string; senderName: string; senderEmail: string; reviewerId: string; reviewerName: string; signature: string }> }>
   | Response<'RESOLVE_DOWNLOAD_NAMES', { fileIds: string[]; selection: FileDownloadSelection }>
@@ -713,11 +714,21 @@ export function isMessage(value: unknown): value is AppMessage {
         Object.keys(value.payload).length === 1
     case MessageType.InspectEasyMail:
       return isRecord(value.payload) && typeof value.payload.executionId === 'string' && Object.keys(value.payload).length === 1
-    case MessageType.SearchFiles:
-      return isRecord(value.payload) && isFileSearchQuery(value.payload.query) && isSearchContinuation(value.payload.continuation) &&
-        (Object.keys(value.payload).length === 1 || (Object.keys(value.payload).length === 2 && value.payload.continuation !== undefined))
-    case MessageType.SearchLimitMonitor:
-      return isRecord(value.payload) && isLimitMonitorQuery(value.payload.query) && Object.keys(value.payload).length === 1
+    case MessageType.SearchFiles: {
+      if (!isRecord(value.payload) || !isFileSearchQuery(value.payload.query) || !isSearchContinuation(value.payload.continuation)) return false
+      const keys = Object.keys(value.payload)
+      if (!keys.includes('query')) return false
+      const extra = keys.filter(key => key !== 'query')
+      return extra.every(key => key === 'continuation' || key === 'timeoutMs') &&
+        (value.payload.timeoutMs === undefined || fileSearchTimeoutMs(value.payload.timeoutMs) === value.payload.timeoutMs)
+    }
+    case MessageType.SearchLimitMonitor: {
+      if (!isRecord(value.payload) || !isLimitMonitorQuery(value.payload.query)) return false
+      const keys = Object.keys(value.payload)
+      if (!keys.includes('query')) return false
+      return keys.every(key => key === 'query' || key === 'timeoutMs') &&
+        (value.payload.timeoutMs === undefined || fileSearchTimeoutMs(value.payload.timeoutMs) === value.payload.timeoutMs)
+    }
     case MessageType.SubmitLimitMail:
       return isLimitMailSubmitRequest(value.payload)
     case MessageType.SubmitLimitMailResult:

@@ -311,10 +311,10 @@ function waveMessage(units: readonly ArbitrationUnit[], index: number, total: nu
     'IPR 就是技术联系人。身份只能是：发明人、客户联系人、IPR。多人用顿号，身份与人名一一对应。',
     '不要写商务、登录人、登陆人、密送、技术负责人。抄送商务、抄送登录人、密送登录人由系统在提交时默认追加。仲裁写了也会被丢掉，写抄送无也不会取消这些默认项。',
     priorityLine(options.iprOnly === true) + '抄送只写第 1 条里额外要点名的人，没有就写无。',
-    '每一行只写一行，用竖线分开，文号原样照抄，外面不要加尖括号：',
-    '文号 我方文号｜收件人 人名｜身份 身份｜抄送 人名或无｜抄送身份 身份或无｜依据 一句话',
-    '拿不准的行写成：文号 我方文号｜拿不准｜依据 一句话。不要把身份写进人名括号，文号和人名外面也不要加尖括号。',
-    '不要调用工具，不要构造接口，不要自己去查，不要创建任务，不要让用户挑选。裁完这一批就停。',
+    '每一行只写一行，用竖线分开，文号原样照抄。没有客户文号就写空。不要加尖括号，不要解释，不要写英文：',
+    '客户文号 我方文号｜收件人 人名｜身份 身份｜抄送 人名或无｜抄送身份 身份或无｜依据 一句简体中文',
+    '拿不准的行写成：客户文号 我方文号｜拿不准｜依据 一句简体中文。依据写完立刻换行。不要把身份写进人名括号。',
+    '不要调用工具，不要构造接口，不要自己去查，不要创建任务，不要让用户挑选。裁完这一批就停，不要写思考过程。',
     ...blocks
   ].join('\n\n')
   return text.length > 18000 ? `${text.slice(0, 18000)}\n（后面的原文被截断了。）` : text
@@ -421,6 +421,15 @@ function fieldOf(parts: string[], label: string): string {
   return found.slice(label.length).replace(/^[：:\s]+/, '').trim()
 }
 
+/** 依据只留一句中文。模型有时会在同一行接着写英文思考，那种尾巴不能进表格。 */
+function cleanReason(value: string): string {
+  const text = unwrapToken(value)
+  const cut = text.search(/[`']|\s+[A-Za-z]{2,}(?:\s+[A-Za-z'.,]+){2,}/)
+  if (cut === 0) return ''
+  const kept = (cut > 0 ? text.slice(0, cut) : text).replace(/[\s`'"“”]+$/g, '').trim()
+  return kept.slice(0, 120)
+}
+
 function isCaseVolume(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9\u4e00-\u9fff._/-]*\d[A-Za-z0-9\u4e00-\u9fff._/-]*$/.test(value)
 }
@@ -471,7 +480,7 @@ export function readArbitrationDecisions(text: string): ArbitrationDecision[] {
     if (!volume) continue
     const parts = line.split(/[｜|│丨]/).map(part => part.trim())
     const unsure = parts.some(part => part === '拿不准' || part.startsWith('拿不准')) || /[：:]\s*拿不准/.test(line)
-    const reason = unwrapToken(fieldOf(parts, '依据')).slice(0, 120)
+    const reason = cleanReason(fieldOf(parts, '依据'))
     if (unsure) {
       decisions.push({ volume, recipient: '', role: '', cc: '', ccRole: '', reason, unsure: true })
       continue

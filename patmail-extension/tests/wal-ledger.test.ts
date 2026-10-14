@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { memoryRecoveryStore, openRecoveryLedger, useRecoveryWasm, type StoredFrame } from '../src/recovery/wal-ledger'
+import { holdRecovery, memoryRecoveryStore, openRecoveryLedger, peekRecovery, systemScope, useRecoveryWasm, type StoredFrame } from '../src/recovery/wal-ledger'
 
 const wasmFile = readFileSync(require.resolve('sql.js/dist/sql-wasm.wasm'))
 useRecoveryWasm(wasmFile.buffer.slice(wasmFile.byteOffset, wasmFile.byteOffset + wasmFile.byteLength))
@@ -46,5 +46,17 @@ describe('SQLite WAL 恢复账本', () => {
     expect(await ledger.get('file-desk', 'local')).toBeNull()
     expect(await ledger.latest('file-desk')).toBeNull()
     await expect(ledger.put('workflow-desk', 'local', { cookie: 'secret' })).rejects.toThrow('登录凭据')
+  })
+
+  it('两个系统的工作面分开记，切回来先用内存里的那份', () => {
+    const large = systemScope('http://183.36.43.66:88', 'page')
+    const sme = systemScope('http://183.36.43.44:88/', 'workflow')
+    expect(large).not.toBe(sme)
+    expect(systemScope('http://183.36.43.44:88/', 'workflow')).toBe('http://183.36.43.44:88|workflow')
+    holdRecovery('limit-query', large, { rows: ['PA1'] })
+    holdRecovery('limit-query', sme, null)
+    expect(peekRecovery('limit-query', large)).toEqual({ rows: ['PA1'] })
+    expect(peekRecovery('limit-query', sme)).toBeNull()
+    expect(peekRecovery('limit-query', systemScope('http://other', 'page'))).toBeUndefined()
   })
 })

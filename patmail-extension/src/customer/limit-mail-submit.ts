@@ -205,7 +205,7 @@ export function limitMailItems(input: {
   /** auto：有名字的行按写回的收件人提交，空着的行按发文规则勾选客户联系人兜底。checked：空着的行按发文规则勾选。named：只提交有名字的行。 */
   address?: 'named' | 'checked' | 'auto'
 }): { ok: true; items: LimitMailSubmitItem[] } | { ok: false; message: string } {
-  if (!input.procIds.length) return { ok: false, message: '还没有确认勾选。先勾选还没提交审核的事项。' }
+  if (!input.procIds.length) return { ok: false, message: '还没有勾选。先勾选还没提交审核的事项。' }
   const specials = input.specials ?? new Set<string>()
   const flat: Array<{ item: LimitMailSubmitItem; row: PctTaskRow }> = []
   for (const procId of input.procIds) {

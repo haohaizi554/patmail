@@ -51,6 +51,12 @@ describe('message validation', () => {
       caseVolume: 'A-123', pageIndex: 1, pageSize: 20
     } } })).toBe(true)
     expect(isContentRequest({ type: 'SEARCH_FILES', payload: { query: {
+      caseVolume: 'A-123', pageIndex: 1, pageSize: 20
+    }, timeoutMs: 300_000 } })).toBe(true)
+    expect(isContentRequest({ type: 'SEARCH_FILES', payload: { query: {
+      caseVolume: 'A-123', pageIndex: 1, pageSize: 20
+    }, timeoutMs: 90_000 } })).toBe(false)
+    expect(isContentRequest({ type: 'SEARCH_FILES', payload: { query: {
       caseVolume: 'A-123', pageIndex: '1', pageSize: 20
     } } })).toBe(false)
     expect(isContentRequest({ type: 'SEARCH_FILES', payload: { query: {
@@ -100,6 +106,25 @@ describe('message validation', () => {
     prepareForwardedSearch(message)
     const kept = (message.payload.message as { payload: { query: { resolvedFields: { filetype: string } } } }).payload.query.resolvedFields.filetype
     expect(kept).toBe(filetype)
+  })
+
+  it('keeps the file-search timeout chosen on the page when forwarding', () => {
+    const message = {
+      type: 'WORKSPACE',
+      payload: {
+        action: 'forward',
+        message: {
+          type: 'SEARCH_FILES',
+          payload: {
+            query: { caseVolume: 'A-123', pageIndex: 1, pageSize: 20 },
+            timeoutMs: 120_000
+          }
+        }
+      }
+    }
+    prepareForwardedSearch(message)
+    expect(isMessage(message)).toBe(true)
+    expect((message.payload.message as { payload: { timeoutMs?: number } }).payload.timeoutMs).toBe(120_000)
   })
 
   it('validates normalized API responses without accepting raw server records', () => {

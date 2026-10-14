@@ -76,12 +76,11 @@ describe('绑定最后提交的字段', () => {
     })
   })
 
-  it('期限查询绑到客户时留下字段快照，不写进文件查询覆盖项', () => {
-    const next = applyBoundQuery(profile({ limitMailStyle: '1', overrides: { case_volume: '旧的' } }), {
+  it('期限查询绑到客户时留下字段快照，不改审核人', () => {
+    const next = applyBoundQuery(profile({ limitMailStyle: '1', overrides: { case_volume: '旧的' }, reviewTarget: 'self' }), {
       surface: 'limit',
       fields: { ctrl_proc: 'abc', customer_name: '鹏城实验室' },
-      templateId: 'limit-template',
-      reviewSelf: true
+      templateId: 'limit-template'
     })
     expect(next.boundQuery).toEqual({ ctrl_proc: 'abc', customer_name: '鹏城实验室' })
     expect(next.overrides).toEqual({})

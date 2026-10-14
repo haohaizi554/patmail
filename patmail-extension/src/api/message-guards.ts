@@ -1,6 +1,6 @@
 import { isQueryGuid } from '../query/query-validator'
 import { isRecord } from '../shared/guards'
-import { fileSearchValueLimit, isFileSearchBusinessField, type FileSearchQuery } from './file-search-params'
+import { fileSearchTimeoutMs, fileSearchValueLimit, isFileSearchBusinessField, type FileSearchQuery } from './file-search-params'
 import type { DictionarySnapshot } from './dictionaries'
 import type { HistoryQueryDetail, HistoryQueryOption } from './query-history'
 import type { FileSearchResult, PatentFile } from './file-search-types'
@@ -84,7 +84,11 @@ export function prepareForwardedSearch(message: unknown): void {
   const continuation = inner.payload.continuation
   const keep = isRecord(continuation) && Object.keys(continuation).length === 1 &&
     typeof continuation.querySessionId === 'string' && CONTINUATION_ID.test(continuation.querySessionId)
-  inner.payload = keep ? { query, continuation } : { query }
+  const chosen = fileSearchTimeoutMs(inner.payload.timeoutMs)
+  const timeoutMs = inner.payload.timeoutMs !== undefined && chosen === Number(inner.payload.timeoutMs) ? chosen : undefined
+  inner.payload = keep
+    ? { query, continuation, ...(timeoutMs === undefined ? {} : { timeoutMs }) }
+    : { query, ...(timeoutMs === undefined ? {} : { timeoutMs }) }
 }
 
 function isApiError(value: unknown): value is ApiError {

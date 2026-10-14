@@ -281,5 +281,5 @@ export function buildPctTask(input: {
 export function summarizePctTask(task: PctTaskDraft): string {
   const names = [...new Set(task.rows.map(row => row.mailTypeLabel.trim()).filter(Boolean))]
   const detail = names.map(label => `${label} ${task.rows.filter(row => row.mailTypeLabel === label).length} 件`).join('，')
-  return `${task.rows.length} 行。发文类型：${detail || '还没从原网站读到'}。已确认勾选 ${task.confirmedProcIds.length} 件。`
+  return `${task.rows.length} 行。发文类型：${detail || '还没从原网站读到'}。已勾选 ${task.confirmedProcIds.length} 件。`
 }

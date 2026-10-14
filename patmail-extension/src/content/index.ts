@@ -144,10 +144,10 @@ const bridge: MessageBridge = {
         return { type: MessageType.SessionCheckCancelled, payload: { ok: true } }
       case MessageType.SearchFiles:
         return { type: MessageType.SearchFilesResult,
-          payload: await easyRuntime.searchFiles(message.payload.query) }
+          payload: await easyRuntime.searchFiles(message.payload.query, message.payload.timeoutMs) }
       case MessageType.SearchLimitMonitor:
         return { type: MessageType.SearchLimitMonitorResult,
-          payload: await easyRuntime.searchLimitMonitor(message.payload.query) }
+          payload: await easyRuntime.searchLimitMonitor(message.payload.query, message.payload.timeoutMs) }
       case MessageType.SubmitLimitMail:
         return { type: MessageType.SubmitLimitMailResult,
           payload: await easyRuntime.submitLimitMails(message.payload.userId, message.payload.items) }
