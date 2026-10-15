@@ -15,7 +15,7 @@ export function reviewNeedsArbitration(review: string, allowMailedUnfinished: bo
   return true
 }
 
-/** 一边是另一边再加一段「-后缀」。用来认出库里文号和表格文号只差放弃复审这类尾巴。 */
+/** 一边是另一边再加一段后缀。减号尾巴，或整段括号尾巴，比如（结案）。用来认出库里文号和表格文号只差这类尾巴。 */
 export function suffixVariant(left: string, right: string): boolean {
   const a = left.replace(/\s/g, '').toUpperCase()
   const b = right.replace(/\s/g, '').toUpperCase()
@@ -24,7 +24,8 @@ export function suffixVariant(left: string, right: string): boolean {
   const short = a.length >= b.length ? b : a
   if (!long.startsWith(short)) return false
   const extra = long.slice(short.length)
-  return extra.startsWith('-') && extra.length > 1
+  if (extra.startsWith('-') && extra.length > 1) return true
+  return extra.length > 2 && ((extra.startsWith('（') && extra.endsWith('）')) || (extra.startsWith('(') && extra.endsWith(')')))
 }
 
 function text(value: unknown): string {

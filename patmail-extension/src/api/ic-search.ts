@@ -22,12 +22,13 @@ function tag(name: string, value = ''): string {
   return `&lt;${name}&gt;${xmlText(value)}&lt;/${name}&gt;`
 }
 
-/** 案件查询 ICSearchList。表单和期限监控一样先交空条件，但结束的事项也不会被这张表丢掉。多个文号用分号接在同一个栏里，最多 8 个。 */
+/** 案件查询 ICSearchList。表单和期限监控一样先交空条件，但结束的事项也不会被这张表丢掉。多个文号用分号接在同一个栏里，最多 8 个。模糊查询只开在我方文号栏。 */
 export function buildIcSearchParams(
   caseVolume: string,
   now: () => number = Date.now,
   field: IcSearchField = 'case_volume',
-  pageSize = 10
+  pageSize = 10,
+  fuzzy = false
 ): ApiResult<URLSearchParams> {
   const parts = caseVolume.split(/[;；]/).map(item => item.trim()).filter(Boolean)
   if (!parts.length || parts.length > 8 || parts.some(part => part.length > 80) || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 50) {
@@ -49,7 +50,7 @@ export function buildIcSearchParams(
     ['is_proc', 'false'],
     ['is_fuzzy_query_app_no', 'false'],
     ['is_remove_symbol', 'false'],
-    ['is_fuzzy_query_case_volume', 'false'],
+    ['is_fuzzy_query_case_volume', fuzzy && field === 'case_volume' ? 'true' : 'false'],
     ['is_point_app_no', 'false'],
     ['is_first', 'true'],
     ['is_fuzzy_query_pct_app_no', 'false'],

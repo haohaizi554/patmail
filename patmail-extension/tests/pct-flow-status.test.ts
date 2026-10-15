@@ -110,6 +110,15 @@ describe('PCT 发文审核状态', () => {
     expect(suffixVariant('PA2519196CND-YS', 'pa2519196cnd-ys')).toBe(false)
     expect(suffixVariant('PA2519196CND', 'PA2519196CND-YS')).toBe(true)
     expect(suffixVariant('PA2519196CNDYS', 'PA2519196CND')).toBe(false)
+    expect(suffixVariant('CPA25113388CN', 'CPA25113388CN（结案）')).toBe(true)
+    expect(suffixVariant('CPA25113388CN', 'CPA25113388CN(结案)')).toBe(true)
+    expect(suffixVariant('QWPA25110732CN', 'QWPA25110732CN-TB-YS')).toBe(true)
+    expect(suffixVariant('CW1PA25113297CN', 'CW1PA25113297CN-A')).toBe(true)
+    expect(suffixVariant('CW1PA25110997CN', 'CW1PA25110997CN-优')).toBe(true)
+    expect(suffixVariant('CPA25111897CN', 'CPA25111897CN-YS')).toBe(true)
+    expect(suffixVariant('PA25111791CN', 'PA25111791CN-NYS-优')).toBe(true)
+    expect(suffixVariant('CPA25113388CN', 'CPA25113388CN（结案')).toBe(false)
+    expect(suffixVariant('CPA25113388CN', 'CPA25113388CNX')).toBe(false)
   })
 
   it('已经提交、审核通过的行不再仲裁，未管制完成日跟允许发文开关', () => {

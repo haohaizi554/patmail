@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { isEasyOrigin } from '../api/config'
 import { isMessage, MessageType, type ContentRequest } from '../shared/message'
 import { summarize, type ScanSummary } from '../shared/types'
 import { sendToBackground } from '../utils/runtime'
@@ -13,9 +14,8 @@ const workerStatus = ref<'checking' | 'ready' | 'unavailable'>('checking')
 function supportedUrl(value: string | undefined): boolean {
   if (!value) return false
   const url = new URL(value)
-  return url.protocol === 'http:' && (
-    url.host === '183.36.43.66:88' || url.host === '183.36.43.44:88' || url.hostname === '127.0.0.1' || url.hostname === 'localhost'
-  )
+  if (url.hostname === '127.0.0.1' || url.hostname === 'localhost') return url.protocol === 'http:'
+  return isEasyOrigin(url.origin)
 }
 
 async function act(type: 'SCAN_PAGE' | 'SHOW_PANEL'): Promise<void> {

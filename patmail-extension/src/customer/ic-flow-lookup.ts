@@ -30,7 +30,7 @@ const IC_SEARCH_GROUP = 8
 type FoundCase = { caseId: string; libraryVolume: string }
 type Seek = FoundCase | 'miss' | 'unread' | 'login'
 
-/** 用案件查询找案子，再按处理事项名称读发文流程。我方文号对上就不再查客户文号；只有库里没有时才补查。 */
+/** 用案件查询找案子，再按处理事项名称读发文流程。我方文号对上就不再查客户文号；只有库里没有时才补查。没有客户文号可交叉验证时，再按后缀做一次模糊查询。 */
 export async function lookupIcFlow(
   rows: IcFlowAsk[],
   post: (operation: 'icSearch' | 'caseBusFlow', params: URLSearchParams) => Promise<ApiResult<unknown>>,
@@ -80,6 +80,44 @@ export async function lookupIcFlow(
 
   function cacheKey(field: IcSearchField, volume: string, prefer: string): string {
     return `${field}\n${volumeKey(volume)}\n${volumeKey(prefer)}`
+  }
+
+  function pickFuzzy(hits: IcCaseHit[], volume: string, clipped: boolean): IcCaseHit | undefined {
+    const exact = hits.find(item => volumeKey(item.caseVolume) === volumeKey(volume))
+    if (exact) return exact
+    if (clipped) return undefined
+    const variants = hits.filter(item => suffixVariant(volume, item.caseVolume))
+    return variants.length === 1 ? variants[0] : undefined
+  }
+
+  async function searchFuzzyOnce(volume: string): Promise<Seek> {
+    const params = buildIcSearchParams(volume, Date.now, 'case_volume', 50, true)
+    if (!params.ok) return 'unread'
+    const response = await post('icSearch', params.data)
+    if (!response.ok) {
+      if (/登录/.test(response.error.message)) {
+        failure = response
+        return 'login'
+      }
+      return 'unread'
+    }
+    if (!isRecord(response.data) || (response.data.TableRows != null && !Array.isArray(response.data.TableRows))) return 'unread'
+    const hits = icCasesFromBody(response.data)
+    const hit = pickFuzzy(hits, volume, hits.length >= 50)
+    if (!hit) return 'miss'
+    return { caseId: hit.caseId, libraryVolume: hit.caseVolume }
+  }
+
+  async function seekFuzzy(volume: string): Promise<Seek> {
+    const key = `fuzzy\n${volumeKey(volume)}`
+    if (!volumeKey(volume)) return 'miss'
+    const cached = cache.get(key)
+    if (cached && cached !== 'unread') return cached
+    let searched = await searchFuzzyOnce(volume)
+    if (searched === 'login' || failure) return 'login'
+    if (searched === 'unread') searched = await searchFuzzyOnce(volume)
+    if (searched !== 'unread') cache.set(key, searched)
+    return searched
   }
 
   async function seek(volume: string, field: IcSearchField = 'case_volume', prefer = ''): Promise<Seek> {
@@ -240,6 +278,32 @@ export async function lookupIcFlow(
     await searchJobs(customerJobs, 'case_volume_customer', true)
   }
   if (!failure) {
+    const fuzzyLeaders: Job[] = []
+    const fuzzySiblings = new Map<number, number[]>()
+    const seenFuzzy = new Map<string, number>()
+    for (const job of ourJobs) {
+      if (job.prefer || choices[job.index] !== 'miss') continue
+      const key = volumeKey(job.volume)
+      if (!key) continue
+      const leader = seenFuzzy.get(key)
+      if (leader !== undefined) {
+        const list = fuzzySiblings.get(leader) ?? []
+        list.push(job.index)
+        fuzzySiblings.set(leader, list)
+        continue
+      }
+      seenFuzzy.set(key, job.index)
+      fuzzyLeaders.push(job)
+    }
+    await pool(fuzzyLeaders, IC_LOOKUP_SOCKETS, async job => {
+      if (failure) return
+      const found = await seekFuzzy(job.volume)
+      if (found === 'login' || failure || typeof found !== 'object') return
+      remember(job.index, found, false)
+      for (const index of fuzzySiblings.get(job.index) ?? []) remember(index, found, false)
+    })
+  }
+  if (!failure) {
     const caseIds: string[] = []
     const seenCase = new Set<string>()
     for (const choice of choices) {
@@ -283,7 +347,7 @@ export async function lookupIcFlow(
     const uncontrolled = sent === 'done' && mailedWithoutFinishDate(body, row.procLabel) ? true as const : undefined
     const skipSend = sent === 'open' && finishedWithoutFlow(body, row.procLabel) ? true as const : undefined
     const customer = (row.customerVolume ?? '').trim()
-    const correctedOur = customer && suffixVariant(row.caseVolume, choice.libraryVolume) ? choice.libraryVolume : undefined
+    const correctedOur = suffixVariant(row.caseVolume, choice.libraryVolume) ? choice.libraryVolume : undefined
     const correctedCustomer = customer && suffixVariant(customer, choice.libraryVolume) ? choice.libraryVolume : undefined
     const brief = row.withRecord ? briefs.get(choice.caseId) : undefined
     const customerInfo = brief?.customerInfo || undefined

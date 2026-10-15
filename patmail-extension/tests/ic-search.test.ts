@@ -26,6 +26,19 @@ describe('案件查询', () => {
     expect(element).toContain('&lt;tech_disclosure&gt;null&lt;/tech_disclosure&gt;')
     expect(built.data.get('cookie')).toBeNull()
     expect(built.data.get('pageSize')).toBe('10')
+    expect(built.data.get('is_fuzzy_query_case_volume')).toBe('false')
+  })
+
+  it('我方文号可以单独打开模糊查询', () => {
+    const built = buildIcSearchParams('CPA25113388CN', () => 1, 'case_volume', 50, true)
+    expect(built.ok).toBe(true)
+    if (!built.ok) return
+    expect(built.data.get('is_fuzzy_query_case_volume')).toBe('true')
+    expect(built.data.get('pageSize')).toBe('50')
+    const customer = buildIcSearchParams('HC20251191', () => 1, 'case_volume_customer', 10, true)
+    expect(customer.ok).toBe(true)
+    if (!customer.ok) return
+    expect(customer.data.get('is_fuzzy_query_case_volume')).toBe('false')
   })
 
   it('最多 8 个文号并成一次查询', () => {

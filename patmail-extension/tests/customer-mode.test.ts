@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { isEasyOrigin, SME_CUSTOMER_ORIGIN } from '../src/api/config'
+import { isEasyOrigin, LARGE_CUSTOMER_DOMAIN_ORIGIN, SME_CUSTOMER_DOMAIN_ORIGIN, SME_CUSTOMER_ORIGIN } from '../src/api/config'
 import { handleWorkspaceMessage, type WorkspaceHost } from '../src/background/workspace'
 import { MemoryEvidenceStore } from '../src/automation/evidence-store'
 import { SerialTaskStore } from '../src/automation/indexed-store'
@@ -35,10 +35,17 @@ afterEach(async () => {
 describe('客户系统切换', () => {
   it('把中小客户站点登记成可信任的 EASY，业务地址和大客户分开', () => {
     expect(isEasyOrigin(sme)).toBe(true)
+    expect(isEasyOrigin(LARGE_CUSTOMER_DOMAIN_ORIGIN)).toBe(true)
+    expect(isEasyOrigin(SME_CUSTOMER_DOMAIN_ORIGIN)).toBe(true)
     expect(modeOrigin('large')).toBe(large)
     expect(modeOrigin('sme')).toBe(sme)
-    expect(originsForMode('sme')).toEqual([sme])
+    expect(originsForMode('sme')).toEqual([sme, SME_CUSTOMER_DOMAIN_ORIGIN])
     expect(originsForMode('large')).toContain(large)
+    expect(originsForMode('large')).toContain(LARGE_CUSTOMER_DOMAIN_ORIGIN)
+    expect(originMatchesMode(LARGE_CUSTOMER_DOMAIN_ORIGIN, 'large')).toBe(true)
+    expect(originMatchesMode(LARGE_CUSTOMER_DOMAIN_ORIGIN, 'sme')).toBe(false)
+    expect(originMatchesMode(SME_CUSTOMER_DOMAIN_ORIGIN, 'sme')).toBe(true)
+    expect(originMatchesMode(SME_CUSTOMER_DOMAIN_ORIGIN, 'large')).toBe(false)
     expect(originMatchesMode(sme, 'large')).toBe(false)
     expect(expectedWorkspaceOrigin({
       switchesSystem: false, sessionStatus: 'disconnected', easyOrigin: large, modeOrigin: sme

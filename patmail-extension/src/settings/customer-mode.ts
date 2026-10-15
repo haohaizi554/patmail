@@ -1,4 +1,4 @@
-import { LARGE_CUSTOMER_ORIGIN, PCL_ORIGIN, SME_CUSTOMER_ORIGIN } from '../api/config'
+import { LARGE_CUSTOMER_DOMAIN_ORIGIN, LARGE_CUSTOMER_ORIGIN, PCL_ORIGIN, SME_CUSTOMER_DOMAIN_ORIGIN, SME_CUSTOMER_ORIGIN } from '../api/config'
 
 /** 大客户走 66，中小客户走 44。中小客户先复用大客户的全部能力。 */
 export type CustomerMode = 'large' | 'sme'
@@ -18,9 +18,11 @@ export function modeLabel(mode: CustomerMode): string {
   return mode === 'sme' ? '中小客户' : '大客户'
 }
 
-/** 大客户模式仍包含原来的 66 和鹏城。中小客户只连 44。 */
+/** 大客户认 66、d.hiseeip.com 和鹏城。中小客户认 44 和 z.hiseeip.com。 */
 export function originsForMode(mode: CustomerMode): readonly string[] {
-  return mode === 'sme' ? [SME_CUSTOMER_ORIGIN] : [LARGE_CUSTOMER_ORIGIN, PCL_ORIGIN]
+  return mode === 'sme'
+    ? [SME_CUSTOMER_ORIGIN, SME_CUSTOMER_DOMAIN_ORIGIN]
+    : [LARGE_CUSTOMER_ORIGIN, LARGE_CUSTOMER_DOMAIN_ORIGIN, PCL_ORIGIN]
 }
 
 export function originMatchesMode(origin: string, mode: CustomerMode = customerMode()): boolean {

@@ -286,6 +286,79 @@ describe('一件没查成不停下其余', () => {
     }
   })
 
+  it('没有客户文号时，模糊查询对上带后缀的库内文号并修正', async () => {
+    const library = 'aaaaaaaa-1111-4111-8111-111111111111'
+    const calls: string[] = []
+    const post = async (operation: 'icSearch' | 'caseBusFlow', params: URLSearchParams): Promise<ApiResult<unknown>> => {
+      if (operation === 'caseBusFlow') return { ok: true, data: { ProcInfo: [], Eflow: [] } }
+      const fuzzy = params.get('is_fuzzy_query_case_volume') ?? ''
+      const our = elementTag(params.get('Element') ?? '', 'case_volume')
+      calls.push(`${fuzzy}:${our}`)
+      if (fuzzy === 'true' && our === 'CPA25113388CN') {
+        return { ok: true, data: { TableRows: [{ case_id: library, case_volume: 'CPA25113388CN（结案）' }] } }
+      }
+      if (fuzzy === 'true' && our === 'QWPA25110732CN') {
+        return { ok: true, data: { TableRows: [{ case_id: library, case_volume: 'QWPA25110732CN-TB-YS' }] } }
+      }
+      return { ok: true, data: { TableRows: [] } }
+    }
+    const found = await lookupIcFlow([
+      { caseVolume: 'CPA25113388CN', procLabel: '提醒申请PCT' },
+      { caseVolume: 'QWPA25110732CN', procLabel: '提醒申请PCT' }
+    ], post)
+    expect(found.ok).toBe(true)
+    expect(calls[0]).toBe('false:CPA25113388CN;QWPA25110732CN')
+    expect(calls.slice(1).sort()).toEqual(['true:CPA25113388CN', 'true:QWPA25110732CN'])
+    if (found.ok) {
+      expect(found.data.items[0]?.found).toBe(true)
+      expect(found.data.items[0]?.correctedOur).toBe('CPA25113388CN（结案）')
+      expect(found.data.items[1]?.correctedOur).toBe('QWPA25110732CN-TB-YS')
+    }
+  })
+
+  it('模糊结果不是唯一后缀，或已经有客户文号时，不再模糊对上', async () => {
+    const calls: string[] = []
+    const post = async (operation: 'icSearch' | 'caseBusFlow', params: URLSearchParams): Promise<ApiResult<unknown>> => {
+      if (operation === 'caseBusFlow') return { ok: true, data: { ProcInfo: [], Eflow: [] } }
+      const fuzzy = params.get('is_fuzzy_query_case_volume') ?? ''
+      const our = elementTag(params.get('Element') ?? '', 'case_volume')
+      const customer = elementTag(params.get('Element') ?? '', 'case_volume_customer')
+      calls.push(`${fuzzy}:${our}:${customer}`)
+      if (fuzzy === 'true' && our === 'CW1PA25113297CN') {
+        return {
+          ok: true,
+          data: {
+            TableRows: [
+              { case_id: 'aaaaaaaa-1111-4111-8111-111111111111', case_volume: 'CW1PA25113297CN-A' },
+              { case_id: 'bbbbbbbb-1111-4111-8111-111111111111', case_volume: 'CW1PA25113297CN-优' }
+            ]
+          }
+        }
+      }
+      if (fuzzy === 'true' && our === 'PA25111791CN') {
+        return { ok: true, data: { TableRows: [{ case_id: 'cccccccc-1111-4111-8111-111111111111', case_volume: 'PA25111791CNX' }] } }
+      }
+      return { ok: true, data: { TableRows: [] } }
+    }
+    const found = await lookupIcFlow([
+      { caseVolume: 'CW1PA25113297CN', procLabel: '提醒申请PCT' },
+      { caseVolume: 'PA25111791CN', procLabel: '提醒申请PCT' },
+      { caseVolume: 'CPA25111897CN', customerVolume: 'HC1', procLabel: '提醒申请PCT' }
+    ], post)
+    expect(found.ok).toBe(true)
+    expect(calls.some(call => call.startsWith('true:CPA25111897CN'))).toBe(false)
+    expect(calls.filter(call => call.startsWith('true:')).sort()).toEqual([
+      'true:CW1PA25113297CN:',
+      'true:PA25111791CN:'
+    ])
+    if (found.ok) {
+      expect(found.data.items[0]?.found).toBe(false)
+      expect(found.data.items[0]?.correctedOur).toBeUndefined()
+      expect(found.data.items[1]?.found).toBe(false)
+      expect(found.data.items[2]?.found).toBe(false)
+    }
+  })
+
   it('没有子流程且事项已完成时标不用发', async () => {
     const post = async (operation: 'icSearch' | 'caseBusFlow'): Promise<ApiResult<unknown>> => {
       if (operation === 'caseBusFlow') {
