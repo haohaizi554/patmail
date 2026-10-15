@@ -650,7 +650,9 @@ async function writeRecipients(transport: EasyTransport, mailId: string, item: L
   }
   plan.to = dropPrefilledNoticeRecipient(plan.to)
   plan.cc = dropPrefilledNoticeRecipient(plan.cc)
-  const missing = plan.notes[0] || (!plan.to.includes('@') ? '收件人没有对上邮箱，没有提交。' : '')
+  const caution = plan.notes.find(note => /请认真核对/.test(note)) ?? ''
+  const blocking = plan.notes.find(note => note !== caution)
+  const missing = blocking || (!plan.to.includes('@') ? '收件人没有对上邮箱，没有提交。' : '')
   const salesInCc = sales.every(row => plan.cc.toLowerCase().includes(row.email.trim().toLowerCase()))
   if (missing || !plan.to.includes('@') || !salesInCc) {
     return { ok: false, message: missing || '商务没有写进抄送，没有提交。' }
@@ -668,7 +670,10 @@ async function writeRecipients(transport: EasyTransport, mailId: string, item: L
   const status = readSaveMailInfo(saved.data)
   if (status.status !== 'ok') return { ok: false, message: status.status === 'failed' ? 'EASY 拒绝了这次保存。发文已创建，没有提交。' : '保存收件人的响应无法确认，没有提交。再点一次会沿用这封发文，不会重新创建。' }
   const finished = finish.value ? '完成事项已勾上本封的处理事项。' : ''
-  if (item.contacts === 'all') return { ok: true, note: `收件人已按发文规则勾上客户联系人，抄送已含业务人员。${skippedRule}${finished}`, to: plan.to, cc: plan.cc }
+  if (item.contacts === 'all') {
+    const head = caution || '收件人已按发文规则勾上客户联系人，抄送已含业务人员。'
+    return { ok: true, note: `${head}${skippedRule}${finished}`, to: plan.to, cc: plan.cc }
+  }
   if (item.arbitrated && sheetDisplayName(item.iprName) === '只发业务') return { ok: true, note: `收件人和抄送只写了发文页上的业务人员。${finished}`, to: plan.to, cc: plan.cc }
   return { ok: true, note: `${item.mode === 'lead' ? '收件人已写入技术负责人，抄送已含 IPR 和商务。' : '收件人已写入 IPR，抄送已含商务。'}${finished}`, to: plan.to, cc: plan.cc }
 }

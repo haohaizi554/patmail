@@ -214,4 +214,22 @@ describe('PCT 联系人追加', () => {
     expect(plan.skipped).toEqual(['黄健宏'])
     expect(plan.notes).toEqual([])
   })
+
+  it('全选时规则里没有客户邮箱，先把业务邮箱写入收件人并要求核对', () => {
+    const plan = planCheckedRecipients(
+      [
+        { type: 'to', name: '袁老师', email: '' },
+        { type: 'cc', name: '袁老师', email: 'csm31@centips.com' }
+      ],
+      [
+        contact({ name: '客户IPR', email: '1479293701@qq.com', role: 'IPR' }),
+        contact({ group: 'sales', name: '袁老师', email: 'csm31@centips.com', role: '' })
+      ],
+      { to: '', cc: '' }
+    )
+    expect(plan.to).toBe('袁老师(csm31@centips.com);')
+    expect(plan.cc).toBe('袁老师(csm31@centips.com);')
+    expect(plan.notes).toEqual(['收件人没有可勾选的客户联系人邮箱，已先写入业务邮箱，请认真核对。'])
+    expect(plan.skipped).toEqual(['袁老师'])
+  })
 })

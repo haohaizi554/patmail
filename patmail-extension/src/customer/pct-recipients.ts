@@ -316,7 +316,11 @@ export function planCheckedRecipients(
     pushPerson(toAdded, seenTo, address)
   }
   for (const row of contacts.filter(item => item.group === 'sales')) pushPerson(ccAdded, seenCc, clean(row))
-  if (!toAdded.length) notes.push('发文规则里没有可勾选的客户联系人邮箱，没有提交。')
+  if (!toAdded.length) {
+    for (const row of contacts.filter(item => item.group === 'sales')) pushPerson(toAdded, seenTo, clean(row))
+    if (toAdded.length) notes.push('收件人没有可勾选的客户联系人邮箱，已先写入业务邮箱，请认真核对。')
+    else notes.push('发文规则里没有可勾选的客户联系人邮箱，没有提交。')
+  }
   if (!ccAdded.length) notes.push('发文页没有可勾选的业务人员邮箱，没有提交。')
   return {
     to: people(toAdded),

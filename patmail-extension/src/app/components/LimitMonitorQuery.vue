@@ -7,7 +7,7 @@ import { isLimitMonitorType, type LimitMonitorQuery } from '../../api/limit-moni
 import { MAILED_UNFINISHED_REVIEW, SKIP_SEND_REVIEW } from '../../customer/pct-flow-status'
 import { clonePctTask, readWorkflowTask, writeWorkflowTask } from '../../customer/pct-sheet'
 import { limitMailItems, limitMailLetterLabel, limitMailProcIds, limitMailSubmitShouldHalt, runLimitMailSubmit, runMailLetterPool, selectionNeedsAddressChoice, type LimitMailSubmitResult } from '../../customer/limit-mail-submit'
-import { beginProgress, classifySubmitText, clipCompany, confirmDialog, endProgress, logProgress, noteProgress, openSummary, progressSummaryLine, tallyProgress } from '../dialog'
+import { beginProgress, classifySubmitText, clipCompany, confirmDialog, endProgress, logProgress, noteProgress, openSummary, progressSummaryLine, tallyProgress, warnBusinessRecipients } from '../dialog'
 import { splitCaseVolumes } from '../../customer/volume-list'
 import { isQueryGuid } from '../../query/query-validator'
 import { flushRecovery, holdRecovery, peekRecovery, recallRecovery, scheduleRecovery, systemScope } from '../../recovery/wal-ledger'
@@ -599,6 +599,7 @@ async function onSubmitAsk(address?: string): Promise<void> {
   const width = concurrency.value
   let handedOff = false
   const summaryRows: string[][] = []
+  const cautionRows: string[][] = []
   try {
     if (width > 1 && involved.length) await markSendGates(involved, true)
     let finished = 0
@@ -624,6 +625,7 @@ async function onSubmitAsk(address?: string): Promise<void> {
           result.to || '',
           result.cc || ''
         ])
+        if (result.to && /请认真核对/.test(result.message)) cautionRows.push([volumes.get(result.procId) ?? result.procId, result.to])
       }
       finished += 1
       text.split('\n').forEach((line, lineIndex) => logProgress(lineIndex === 0 ? `${label}：${line}` : line, finished))
@@ -659,6 +661,7 @@ async function onSubmitAsk(address?: string): Promise<void> {
     handedOff = true
     message.value = ''
     publish()
+    if (cautionRows.length) await warnBusinessRecipients(cautionRows)
     if (summaryRows.length) {
       const counts = progressSummaryLine().replace(/^统计：|。$/g, '')
       openSummary(

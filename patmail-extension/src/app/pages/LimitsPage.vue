@@ -17,7 +17,7 @@ import { readLimitTimeout } from '../../api/query-timeout'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useWorkflowCatalog } from '../composables/useWorkflowCatalog'
 import { useWorkspace } from '../composables/useWorkspace'
-import { beginProgress, classifySubmitText, clipCompany, endProgress, logProgress, noteProgress, openSummary, progressSummaryLine, tallyProgress } from '../dialog'
+import { beginProgress, classifySubmitText, clipCompany, endProgress, logProgress, noteProgress, openSummary, progressSummaryLine, tallyProgress, warnBusinessRecipients } from '../dialog'
 import { useMailConcurrency } from '../../settings/use-mail-concurrency'
 import { useWriteSwitch } from '../../settings/use-write-switch'
 
@@ -314,6 +314,7 @@ async function onSubmitAsk(address?: string): Promise<void> {
   beginProgress(submitTitle(address), planned.items.length)
   let finished = 0
   const summaryRows: string[][] = []
+  const cautionRows: string[][] = []
   try {
     const { halted, unstarted } = await runMailLetterPool(planned.items, width, async (item) => {
       const label = limitMailLetterLabel(item, id => rows.value.find(entry => entry.procId === id)?.caseVolume ?? '')
@@ -331,6 +332,7 @@ async function onSubmitAsk(address?: string): Promise<void> {
           result.to || '',
           result.cc || ''
         ])
+        if (result.to && /请认真核对/.test(result.message)) cautionRows.push([volumes.get(result.procId) ?? result.procId, result.to])
       }
       finished += 1
       text.split('\n').forEach((line, lineIndex) => logProgress(lineIndex === 0 ? `${label}：${line}` : line, finished))
@@ -355,6 +357,7 @@ async function onSubmitAsk(address?: string): Promise<void> {
     }
     logProgress(progressSummaryLine(), finished)
     message.value = progressSummaryLine()
+    if (cautionRows.length) await warnBusinessRecipients(cautionRows)
     if (summaryRows.length) {
       openSummary(
         `${submitTitle(address)} · ${progressSummaryLine().replace(/^统计：|。$/g, '')}`,

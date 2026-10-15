@@ -147,6 +147,19 @@ export function infoDialog(options: Pick<DialogOptions, 'title' | 'message'>): P
   return confirmDialog({ ...options, confirmLabel: '知道了', cancelLabel: '' })
 }
 
+/** 全选时没有客户收件人，已先把业务邮箱写入收件人。提交结束后让用户核对。 */
+export async function warnBusinessRecipients(rows: string[][]): Promise<void> {
+  if (!rows.length) return
+  await confirmDialog({
+    title: `警示：${rows.length} 封已先写入业务邮箱`,
+    message: '这些信的表格没有指定收件人，客户要求也没有指定发给谁。全选时发文规则里没有可勾选的客户联系人邮箱，已先把业务邮箱写入收件人。请在审核前认真核对，不该发给业务人员的要改掉。',
+    table: { headers: ['案号', '收件人'], rows },
+    confirmLabel: '知道了',
+    cancelLabel: '',
+    warn: true
+  })
+}
+
 export function closeDialog(confirmed: boolean): void {
   if (!state.open) return
   state.open = false

@@ -1,7 +1,8 @@
 import { activityDetail } from './trace'
 import type { AgentConfig } from './config'
 import { chatCompletion, LlmError, llmFailureKind, type AssistantToolCall, type ChatChoice, type ChatMessage, type ChatOutcome } from './llm'
-import { applySummary, contextChars, factsForPrompt, foldDigest, needsCompression, OVERFLOW_RETRY_CHARS, projectOldToolText, splitForCompression, trimToolResults, visibleHistory, type AgentMemoryState, type AgentWork, type MemoryTurn } from './memory'
+import { applySummary, contextChars, factsForPrompt, foldDigest, modelAnswer, needsCompression, OVERFLOW_RETRY_CHARS, projectOldToolText, splitForCompression, trimToolResults, visibleHistory, type AgentMemoryState, type AgentWork, type MemoryTurn } from './memory'
+import { readArbitrationDecisions } from '../customer/pct-workbook'
 import { planFromCalls, remainingWork, type WorkStep } from './plan'
 import { resolveSlash } from './slash'
 import { agentToolSchemas, executeAgentTool, type ToolContext } from './tools'
@@ -153,11 +154,45 @@ function wait(ms: number): Promise<void> {
 function messageOf(turn: { role: string; content: string; guidance?: string }): string {
   if (turn.role === 'assistant') {
     const split = splitAgentReply(turn.content)
-    if (split.thought) return split.answer
-    return turn.content
+    return omitVerdict(split.thought ? split.answer : turn.content)
   }
   if (turn.role === 'user' && turn.guidance) return `${turn.content}\n\n${turn.guidance}`
   return turn.content
+}
+
+/** 裁决行不送回模型。页面上仍保留原文，下一句普通提问不会照着抄。 */
+function omitVerdict(text: string): string {
+  const lines = text.split('\n')
+  const kept: string[] = []
+  let dropped = 0
+  for (const line of lines) {
+    if (line.trim() && readArbitrationDecisions(line).length > 0) {
+      dropped += 1
+      continue
+    }
+    kept.push(line)
+  }
+  if (!dropped) return text
+  const rest = kept.join('\n').trim()
+  const note = `上一轮收件人裁决共 ${dropped} 行，原文已略去，不要照抄。`
+  return rest ? `${note}\n${rest}` : note
+}
+
+function isArbitrationAsk(text: string): boolean {
+  return text.includes('请仲裁收件人和抄送')
+}
+
+function repeatsPrevious(state: AgentMemoryState, reply: string): boolean {
+  const answer = (splitAgentReply(reply).answer || reply).replace(/\s+/g, '')
+  if (!answer) return false
+  const visible = state.turns.filter(turn => !turn.hidden && (turn.role === 'user' || turn.role === 'assistant'))
+  for (let index = visible.length - 1; index >= 0; index -= 1) {
+    const turn = visible[index]
+    if (!turn || turn.role !== 'assistant') continue
+    const prior = modelAnswer(turn.content).replace(/\s+/g, '')
+    return prior.length > 0 && prior === answer
+  }
+  return false
 }
 
 /** 仲裁只看这一批材料。更早的闲聊留在记忆里，但不送给模型，避免它顺着上一轮的英文接着写。续写时仍带上这一轮刚加的隐藏提示。 */
@@ -189,6 +224,7 @@ function outgoingContent(turn: MemoryTurn, index: number, firstUser: number | un
   let text = messageOf(turn)
   if (turn.role === 'tool' && lastUser !== undefined && index < lastUser) return projectOldToolText(text)
   if (turn.role !== 'user' || turn.hidden) return text
+  if (index !== lastUser && isArbitrationAsk(text)) return '上一轮已经仲裁过收件人。材料不重复附上，不要照抄裁决行。'
   if (index === firstUser && summary) text = `更早对话的原文摘录：\n${summary}\n\n${text}`
   if (index === lastUser && facts) text = `${text}\n\n本轮可以参考的长期记忆：\n${facts}`
   return text
@@ -709,6 +745,21 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
     const settled = await resumeCut(choice)
     const reply = replyText(settled, config.thinking)
     if (!reply) { halt = true; break }
+    if (!plain && repeatsPrevious(state, reply)) {
+      if (nudges < MAX_NUDGES) {
+        nudges += 1
+        state = {
+          ...state,
+          turns: [
+            ...state.turns,
+            { role: 'assistant', content: reply, hidden: true },
+            { role: 'user', content: '这和上一轮回复相同。直接回答用户这一句，不要照抄上一轮裁决或上一轮回复。', hidden: true }
+          ]
+        }
+        continue
+      }
+      return finish('这次回复和上一轮一样，没有采用。请换个说法再问。', steps)
+    }
     const planLeft = remainingWork(plan, traces).map(step => step.title)
     const gate = reviewReply({ answer: splitAgentReply(reply).answer || reply, required, traces, submitAsked, planLeft })
     if (gate.action === 'nudge' && nudges < MAX_NUDGES) {
@@ -740,7 +791,7 @@ export async function runAgentTurn(config: AgentConfig, memory: AgentMemoryState
     const choice = outcome.choices[0]
     const settled = choice && choice.toolCalls.length === 0 ? await resumeCut(choice) : null
     const reply = settled ? replyText(settled, config.thinking) : ''
-    if (reply) return finish(reply, steps)
+    if (reply && (plain || !repeatsPrevious(state, reply))) return finish(reply, steps)
   } catch (error) {
     if (error instanceof LlmError && error.message === '已停下。') throw error
   }

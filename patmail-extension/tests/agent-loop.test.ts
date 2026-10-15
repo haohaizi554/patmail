@@ -61,6 +61,46 @@ describe('agent memory', () => {
     expect(turn.memory.turns.find(item => item.toolCallId === 'old')?.content).toContain('CASE-1')
   })
 
+  it('普通提问不把上一轮裁决原文送给模型，照抄的回复也不收下', async () => {
+    const verdict = '空 PA25114685CN｜提醒申请PCT｜拿不准｜依据 客户要求没有指定发给谁'
+    const prior = {
+      ...EMPTY_MEMORY,
+      turns: [
+        { role: 'user' as const, content: '请仲裁收件人和抄送。这是第 1/1 批。\n\n客户文号 PA1' },
+        { role: 'assistant' as const, content: verdict }
+      ]
+    }
+    const sent: string[][] = []
+    let calls = 0
+    const complete: Complete = async (_config, options) => {
+      sent.push(options.messages.filter(message => message.role !== 'system').map(message => message.content))
+      calls += 1
+      return calls === 1 ? outcome(verdict) : outcome('我是 PatMail 的执行助手。')
+    }
+    const turn = await runAgentTurn(config, prior, '你是谁?', idleContext, complete)
+    expect(sent[0]?.join('\n')).not.toContain('PA25114685CN')
+    expect(sent[0]?.join('\n')).not.toContain('请仲裁收件人和抄送。这是第 1/1 批')
+    expect(sent[0]?.join('\n')).toContain('你是谁?')
+    expect(turn.reply).toContain('执行助手')
+    expect(turn.reply).not.toContain('PA25114685CN')
+  })
+
+  it('连续照抄上一轮时，不把抄写存成新回复', async () => {
+    const verdict = '空 PA25114685CN｜提醒申请PCT｜拿不准｜依据 客户要求没有指定发给谁'
+    const prior = {
+      ...EMPTY_MEMORY,
+      turns: [
+        { role: 'user' as const, content: '你好' },
+        { role: 'assistant' as const, content: verdict }
+      ]
+    }
+    const complete: Complete = async () => outcome(verdict)
+    const turn = await runAgentTurn(config, prior, '你是谁?', idleContext, complete)
+    expect(turn.reply).toContain('没有采用')
+    expect(turn.reply).not.toContain('PA25114685CN')
+    expect(turn.history.at(-1)?.content).not.toContain('PA25114685CN')
+  })
+
   it('compresses only after the stored cache crosses the size threshold', () => {
     const short = Array.from({ length: 40 }, (_, index) => ({ role: 'user' as const, content: `第${index}句` }))
     expect(needsCompression({ ...EMPTY_MEMORY, turns: short })).toBe(false)
