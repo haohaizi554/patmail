@@ -7,17 +7,17 @@ import type { LimitMonitorResult, LimitMonitorRow } from '../../api/limit-monito
 import { isLimitMonitorType, type LimitMonitorQuery } from '../../api/limit-monitor-params'
 import { PCT_RESUME_KEY, PENDING_CUSTOMER_KEY, querySnapshot } from '../../customer/mail-flow'
 import { clonePctTask, readWorkflowTask, writeWorkflowTask } from '../../customer/pct-sheet'
-import { limitMailItems, limitMailLetterLabel, limitMailProcIds, limitMailSubmitShouldHalt, runLimitMailSubmit, runMailLetterPool } from '../../customer/limit-mail-submit'
+import { limitMailItems, limitMailLetterLabel, limitMailProcIds, limitMailSubmitShouldHalt, runLimitMailSubmit, runMailLetterPool, selectionNeedsAddressChoice, type LimitMailSubmitResult } from '../../customer/limit-mail-submit'
 import { inventorCustomerNames, recipientModeForTask } from '../../workflow/catalog'
 import { joinCaseVolumes, splitCaseVolumes } from '../../customer/volume-list'
 import { isQueryGuid } from '../../query/query-validator'
 import { flushRecovery, holdRecovery, peekRecovery, recallRecovery, scheduleRecovery, systemScope } from '../../recovery/wal-ledger'
-import { scopeFromConnection } from '../../shared/connection'
+import { sceneOwnerChanged, scopeFromConnection } from '../../shared/connection'
 import { readLimitTimeout } from '../../api/query-timeout'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useWorkflowCatalog } from '../composables/useWorkflowCatalog'
 import { useWorkspace } from '../composables/useWorkspace'
-import { beginProgress, classifySubmitText, endProgress, logProgress, noteProgress, progressSummaryLine, tallyProgress } from '../dialog'
+import { beginProgress, classifySubmitText, clipCompany, endProgress, logProgress, noteProgress, openSummary, progressSummaryLine, tallyProgress } from '../dialog'
 import { useMailConcurrency } from '../../settings/use-mail-concurrency'
 import { useWriteSwitch } from '../../settings/use-write-switch'
 
@@ -58,6 +58,18 @@ const boundFields = computed(() => {
   return submittedFields.value
 })
 const shownPageSize = computed(() => sheetMerged.value ? Math.max(rows.value.length, 1) : pageSize.value)
+
+/** 任务表格里有仲行或空着的收件人时，和期限监控一样给出「信任AI / 直接全选」两个按钮。 */
+const hasIprGap = computed(() => {
+  const task = readWorkflowTask()
+  const sheetRows = task?.rows ?? []
+  if (!sheetRows.length) return false
+  const open = rows.value.filter(row => {
+    const gate = gates.value[row.procId]
+    return gate === 'open' || gate === 'done'
+  }).map(row => row.procId)
+  return selectionNeedsAddressChoice(rows.value, sheetRows, selected.value, open, recipientModeForTask(task, catalog.value.workflows))
+})
 
 function textFor(code: string, fallback: string, timeoutMs = 60_000): string {
   if (code === 'REQUEST_TIMEOUT') return `原网站查询太慢，没有在 ${timeoutMs / 60_000} 分钟内返回。可以把超时时间调长后再查。`
@@ -249,6 +261,13 @@ function onSelect(ids: string[]): void {
   selected.value = ids
 }
 
+/** 进度浮窗标题带上这次提交用的模式，方便区分是哪种口径发出去的。 */
+function submitTitle(address?: string): string {
+  if (address === 'all') return '提交到 EASY：不信任仲裁全选'
+  if (address === 'trust') return '提交到 EASY：信任仲裁'
+  return '提交到 EASY：直接提交'
+}
+
 async function onSubmitAsk(address?: string): Promise<void> {
   if (!writesReady.value) {
     message.value = '正在读取系统设置里的写开关。'
@@ -284,7 +303,7 @@ async function onSubmitAsk(address?: string): Promise<void> {
     sheetRows: task?.rows ?? [],
     mode: recipientModeForTask(task, catalog.value.workflows),
     specials: inventorCustomerNames(flow),
-    address: address === 'auto' ? 'auto' : address === 'all' ? 'all' : undefined
+    address: address === 'auto' || address === 'trust' ? 'auto' : address === 'all' ? 'all' : undefined
   })
   if (!planned.ok) {
     message.value = planned.message
@@ -292,16 +311,27 @@ async function onSubmitAsk(address?: string): Promise<void> {
   }
   const sent = new Set<string>()
   const width = concurrency.value
-  beginProgress('提交到 EASY', planned.items.length)
+  beginProgress(submitTitle(address), planned.items.length)
   let finished = 0
+  const summaryRows: string[][] = []
   try {
     const { halted, unstarted } = await runMailLetterPool(planned.items, width, async (item) => {
       const label = limitMailLetterLabel(item, id => rows.value.find(entry => entry.procId === id)?.caseVolume ?? '')
       logProgress(`正在处理 ${label}。`)
-      const text = await runLimitMailSubmit(bridge, connection.value.operatorId, [item], gates.value)
+      const got: LimitMailSubmitResult[] = []
+      const text = await runLimitMailSubmit(bridge, connection.value.operatorId, [item], gates.value, result => got.push(result))
       const kind = classifySubmitText(text)
       tallyProgress(kind, limitMailProcIds(item).length)
       if (kind !== 'success') noteProgress(kind, label, text)
+      const volumes = new Map(limitMailProcIds(item).map(id => [id, rows.value.find(entry => entry.procId === id)?.caseVolume ?? id]))
+      for (const result of got) {
+        summaryRows.push([
+          volumes.get(result.procId) ?? result.procId,
+          clipCompany(item.customerName),
+          result.to || '',
+          result.cc || ''
+        ])
+      }
       finished += 1
       text.split('\n').forEach((line, lineIndex) => logProgress(lineIndex === 0 ? `${label}：${line}` : line, finished))
       if (text.startsWith('已提交')) {
@@ -325,6 +355,14 @@ async function onSubmitAsk(address?: string): Promise<void> {
     }
     logProgress(progressSummaryLine(), finished)
     message.value = progressSummaryLine()
+    if (summaryRows.length) {
+      openSummary(
+        `${submitTitle(address)} · ${progressSummaryLine().replace(/^统计：|。$/g, '')}`,
+        ['案号', '公司', '收件人', '抄送人'],
+        summaryRows,
+        `提交总结-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.xlsx`
+      )
+    }
   } catch (error: unknown) {
     logProgress(error instanceof Error ? error.message : '提交中断了。')
     logProgress(progressSummaryLine())
@@ -405,6 +443,7 @@ async function resumeQuery(): Promise<void> {
 }
 
 let limitScope = systemScope(connection.value.easyOrigin, 'page')
+let sceneOwner = ''
 let parking = false
 
 function pokeLimit(): void {
@@ -458,6 +497,49 @@ watch(() => connection.value.easyOrigin, (next, previous) => {
   }
 })
 
+watch(() => connection.value.operatorId, (next, previous) => {
+  if (next === previous) return
+  if (!next) return
+  const owner = sceneOwner || (isQueryGuid(previous) ? previous.toLowerCase() : '')
+  if (!sceneOwnerChanged(owner, next)) {
+    if (isQueryGuid(next) && !sceneOwner) sceneOwner = next.toLowerCase()
+    return
+  }
+  parking = true
+  gateToken += 1
+  const payload = readLimitDesk()
+  const origin = connection.value.easyOrigin
+  holdRecovery('limit-query', systemScope(origin, `${owner}|page`), payload)
+  holdRecovery('limit-query', limitScope, null)
+  rows.value = []
+  gates.value = {}
+  checkingGates.value = false
+  selected.value = []
+  confirmedIds.value = []
+  message.value = ''
+  total.value = 0
+  loading.value = false
+  sheetMerged.value = false
+  submittedFields.value = {}
+  draftFields.value = {}
+  seed.value = null
+  seedToken.value += 1
+  sceneOwner = next.toLowerCase()
+  limitScope = systemScope(origin, `${sceneOwner}|page`)
+  const cached = peekRecovery('limit-query', limitScope)
+  const arriving = limitScope
+  if (cached) applyLimitDesk(cached)
+  parking = false
+  pokeLimit()
+  if (cached === undefined) {
+    void recallRecovery('limit-query', arriving).then(saved => {
+      if (limitScope !== arriving || rows.value.length) return
+      applyLimitDesk(saved)
+      pokeLimit()
+    }).catch(() => { /* 新账号还没有这份查询 */ })
+  }
+})
+
 function readLimitDesk(): unknown | null {
   if (!rows.value.length && !selected.value.length && !confirmedIds.value.length) return null
   const owner = connection.value.operatorId
@@ -482,6 +564,7 @@ function applyLimitDesk(payload: unknown): void {
   const owner = typeof desk.operatorId === 'string' ? desk.operatorId.toLowerCase() : ''
   const live = connection.value.operatorId
   if (isQueryGuid(live) && owner && live.toLowerCase() !== owner) return
+  if (owner) sceneOwner = owner
   rows.value = desk.rows as LimitMonitorRow[]
   gates.value = desk.gates && typeof desk.gates === 'object' ? desk.gates as Record<string, 'open' | 'pending' | 'done'> : {}
   selected.value = Array.isArray(desk.selected) ? desk.selected.filter((item): item is string => typeof item === 'string') : []
@@ -512,7 +595,7 @@ onUnmounted(() => { void flushRecovery('limit-query', limitScope, readLimitDesk)
 </script>
 
 <template>
-  <LimitPage live hide-form selectable :writes-open="writesOpen" :writes-ready="writesReady" :selected="selected" :rows="rows" :gates="gates" :checking="checkingGates" :total="sheetMerged ? rows.length : total" :loading="loading" :message="message" :connected="connected" :page-index="pageIndex" :page-size="shownPageSize" @page="goPage" @select="onSelect" @confirm="onConfirm" @submit="onSubmitAsk">
+  <LimitPage live hide-form selectable :ipr-gap="hasIprGap" :writes-open="writesOpen" :writes-ready="writesReady" :selected="selected" :rows="rows" :gates="gates" :checking="checkingGates" :total="sheetMerged ? rows.length : total" :loading="loading" :message="message" :connected="connected" :page-index="pageIndex" :page-size="shownPageSize" @page="goPage" @select="onSelect" @confirm="onConfirm" @submit="onSubmitAsk">
     <section v-if="!connected" class="card"><p class="empty">尚未确认 EASY 用户，不能读取期限模板。</p></section>
     <template v-else>
       <LimitQuerySection :bridge="bridge" :user-id="connection.operatorId" :can-search="connected && !loading" :seed="seed" :seed-token="seedToken" @search="search" @draft="draftFields = $event" />

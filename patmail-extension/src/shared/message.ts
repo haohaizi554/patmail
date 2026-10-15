@@ -156,7 +156,7 @@ export type ContentRequest =
   | Request<'CHECK_SESSION'> | Request<'CANCEL_SESSION_CHECK'>
   | Request<'CANCEL_FILE_SEARCH'> | Request<'CANCEL_LIMIT_MONITOR'> | Response<'SEARCH_FILES', { query: FileSearchQuery; continuation?: { querySessionId: string }; timeoutMs?: number }>
   | Response<'SEARCH_LIMIT_MONITOR', { query: LimitMonitorQuery; timeoutMs?: number }>
-  | Response<'SUBMIT_LIMIT_MAIL', { userId: string; items: Array<{ procId: string; procIds?: string[]; mailTypeId: string; mailStyle: '1' | '2'; mailId?: string; mode: 'ipr' | 'lead'; inventor?: boolean; customerName: string; contactName: string; iprName: string; leadName: string }> }>
+  | Response<'SUBMIT_LIMIT_MAIL', { userId: string; items: Array<{ procId: string; procIds?: string[]; mailTypeId: string; mailStyle: '1' | '2'; mailId?: string; mode: 'ipr' | 'lead'; inventor?: boolean; customerName: string; contactName: string; iprName: string; leadName: string; contacts?: 'all'; ccName?: string; arbitrated?: true; hold?: 'skip' }> }>
   | Response<'SUBMIT_FILE_MANAGE', { userId: string; items: Array<{ fileId: string; fileIds: string[]; fileNames: string[]; mailTypeId: string; mailStyle: '1'; mailId?: string; recall?: boolean; subject: string; senderId: string; senderName: string; senderEmail: string; reviewerId: string; reviewerName: string; signature: string }> }>
   | Response<'RESOLVE_DOWNLOAD_NAMES', { fileIds: string[]; selection: FileDownloadSelection }>
   | Response<'EXPORT_CASE_CONTACTS', { volumes: string[] }>
@@ -244,7 +244,7 @@ export interface LeaseCommand {
 }
 
 export type WorkspaceAction =
-  | { action: 'focus' } | { action: 'listTabs' } | { action: 'refreshSession' } | { action: 'openLogin' } | { action: 'load' }
+  | { action: 'focus' } | { action: 'listTabs' } | { action: 'refreshSession' } | { action: 'openLogin' } | { action: 'load' } | { action: 'declineAccountSwitch' }
   | { action: 'setCustomerMode'; mode: CustomerMode }
   | { action: 'bind'; tabId: number }
   | { action: 'saveCustomer'; profile: CustomerQueryProfile; expectedScope: ExpectedAccountScope; expectedRevision?: number }
@@ -328,7 +328,7 @@ export type ContentResponse =
   | Response<'SESSION_CHECK_CANCELLED', { ok: true }>
   | Response<'SEARCH_FILES_RESULT', ApiResult<FileSearchResult>>
   | Response<'SEARCH_LIMIT_MONITOR_RESULT', ApiResult<LimitMonitorResult>>
-  | Response<'SUBMIT_LIMIT_MAIL_RESULT', { stopped: boolean; results: Array<{ procId: string; mailId: string; state: 'submitted' | 'created' | 'unknown' | 'failed'; message: string }> }>
+  | Response<'SUBMIT_LIMIT_MAIL_RESULT', { stopped: boolean; results: Array<{ procId: string; mailId: string; state: 'submitted' | 'created' | 'unknown' | 'failed'; message: string; to?: string; cc?: string }> }>
   | Response<'SUBMIT_FILE_MANAGE_RESULT', { stopped: boolean; results: Array<{ fileId: string; mailId: string; state: 'submitted' | 'created' | 'unknown' | 'failed'; message: string }> }>
   | Response<'RESOLVE_DOWNLOAD_NAMES_RESULT', ApiResult<{ names: string[] }>>
   | Response<'EXPORT_CASE_CONTACTS_RESULT', ApiResult<CaseContactExport>>
@@ -531,13 +531,14 @@ function isAccountReviewerResult(value: unknown): value is ApiResult<AccountRevi
 function isLimitMailSubmitItem(value: unknown): boolean {
   if (!isRecord(value)) return false
   const keys = Object.keys(value)
-  const allowed = ['procId', 'procIds', 'mailTypeId', 'mailStyle', 'mailId', 'mode', 'inventor', 'customerName', 'contactName', 'iprName', 'leadName', 'contacts', 'ccName', 'arbitrated']
+  const allowed = ['procId', 'procIds', 'mailTypeId', 'mailStyle', 'mailId', 'mode', 'inventor', 'customerName', 'contactName', 'iprName', 'leadName', 'contacts', 'ccName', 'arbitrated', 'hold']
   if (!keys.every(key => allowed.includes(key))) return false
   if (!keys.includes('mode') || !keys.includes('customerName') || !keys.includes('contactName') || !keys.includes('iprName') || !keys.includes('leadName')) return false
   if (value.mode !== 'ipr' && value.mode !== 'lead') return false
   if (value.inventor !== undefined && value.inventor !== true && value.inventor !== false) return false
   if (value.contacts !== undefined && value.contacts !== 'all') return false
   if (value.arbitrated !== undefined && value.arbitrated !== true) return false
+  if (value.hold !== undefined && value.hold !== 'skip') return false
   if (!isShortText(value.customerName, 120) || !isShortText(value.contactName, 80) || !isShortText(value.iprName, 200) || !isShortText(value.leadName, 80)) return false
   if (value.ccName !== undefined && !isShortText(value.ccName, 200)) return false
   if (value.contacts !== 'all' && !value.iprName.trim()) return false
@@ -595,7 +596,10 @@ function isLimitMailSubmitResponse(value: unknown): boolean {
   return value.results.every(item => isRecord(item) &&
     typeof item.procId === 'string' && typeof item.mailId === 'string' && typeof item.message === 'string' && item.message.length <= 8000 &&
     (item.state === 'submitted' || item.state === 'created' || item.state === 'unknown' || item.state === 'failed') &&
-    Object.keys(item).length === 4)
+    // to/cc 是实际写进 EASY 的地址载荷，成对出现，提交总结弹窗要展示。
+    (!('to' in item) || (typeof item.to === 'string' && item.to.length <= 4000)) &&
+    (!('cc' in item) || (typeof item.cc === 'string' && item.cc.length <= 4000)) &&
+    ('to' in item) === ('cc' in item))
 }
 
 export function isMessage(value: unknown): value is AppMessage {
@@ -950,7 +954,7 @@ function isPlanFiles(value: unknown): value is SelectedPatentFile[] {
 
 function isWorkspaceAction(value: unknown): value is WorkspaceAction {
   if (!isRecord(value) || typeof value.action !== 'string') return false
-  if (value.action === 'focus' || value.action === 'listTabs' || value.action === 'refreshSession' || value.action === 'openLogin' || value.action === 'load') {
+  if (value.action === 'focus' || value.action === 'listTabs' || value.action === 'refreshSession' || value.action === 'openLogin' || value.action === 'load' || value.action === 'declineAccountSwitch') {
     return Object.keys(value).length === 1
   }
   if (value.action === 'setCustomerMode') return isCustomerMode(value.mode) && Object.keys(value).length === 2

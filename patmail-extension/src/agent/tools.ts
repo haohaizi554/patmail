@@ -14,6 +14,8 @@ export interface DeadlineRow {
   procId: string
   caseId: string
   caseVolume: string
+  /** 处理事项。提交时用来和表格行精确对行，避免同一文号两行串线。 */
+  ctrlProc?: string
 }
 
 export interface ToolContext {
@@ -726,10 +728,10 @@ async function readDeadlinePage(ctx: ToolContext, query: { type: 'all'; pageInde
   return { ok: true, items: data.items, total: data.total, pageIndex: data.pageIndex, pageSize: data.pageSize, totalPages: data.totalPages }
 }
 
-function deadlineRefs(items: Array<{ procId?: string; caseId?: string; caseVolume?: string }>): DeadlineRow[] {
+function deadlineRefs(items: Array<{ procId?: string; caseId?: string; caseVolume?: string; ctrlProc?: string }>): DeadlineRow[] {
   return items
     .filter(item => item.procId && item.caseVolume)
-    .map(item => ({ procId: item.procId ?? '', caseId: item.caseId ?? '', caseVolume: item.caseVolume ?? '' }))
+    .map(item => ({ procId: item.procId ?? '', caseId: item.caseId ?? '', caseVolume: item.caseVolume ?? '', ...(item.ctrlProc ? { ctrlProc: item.ctrlProc } : {}) }))
 }
 
 async function searchDeadlines(ctx: ToolContext, args: Record<string, unknown>, memory: AgentMemoryState): Promise<ListedRows<DeadlineRow>> {

@@ -468,6 +468,23 @@ img { max-width: 100%; }
 .dialog.warn header button { position: absolute; right: 0; top: -2px; }
 .dialog.warn header h3 { color: #c2452d; text-align: center; font-size: 16px; }
 .dialog.warn .app-dialog-gap { max-height: 320px; overflow: auto; }
+.dialog.with-table { width: min(860px, calc(100vw - 40px)); }
+.dialog.with-table .app-dialog-gap { max-height: none; overflow: visible; }
+.dialog.summary-dialog { width: min(1280px, calc(100vw - 32px)); }
+.mask.summary-mask { z-index: 130; }
+.dialog.summary-dialog .dialog-table { max-height: min(72vh, 820px); overflow-x: hidden; overflow-y: auto; }
+.dialog.summary-dialog .dialog-table table { table-layout: fixed; }
+.dialog.summary-dialog .dialog-table th,
+.dialog.summary-dialog .dialog-table td { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
+.dialog.summary-dialog .dialog-table th:nth-child(1),
+.dialog.summary-dialog .dialog-table td:nth-child(1) { width: 18%; }
+.dialog.summary-dialog .dialog-table th:nth-child(2),
+.dialog.summary-dialog .dialog-table td:nth-child(2) { width: 16%; }
+.dialog-table { border: 1px solid #eadff0; border-radius: 10px; margin: 0 0 16px; max-height: min(58vh, 640px); overflow: auto; }
+.dialog-table table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dialog-table th, .dialog-table td { border-bottom: 1px solid #f4edf7; padding: 6px 14px; text-align: left; white-space: nowrap; }
+.dialog-table th { position: sticky; top: 0; z-index: 1; background: #faf6fc; color: var(--sub); font-weight: 700; }
+.dialog-table tbody tr:last-child td { border-bottom: 0; }
 .dialog.arbitration-board { width: min(1440px, calc(100vw - 24px)); }
 .arbitration-scroll { max-height: min(72vh, 760px); overflow: auto; margin-top: 8px; }
 .arbitration-board .grid { width: 100%; font-size: 13px; }
@@ -487,7 +504,7 @@ img { max-width: 100%; }
 .dialog textarea { height: auto; padding: 8px 10px; }
 .dialog footer { justify-content: flex-end; gap: 8px; }
 .progress-mask { z-index: 90; }
-.progress-dialog { width: min(760px, calc(100vw - 48px)); }
+.progress-dialog { width: min(760px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; }
 .progress-meter { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
 .progress-meter .send-bar { flex: 1; }
 .progress-meter strong { flex: none; min-width: 3.2em; text-align: right; font-size: 13px; font-weight: 700; color: #ff4f93; font-variant-numeric: tabular-nums; }
@@ -502,7 +519,7 @@ img { max-width: 100%; }
 .progress-tally .is-failed { color: #c4234e; }
 .progress-tally .is-abnormal { color: #9a6700; }
 .progress-tally .is-skipped { color: #8a94ab; }
-.progress-notes { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 13px; line-height: 1.5; }
+.progress-notes { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 13px; line-height: 1.5; max-height: min(220px, 32vh); overflow: auto; }
 .progress-notes .is-failed { color: #c4234e; }
 .progress-notes .is-abnormal { color: #9a6700; }
 .progress-notes .is-skipped { color: #5c6780; }

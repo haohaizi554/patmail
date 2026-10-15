@@ -163,6 +163,36 @@ describe('PCT 联系人追加', () => {
     expect(sheetRecipientNames(row({ iprName: '只发业务', iprArbitrated: true }))).toEqual({ to: '只发业务', cc: '' })
   })
 
+  it('仲裁写回「发明人」时用这一行的第一客户联系人当收件人', () => {
+    const plan = planPctRecipients(
+      [row({ iprName: '发明人', iprArbitrated: true, contactName: '姜颖' })],
+      [
+        contact({}),
+        contact({ group: 'sales', name: '林淑敏', email: 'linsm@centips.com', role: '' })
+      ],
+      { to: '', cc: '' }
+    )
+    expect(plan.to).toBe('姜颖(liy02@pcl.ac.cn);')
+    expect(plan.cc).toBe('林淑敏(linsm@centips.com);')
+    expect(sheetRecipientNames(row({ iprName: '发明人', iprArbitrated: true }))).toEqual({ to: '', cc: '' })
+  })
+
+  it('lead 模式的抄送名单不把「发明人」「拿不准」这些裁决词当人名去查', () => {
+    const plan = planPctRecipients(
+      [row({ iprName: '发明人', iprArbitrated: true, contactName: '姜颖', leadName: '王工' })],
+      [
+        contact({ name: '王工', email: 'wangg@example.com', role: '技术负责人', group: 'pics' }),
+        contact({ group: 'sales', name: '林淑敏', email: 'linsm@centips.com', role: '' })
+      ],
+      { to: '', cc: '' },
+      new Set(),
+      'lead'
+    )
+    expect(plan.to).toBe('王工(wangg@example.com);')
+    expect(plan.cc).toBe('林淑敏(linsm@centips.com);')
+    expect(plan.notes.some(note => note.includes('发明人'))).toBe(false)
+  })
+
   it('全选联系人只写入发文规则里的收件人，去掉括号，丢掉没有邮箱的人', () => {
     const plan = planCheckedRecipients(
       [

@@ -12,7 +12,7 @@ import type { CustomerQueryProfile } from '../src/customer/types'
 import { emptyMailRules } from '../src/mail'
 import { MailRuleRepository } from '../src/mail/repository'
 import type { MailRuleBundle, SelectedPatentFile } from '../src/mail/types'
-import { EasyConnectionController, emptyConnection, scopeFromConnection } from '../src/shared/connection'
+import { EasyConnectionController, emptyConnection, resumeLoginChoice, sameConnectionSnapshot, sceneOwnerChanged, scopeFromConnection } from '../src/shared/connection'
 import { MessageType } from '../src/shared/message'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -72,6 +72,15 @@ describe('Phase 3.1 连接、规则与任务来源', () => {
     expect(connection.context.sessionStatus).toBe('pending')
     expect(connection.context.operatorId).toBe('')
     expect(connection.snapshot()).toMatchObject({ easyOrigin: origin, easyTabId: 4, lastOperatorId: userA })
+    const before = connection.snapshot()
+    connection.context = { ...connection.context, sessionStatus: 'authenticated', operatorId: userA, displayName: '测试员', lastDisplayName: '测试员' }
+    expect(sameConnectionSnapshot(before, connection.snapshot())).toBe(false)
+    expect(resumeLoginChoice(userA, userA)).toBe('resume')
+    expect(resumeLoginChoice('', userB)).toBe('resume')
+    expect(resumeLoginChoice(userA, '')).toBe('resume')
+    expect(resumeLoginChoice(userA, userB)).toBe('ask')
+    expect(sceneOwnerChanged(userA, '')).toBe(false)
+    expect(sceneOwnerChanged(userA, userB)).toBe(true)
     const version = connection.context.connectionVersion
     connection.beginBind({ id: 4, url: `${origin}/inbox` })
     connection.applySession({ ok: true, status: 'authenticated', userId: userB }, version)

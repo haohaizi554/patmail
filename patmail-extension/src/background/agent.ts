@@ -516,7 +516,7 @@ async function submitEasy(
   })
   const planned = limitMailItems({
     procIds: openIds,
-    rows: picked.map(row => ({ procId: row.procId, caseVolume: row.caseVolume })),
+    rows: picked.map(row => ({ procId: row.procId, caseVolume: row.caseVolume, ctrlProc: row.ctrlProc })),
     sheetRows: sheets,
     mode: lead ? 'lead' : 'ipr',
     address: 'auto'

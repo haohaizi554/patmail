@@ -13,6 +13,7 @@ describe('提交进度统计', () => {
     expect(classifySubmitText('这些事项还在审核里，没有再创建。')).toBe('skipped')
     expect(classifySubmitText('这些事项已经提交过，没有再创建。')).toBe('skipped')
     expect(classifySubmitText('没有要提交的事项。')).toBe('skipped')
+    expect(classifySubmitText('客户要求这封提醒不用发，没有创建发文。')).toBe('skipped')
     expect(classifySubmitText('没有提交到审核人。创建发文的响应无法确认，没有再次创建。')).toBe('failed')
   })
 

@@ -70,7 +70,7 @@ const totalPages = computed(() => Math.max(1, Math.ceil(totalText.value / props.
 const submitTitle = computed(() => {
   if (!props.writesReady) return '正在读取系统设置里的写开关。'
   if (!props.writesOpen) return '写开关在系统设置里关着。'
-  if (props.iprGap) return '有仲裁结果或空着的收件人时，用旁边两个按钮：信任 AI 按写回的人提交、空行再按发文规则勾选；直接全选则不采用写回的收件人。'
+  if (props.iprGap) return '有仲裁结果或空着的收件人时，用旁边两个按钮：信任 AI 按写回的人提交、空行再按发文规则勾选；直接全选不采用写回的收件人，原表有值的行照表格提交，空行和仲行按发文规则全勾。'
   return '按勾选创建发文。勾几件就发几件，每件单独成封，没勾选的不会因为同客户合并被带上。封与封排队提交，同时在途几封看系统设置里的并发数，默认上一封有结果再取下一封。交给当前登录人审核。发文流程交到审核，不在这里结束。完成事项会勾上本封的处理事项，PCT 相关也一样。'
 })
 function blocked(row) {
@@ -95,11 +95,14 @@ function toggleRow(id) {
 }
 
 function togglePage() {
-  const ids = pageIds.value
-  const next = pageAll.value
-    ? props.selected.filter(id => !ids.includes(id))
-    : [...new Set([...props.selected, ...ids])]
-  emit('select', next)
+  if (!pageAll.value) {
+    const ids = pageIds.value
+    emit('select', [...new Set([...props.selected, ...ids])])
+    return
+  }
+  // 取消全选不能只清当前页：「全选所有」勾上的跨页行也要一起清掉。单页模式 everyIds 就是本页，行为不变。
+  const clearing = new Set(everyIds.value)
+  emit('select', props.selected.filter(id => !clearing.has(id)))
 }
 
 function pickableIds(allow) {
@@ -116,8 +119,8 @@ function selectPlain() {
 }
 
 function askSubmit(mode) {
-  emit('submit', mode)
-}
+    emit('submit', mode)
+  }
 
 function goPage(page) {
   if (page < 1 || page > totalPages.value) return
@@ -287,8 +290,8 @@ function reset() {
       </div>
       <button v-if="!iprGap" key="submit-auto" class="ghost tiny" type="button" v-hint="submitTitle" @click="askSubmit('auto')">提交到 EASY</button>
       <template v-else>
-        <button key="submit-trust" class="ghost tiny" type="button" v-hint="'信任 AI：有名字的行按助手写回的收件人和抄送提交。还空着的行按这封发文规则勾选客户联系人，业务人员作为抄送。写成「不用发」的不创建发文；写成「只发业务」的只写业务人员。'" @click="askSubmit('auto')">提交到 EASY：信任AI</button>
-        <button key="submit-all" class="ghost tiny" type="button" v-hint="'不信任 AI：不采用助手写回的收件人。勾选的每一行都按这封发文规则把客户联系人全部勾上，业务人员作为抄送。'" @click="askSubmit('all')">提交到 EASY：直接全选</button>
+        <button key="submit-trust" class="ghost tiny" type="button" v-hint="'信任 AI：有名字的行按助手写回的收件人和抄送提交。还空着的行按这封发文规则勾选客户联系人，业务人员作为抄送。写成「不用发」的不创建发文；写成「只发业务」的只写业务人员。'" @click="askSubmit('trust')">提交到 EASY：信任AI</button>
+        <button key="submit-all" class="ghost tiny" type="button" v-hint="'不信任 AI：不采用助手写回的收件人。原表有收件人的行照表格提交，空着的行和助手写回的行按这封发文规则把客户联系人全部勾上，业务人员作为抄送。'" @click="askSubmit('all')">提交到 EASY：直接全选</button>
       </template>
     </div>
     <p v-if="checking" class="hint">正在核对发文审核状态。核对完之前不能勾选。</p>

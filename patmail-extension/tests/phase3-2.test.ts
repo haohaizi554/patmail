@@ -96,7 +96,8 @@ describe('Phase 3.2 写入入口、账号隔离与只读契约', () => {
     ;(runtime as WorkspaceHost & { switchUser(next: string): void }).switchUser(userB)
     const refreshed = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'refreshSession' } }, runtime)
     if (refreshed.type !== MessageType.WorkspaceResult) throw new Error('refresh')
-    expect(refreshed.payload.connection.operatorId).toBe(userB)
+    expect(refreshed.payload.connection.operatorId).toBe('')
+    expect(refreshed.payload.connection.accountOffer?.operatorId).toBe(userB)
     const stale = await handleWorkspaceMessage({
       type: MessageType.Workspace,
       payload: { action: 'saveCustomer', profile: profile('客户A被写入乙'), expectedScope: scopeA, expectedRevision: 1 }

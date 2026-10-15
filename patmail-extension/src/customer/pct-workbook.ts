@@ -317,8 +317,9 @@ function waveMessage(units: readonly ArbitrationUnit[], index: number, total: nu
     mailKindLine(),
     priorityLine(options.iprOnly === true) + '抄送只写第 1 条里额外要点名的人，没有就写无。',
     '每一行只写一行，用竖线分开，文号原样照抄。没有客户文号就写空。不要加尖括号，不要解释，不要写英文：',
-    '客户文号 我方文号｜收件人 人名｜身份 身份｜抄送 人名或无｜抄送身份 身份或无｜依据 一句简体中文',
-    '拿不准的行写成：客户文号 我方文号｜拿不准｜依据 一句简体中文。依据写完立刻换行。不要把身份写进人名括号。',
+    '客户文号 我方文号｜事项 表格处理事项原样照抄｜收件人 人名｜身份 身份｜抄送 人名或无｜抄送身份 身份或无｜依据 一句简体中文',
+    '拿不准的行写成：客户文号 我方文号｜事项 表格处理事项原样照抄｜拿不准｜依据 一句简体中文。依据写完立刻换行。不要把身份写进人名括号。',
+    '同一文号在表里出现两行时，两行各写一条，事项列写各自的处理事项，不要合并成一条。',
     '不要调用工具，不要构造接口，不要自己去查，不要创建任务，不要让用户挑选。裁完这一批就停，不要写思考过程。',
     ...blocks
   ].join('\n\n')
@@ -369,6 +370,8 @@ function volumeKey(value: string): string {
 
 export interface ArbitrationDecision {
   volume: string
+  /** 裁决行对应的那一事项。同文号出现两行时靠它区分，模型没写就留空。 */
+  procLabel?: string
   recipient: string
   role: string
   cc: string
@@ -386,7 +389,7 @@ function blankParty(value: string): boolean {
 /** 不发这封提醒，或只发给业务、不发给客户。这两种是明确结论，不能当成拿不准。 */
 function closedVerdict(parts: string[]): '' | '不用发' | '只发业务' {
   for (const part of parts) {
-    if (/^(依据|抄送|身份|抄送身份)/.test(part)) continue
+    if (/^(依据|抄送|身份|抄送身份|事项)/.test(part)) continue
     const text = unwrapToken(part).replace(/^收件人\s*[：:]?\s*/, '').trim()
     if (text === '不用发') return '不用发'
     if (text === '只发业务') return '只发业务'
@@ -497,13 +500,14 @@ export function readArbitrationDecisions(text: string): ArbitrationDecision[] {
     const parts = line.split(/[｜|│丨]/).map(part => part.trim())
     const unsure = parts.some(part => part === '拿不准' || part.startsWith('拿不准')) || /[：:]\s*拿不准/.test(line)
     const reason = cleanReason(fieldOf(parts, '依据'))
+    const procLabel = fieldOf(parts, '事项').slice(0, 60)
     const closed = closedVerdict(parts)
     if (closed) {
-      decisions.push({ volume, recipient: closed, role: '', cc: '', ccRole: '', reason, unsure: false })
+      decisions.push({ volume, ...(procLabel ? { procLabel } : {}), recipient: closed, role: '', cc: '', ccRole: '', reason, unsure: false })
       continue
     }
     if (unsure) {
-      decisions.push({ volume, recipient: '', role: '', cc: '', ccRole: '', reason, unsure: true })
+      decisions.push({ volume, ...(procLabel ? { procLabel } : {}), recipient: '', role: '', cc: '', ccRole: '', reason, unsure: true })
       continue
     }
     const recipientRaw = fieldOf(parts, '收件人') || line.match(/收件人\s*[：:\-]?\s*([^，,；;｜|\n]+)/)?.[1]?.trim() || ''
@@ -512,12 +516,13 @@ export function readArbitrationDecisions(text: string): ArbitrationDecision[] {
     const keptCc = partySlots(partyText(ccRaw), roleText(fieldOf(parts, '抄送身份'), ccRaw), reason)
     if (!keptTo.names) {
       if (fieldOf(parts, '收件人') || unsure) {
-        decisions.push({ volume, recipient: '', role: '', cc: '', ccRole: '', reason, unsure: true })
+        decisions.push({ volume, ...(procLabel ? { procLabel } : {}), recipient: '', role: '', cc: '', ccRole: '', reason, unsure: true })
       }
       continue
     }
     decisions.push({
       volume,
+      ...(procLabel ? { procLabel } : {}),
       recipient: keptTo.names,
       role: keptTo.roles,
       cc: keptCc.names,
@@ -538,16 +543,34 @@ function inventedRecordPick(reason: string, recipient: string, iprOnly: boolean)
   return /著录项目|主送技术联系人|技术联系人/.test(reason)
 }
 
-/** 按文号把收件人写回表格。拿不准的不填。 */
+/** 按文号（带事项）把收件人写回表格。拿不准的不填。同文号两行靠事项列区分；没有事项列又对上多行的，宁可不写也不串行。 */
 export function applyArbitrationReply(rows: readonly PctTaskRow[], text: string, options: Readonly<ArbitrationOptions> = {}): { rows: PctTaskRow[]; written: number; unsure: number; decisions: ArbitrationDecision[] } {
   const iprOnly = options.iprOnly === true
   const decisions = readArbitrationDecisions(text).map(item => inventedRecordPick(item.reason, item.recipient, iprOnly)
     ? { ...item, recipient: '', role: '', cc: '', ccRole: '', unsure: true }
     : item)
-  const byVolume = new Map(decisions.filter(item => !item.unsure).map(item => [volumeKey(item.volume), item]))
+  const byVolume = new Map<string, ArbitrationDecision[]>()
+  for (const item of decisions.filter(item => !item.unsure)) {
+    const key = volumeKey(item.volume)
+    const list = byVolume.get(key) ?? []
+    list.push(item)
+    byVolume.set(key, list)
+  }
+  const decisionFor = (row: PctTaskRow): ArbitrationDecision | undefined => {
+    const proc = row.procLabel.trim()
+    for (const key of [row.ourVolume, row.customerVolume]) {
+      if (!key.trim()) continue
+      const list = byVolume.get(volumeKey(key))
+      if (!list) continue
+      const exact = proc ? list.filter(item => (item.procLabel ?? '').trim() === proc) : []
+      if (exact.length) return exact[exact.length - 1]
+      if (list.length === 1) return list[0]
+    }
+    return undefined
+  }
   let written = 0
   const next = rows.map(row => {
-    const write = byVolume.get(volumeKey(row.ourVolume)) || (row.customerVolume ? byVolume.get(volumeKey(row.customerVolume)) : undefined)
+    const write = decisionFor(row)
     if (!write) return row
     written += 1
     const { iprCarried: _carried, ...rest } = row

@@ -180,11 +180,14 @@ describe('完整页面入口与连接', () => {
     expect(bound.payload.connection.operatorId).toBe(userA)
     const switched = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'refreshSession' } }, runtime)
     if (switched.type !== MessageType.WorkspaceResult) throw new Error('switch')
-    expect(switched.payload.connection.operatorId).toBe(userB)
-    expect(switched.payload.message).toContain('切换')
+    expect(switched.payload.connection.operatorId).toBe('')
+    expect(switched.payload.connection.lastOperatorId).toBe(userA)
+    expect(switched.payload.connection.accountOffer?.operatorId).toBe(userB)
+    expect(switched.payload.connection.sessionStatus).not.toBe('authenticated')
+    expect(switched.payload.message).toContain('不是同一位')
     runtime.connection.observeNavigation(3, `${origin}/inbox`)
     expect(runtime.connection.context.operatorId).toBe('')
-    expect(runtime.connection.context.sessionStatus).toBe('pending')
+    expect(runtime.connection.context.easyTabId).toBe(3)
     runtime.connection.observeNavigation(3, 'http://127.0.0.1/other')
     expect(runtime.connection.context.sessionStatus).toBe('error')
     expect(runtime.connection.context.easyTabId).toBeNull()
@@ -197,6 +200,52 @@ describe('完整页面入口与连接', () => {
     if (failed.type !== MessageType.WorkspaceResult) throw new Error('expired')
     expect(failed.payload.connection.operatorId).toBe('')
     expect(failed.payload.connection.sessionStatus).toBe('expired')
+  })
+
+  it('接回同一位登录人，换人时要等确认才切过去', async () => {
+    const tabs = [{ id: 3, url: `${origin}/inbox`, title: 'EASY' }]
+    const runtime = host(tabs, [session(userA)])
+    const bound = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'bind', tabId: 3 } }, runtime)
+    if (bound.type !== MessageType.WorkspaceResult) throw new Error('bind')
+    expect(bound.payload.connection.operatorId).toBe(userA)
+    runtime.connection.context = {
+      ...runtime.connection.context,
+      operatorId: '',
+      displayName: '',
+      sessionStatus: 'unauthenticated',
+      message: '登录已失效。'
+    }
+    runtime.sendToTab = async () => session(userA)
+    const resumed = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'refreshSession' } }, runtime)
+    if (resumed.type !== MessageType.WorkspaceResult) throw new Error('resume')
+    expect(resumed.payload.connection.operatorId).toBe(userA)
+    expect(resumed.payload.connection.sessionStatus).toBe('authenticated')
+    expect(resumed.payload.connection.accountOffer).toBeNull()
+
+    const other = host(tabs, [session(userA), session(userB), session(userB)])
+    await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'bind', tabId: 3 } }, other)
+    const offered = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'refreshSession' } }, other)
+    if (offered.type !== MessageType.WorkspaceResult) throw new Error('offer')
+    expect(offered.payload.connection.operatorId).toBe('')
+    expect(offered.payload.connection.lastOperatorId).toBe(userA)
+    expect(offered.payload.connection.accountOffer).toMatchObject({ operatorId: userB, tabId: 3 })
+    const stayed = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'declineAccountSwitch' } }, other)
+    if (stayed.type !== MessageType.WorkspaceResult) throw new Error('stay')
+    expect(stayed.payload.connection.accountOffer).toBeNull()
+    expect(stayed.payload.connection.operatorId).toBe('')
+    const quiet = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'refreshSession' } }, other)
+    if (quiet.type !== MessageType.WorkspaceResult) throw new Error('quiet')
+    expect(quiet.payload.connection.accountOffer).toBeNull()
+    expect(quiet.payload.connection.operatorId).not.toBe(userB)
+
+    const adoptHost = host(tabs, [session(userA), session(userB), session(userB)])
+    await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'bind', tabId: 3 } }, adoptHost)
+    await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'refreshSession' } }, adoptHost)
+    const adopted = await handleWorkspaceMessage({ type: MessageType.Workspace, payload: { action: 'bind', tabId: 3 } }, adoptHost)
+    if (adopted.type !== MessageType.WorkspaceResult) throw new Error('adopt')
+    expect(adopted.payload.connection.operatorId).toBe(userB)
+    expect(adopted.payload.connection.accountOffer).toBeNull()
+    expect(adopted.payload.message).toContain('切换')
   })
 
   it('opens one workspace tab and focuses it the next time', async () => {

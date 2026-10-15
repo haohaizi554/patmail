@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 
 import { mirrorLocalExecutions, restoreLocalExecutions } from '../recovery/executions'
 import { customerMode, hydrateCustomerMode, setCustomerMode, watchCustomerMode, type CustomerMode } from '../settings/customer-mode'
 import { resetTaskCheckProgress } from './check-progress'
-import { progressDialog } from './dialog'
+import { confirmDialog, progressDialog } from './dialog'
 import { createFullPageBridge } from './services/full-page-bridge'
 import { useWorkspace } from './composables/useWorkspace'
 import { useAccountAvatar } from '../settings/use-account-avatar'
@@ -103,6 +103,30 @@ function onHash(): void {
 }
 watch(() => workspace.connection.value.sessionStatus, (status, previous) => {
   if (previous === 'authenticated' && status !== 'authenticated') void mirrorLocalExecutions()
+})
+
+let askingOperator = ''
+watch(() => workspace.connection.value.accountOffer?.operatorId ?? '', async (operatorId) => {
+  if (!operatorId || askingOperator === operatorId) return
+  const offer = workspace.connection.value.accountOffer
+  if (!offer) return
+  askingOperator = operatorId
+  const previousName = workspace.connection.value.lastDisplayName.trim() || '上一位登录人'
+  const nextName = offer.displayName.trim() || '另一位登录人'
+  const yes = await confirmDialog({
+    title: '登录人变了',
+    warn: true,
+    confirmLabel: '切换账号',
+    cancelLabel: '留在当前现场',
+    message: `当前现场是「${previousName}」留下的。现在登录的是「${nextName}」。切换账号会丢掉当前现场。`
+  })
+  if (workspace.connection.value.accountOffer?.operatorId !== operatorId) {
+    askingOperator = ''
+    return
+  }
+  if (yes) await workspace.call({ action: 'bind', tabId: offer.tabId })
+  else await workspace.call({ action: 'declineAccountSwitch' })
+  askingOperator = ''
 })
 
 onMounted(() => {

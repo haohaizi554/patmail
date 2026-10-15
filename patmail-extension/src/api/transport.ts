@@ -111,6 +111,13 @@ export function transientEasyFailure(message: string): boolean {
   return /网关异常|服务暂不可用|请求超时|无法连接 EASY/.test(message)
 }
 
+/** 发文提交这一串在原站高峰期常要 20 到 30 秒，先建单、后读联系人和流程、再保存和提交。 */
+const SLOW_OPERATIONS = new Set<EasyOperation>([
+  'limitMailCustomer', 'mailProcess', 'processAP', 'processEF', 'agencySearchCase', 'icSearch', 'caseBusFlow', 'casePageDemand', 'caseInventor', 'caseRecordContact', 'customerList',
+  'getMailInfo', 'getMailCase', 'getMailRule', 'getCustomerContact', 'getRecentContact', 'getCaseContact', 'getSalesContact', 'getPicsContact', 'getCaseAgentContact',
+  'getFlowInfo', 'getFlowSubmit', 'getUrgencyList', 'getFlowLastStatus', 'saveMailInfo', 'mailSubmit'
+])
+
 /** 发文已经创建、后面的读取失败时，再点提交应沿用这封，而不是再创建一封。 */
 export function retryCreatedDraft(message: string): string {
   if (!transientEasyFailure(message) || message.includes('再点')) return message
@@ -142,11 +149,12 @@ export class EasyTransport {
     return result
   }
 
-  /** 文件查询和期限监控在这套原网站上经常超过 15 秒。测试传入的短超时仍然生效。文件查询可以按页面选择拉长。 */
+  /** 文件查询和期限监控在这套原网站上经常超过 15 秒。测试传入的短超时仍然生效。文件查询可以按页面选择拉长。
+ * 发文提交这一串（建单、联系人、规则、保存、提交流程）在原站高峰期实测 20 到 30 秒才回，全部放宽到 60 秒， 15 秒会把还 能成功的请求掐成「结果无法确认」。 */
   private waitMs(operation: EasyOperation, timeoutMs?: number): number {
     if (this.timeoutMs < 15_000) return this.timeoutMs
     if (operation === 'fileSearch' || operation === 'limitMonitor') return fileSearchTimeoutMs(timeoutMs)
-    if (operation === 'limitMailCustomer' || operation === 'mailProcess' || operation === 'processAP' || operation === 'processEF' || operation === 'agencySearchCase' || operation === 'icSearch' || operation === 'caseBusFlow' || operation === 'casePageDemand' || operation === 'caseInventor' || operation === 'caseRecordContact' || operation === 'customerList') return 60_000
+    if (SLOW_OPERATIONS.has(operation)) return 60_000
     return this.timeoutMs
   }
 

@@ -9,7 +9,9 @@ describe('发文核对进度', () => {
   })
 
   it('按已用时间外推预计结束时刻', () => {
-    const started = Date.parse('2026-10-10T04:00:00')
+    // 用当天凌晨 4 点起算，预计结束不会跨天，早上 4 点后断言稳定。
+    const day = new Date()
+    const started = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 4, 0, 0).getTime()
     const now = started + 100_000
     const view = taskCheckSnapshot(25, 100, started, now, 'run')
     expect(view.percent).toBe(25)

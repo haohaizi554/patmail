@@ -8,7 +8,9 @@ export function createFullPageBridge(): MessageBridge {
     async request(message): Promise<ContentResponse> {
       const lookupFlow = message.type === MessageType.LookupIcFlow
       const contactExport = message.type === MessageType.ExportCaseContacts
-      const slow = contactExport || message.type === MessageType.SearchFiles || message.type === MessageType.SearchLimitMonitor
+      // 提交一封信要串完建单、联系人、保存和提交流程，并成几件的信更长。原站高峰期 30 秒不够，放宽到 3 分钟。
+      const submitWait = message.type === MessageType.SubmitLimitMail || message.type === MessageType.SubmitFileManage ? 180_000 : 0
+      const slow = contactExport || submitWait > 0 || message.type === MessageType.SearchFiles || message.type === MessageType.SearchLimitMonitor
         || message.type === MessageType.ListMailProcesses || message.type === MessageType.ListFlowReviewers
         || message.type === MessageType.ReadCaseDemands
         || message.type === MessageType.ReadCaseBusFlow
@@ -19,7 +21,7 @@ export function createFullPageBridge(): MessageBridge {
         || message.type === MessageType.LoadDictionary || message.type === MessageType.ScanFileSearchForm
       const searchWait = message.type === MessageType.SearchFiles || message.type === MessageType.SearchLimitMonitor
         ? fileSearchTimeoutMs(message.payload.timeoutMs) + 15_000 : 0
-      const response = await sendToBackground({ type: MessageType.Workspace, payload: { action: 'forward', message } }, lookupFlow ? 300_000 : contactExport ? 180_000 : searchWait || (slow ? 70_000 : 30_000))
+      const response = await sendToBackground({ type: MessageType.Workspace, payload: { action: 'forward', message } }, lookupFlow ? 300_000 : contactExport ? 180_000 : submitWait || searchWait || (slow ? 70_000 : 30_000))
       if (response?.type === MessageType.Error) return response
       const forwarded = response?.type === MessageType.WorkspaceResult ? response.payload.forwarded : null
       if (forwarded && forwarded.type === MessageType.Error) return forwarded

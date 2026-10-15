@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { lookupIcFlow } from '../src/customer/ic-flow-lookup'
-import { NATIONAL_CUSTOMER_TYPE, NATIONAL_OUR_TYPE, pctRowsFromTable } from '../src/customer/pct-sheet'
+import { NATIONAL_CUSTOMER_TYPE, NATIONAL_OUR_TYPE, NATIONAL_PROC_LABEL, pctRowsFromTable } from '../src/customer/pct-sheet'
 import { applyArbitrationReply, arbitrateDetail, arbitrationAllowed, arbitrationBatchSize, checkedSourceSheets, detailLines, iprArbitrationBrief, iprArbitrationWaves, isPctWorkbookSheet, missedSourceSheets, noteForBlankIpr, pctRowsFromWorkbook, pickArbitrationText, readArbitrationDecisions, shouldAutoArbitrate } from '../src/customer/pct-workbook'
 import { matchListedCustomer } from '../src/customer/customer-list'
 import { caseTextUsable } from '../src/customer/case-arbitration'
@@ -399,6 +399,30 @@ describe('仲裁交给本地模型时分批', () => {
     expect(bracketed.written).toBe(1)
     expect(bracketed.rows[0]?.iprName).toBe('李英')
     expect(bracketed.rows[1]?.iprName).toBe('')
+  })
+
+  it('同文号两种事项靠事项列分开写回，没有事项列又不唯一就不写', () => {
+    const remind = { ...gap('PA1', '甲客户'), procLabel: '提醒申请PCT' }
+    const national = { ...gap('PA1', '甲客户'), procLabel: NATIONAL_PROC_LABEL, mailTypeLabel: NATIONAL_CUSTOMER_TYPE }
+    const low = [
+      '空 PA1｜事项 提醒申请PCT｜收件人 李英｜身份 客户联系人｜抄送 无｜抄送身份 无｜依据 客户要求主送李英',
+      '空 PA1｜事项 ' + NATIONAL_PROC_LABEL + '｜不用发｜依据 客户要求不发进国家提醒'
+    ].join('\n')
+    const split = applyArbitrationReply([remind, national], low)
+    expect(split.rows[0]?.iprName).toBe('李英')
+    expect(split.rows[0]?.procLabel).toBe('提醒申请PCT')
+    expect(split.rows[1]?.iprName).toBe('不用发')
+    expect(split.rows[1]?.iprArbitrated).toBe(true)
+
+    const bare = applyArbitrationReply([remind, national], [
+      '空 PA1｜收件人 李英｜身份 客户联系人｜抄送 无｜抄送身份 无｜依据 客户要求主送李英',
+      '空 PA1｜收件人 王强｜身份 客户联系人｜抄送 无｜抄送身份 无｜依据 客户要求主送王强'
+    ].join('\n'))
+    // 没有事项列，同文号对上两条结论分不出是哪一行，宁可不写也不串行。
+    expect(bare.rows.every(row => !row.iprName)).toBe(true)
+
+    const single = applyArbitrationReply([remind], '空 PA1｜收件人 李英｜身份 客户联系人｜抄送 无｜抄送身份 无｜依据 客户要求主送李英')
+    expect(single.rows[0]?.iprName).toBe('李英')
   })
 
   it('核对没结束不能仲裁，整表结束后才按开关自动开始', () => {

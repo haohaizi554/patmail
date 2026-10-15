@@ -20,7 +20,7 @@ import { fetchMailboxSignature } from '../../mail/signature-load'
 import type { MailRuleBundle } from '../../mail/types'
 import { isQueryGuid } from '../../query/query-validator'
 import { flushRecovery, holdRecovery, peekRecovery, recallRecovery, scheduleRecovery, systemScope } from '../../recovery/wal-ledger'
-import { scopeFromConnection } from '../../shared/connection'
+import { sceneOwnerChanged, scopeFromConnection } from '../../shared/connection'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useMailConcurrency } from '../../settings/use-mail-concurrency'
 import { useWorkspace } from '../composables/useWorkspace'
@@ -91,6 +91,8 @@ function readFileDesk(): unknown | null {
   }
 }
 
+let sceneOwner = ''
+
 function applyFileDesk(payload: unknown): void {
   if (!payload || typeof payload !== 'object' || letters.value.length || foundFiles.value.length) return
   const desk = payload as Record<string, unknown>
@@ -98,6 +100,7 @@ function applyFileDesk(payload: unknown): void {
   const owner = typeof desk.operatorId === 'string' ? desk.operatorId.toLowerCase() : ''
   const live = connection.value.operatorId
   if (isQueryGuid(live) && owner && live.toLowerCase() !== owner) return
+  if (owner) sceneOwner = owner
   if (typeof desk.customerId === 'string') customerId.value = desk.customerId
   if (typeof desk.notice === 'string') notice.value = desk.notice
   letters.value = Array.isArray(desk.letters) ? desk.letters as FileManageLetterPlan[] : []
@@ -158,6 +161,42 @@ watch(() => connection.value.easyOrigin, (next, previous) => {
       applyFileDesk(saved)
       pokeFile()
     }).catch(() => { /* 这个系统还没有账本 */ })
+  }
+})
+
+watch(() => connection.value.operatorId, (next, previous) => {
+  if (next === previous) return
+  if (!next) return
+  const owner = sceneOwner || (isQueryGuid(previous) ? previous.toLowerCase() : '')
+  if (!sceneOwnerChanged(owner, next)) {
+    if (isQueryGuid(next) && !sceneOwner) sceneOwner = next.toLowerCase()
+    return
+  }
+  parkingFile = true
+  const payload = readFileDesk()
+  const origin = connection.value.easyOrigin
+  holdRecovery('file-desk', systemScope(origin, `${owner}|file`), payload)
+  holdRecovery('file-desk', fileScope, null)
+  customerId.value = ''
+  notice.value = ''
+  letters.value = []
+  notes.value = []
+  outcomes.value = {}
+  foundFiles.value = []
+  picked.value = []
+  sceneOwner = next.toLowerCase()
+  fileScope = systemScope(origin, `${sceneOwner}|file`)
+  const cached = peekRecovery('file-desk', fileScope)
+  const arriving = fileScope
+  if (cached) applyFileDesk(cached)
+  parkingFile = false
+  pokeFile()
+  if (cached === undefined) {
+    void recallRecovery('file-desk', arriving).then(saved => {
+      if (fileScope !== arriving || letters.value.length || foundFiles.value.length) return
+      applyFileDesk(saved)
+      pokeFile()
+    }).catch(() => { /* 新账号还没有这份发文 */ })
   }
 })
 

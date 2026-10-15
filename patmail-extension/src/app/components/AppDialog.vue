@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { closeDialog, closeProgress, dialogState, progressDialog } from '../dialog'
+import { closeDialog, closeProgress, closeSummary, dialogState, exportSummary, progressDialog, summaryDialog } from '../dialog'
 
 const state = dialogState()
 const progress = progressDialog
 const dialogRoot = ref<HTMLElement | null>(null)
 const progressRoot = ref<HTMLElement | null>(null)
+const summaryRoot = ref<HTMLElement | null>(null)
 const progressLog = ref<HTMLOListElement | null>(null)
 const cancelButton = ref<HTMLButtonElement | null>(null)
 const confirmButton = ref<HTMLButtonElement | null>(null)
@@ -31,7 +32,7 @@ function focusable(root: HTMLElement): HTMLElement[] {
 }
 
 function onKey(event: KeyboardEvent): void {
-  const root = progress.open ? progressRoot.value : state.open ? dialogRoot.value : null
+  const root = progress.open ? progressRoot.value : summaryDialog.open ? summaryRoot.value : state.open ? dialogRoot.value : null
   if (event.key === 'Tab' && root) {
     const items = focusable(root)
     if (!items.length) {
@@ -55,6 +56,11 @@ function onKey(event: KeyboardEvent): void {
     if (!progress.finished) return
     event.preventDefault()
     closeProgress()
+    return
+  }
+  if (summaryDialog.open) {
+    event.preventDefault()
+    closeSummary()
     return
   }
   if (!state.open) return
@@ -98,12 +104,24 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
 <template>
   <div v-if="state.open" class="mask app-dialog" @click.self="closeDialog(false)">
-    <div ref="dialogRoot" class="dialog" :class="{ warn: state.warn }" role="dialog" aria-modal="true" aria-labelledby="app-dialog-title" aria-describedby="app-dialog-message" tabindex="-1">
+    <div ref="dialogRoot" class="dialog" :class="{ warn: state.warn, 'with-table': Boolean(state.table) }" role="dialog" aria-modal="true" aria-labelledby="app-dialog-title" aria-describedby="app-dialog-message" tabindex="-1">
       <header>
         <h3 id="app-dialog-title">{{ state.title }}</h3>
         <button type="button" aria-label="关闭" @click="closeDialog(false)">×</button>
       </header>
       <p id="app-dialog-message" class="app-dialog-gap">{{ state.message }}</p>
+      <div v-if="state.table" class="dialog-table">
+        <table>
+          <thead v-if="state.table.headers?.length">
+            <tr><th v-for="(head, index) in state.table.headers" :key="index" scope="col">{{ head }}</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, index) in state.table.rows" :key="index">
+              <td v-for="(cell, cellIndex) in row" :key="cellIndex">{{ cell }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <footer>
         <button v-if="state.cancelLabel" ref="cancelButton" type="button" class="ghost" @click="closeDialog(false)">{{ state.cancelLabel }}</button>
         <button ref="confirmButton" type="button" class="solid" @click="closeDialog(true)">{{ state.confirmLabel }}</button>
@@ -138,6 +156,30 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
       </ul>
       <footer v-if="progress.finished">
         <button ref="progressDone" type="button" class="solid" @click="closeProgress">知道了</button>
+      </footer>
+    </div>
+  </div>
+  <div v-if="summaryDialog.open" class="mask app-dialog summary-mask" @click.self="closeSummary">
+    <div ref="summaryRoot" class="dialog with-table summary-dialog" role="dialog" aria-modal="true" aria-labelledby="summary-title" tabindex="-1">
+      <header>
+        <h3 id="summary-title">{{ summaryDialog.title }}</h3>
+        <button type="button" aria-label="关闭" @click="closeSummary">×</button>
+      </header>
+      <div class="dialog-table">
+        <table>
+          <thead>
+            <tr><th v-for="(head, index) in summaryDialog.headers" :key="index" scope="col">{{ head }}</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, index) in summaryDialog.rows" :key="index">
+              <td v-for="(cell, cellIndex) in row" :key="cellIndex">{{ cell }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <footer>
+        <button type="button" class="ghost" @click="exportSummary">导出 xlsx</button>
+        <button type="button" class="solid" @click="closeSummary">关闭</button>
       </footer>
     </div>
   </div>

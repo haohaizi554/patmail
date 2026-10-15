@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import { downloadXlsxSheets } from '../customer/xlsx-table'
 
 export interface DialogOptions {
   title: string
@@ -7,6 +8,13 @@ export interface DialogOptions {
   cancelLabel?: string
   /** 警示框：标题居中标红，用来在提交前拦一下。 */
   warn?: boolean
+  /** 逐行清单画成表格。短表整表展开，长表在框内滚动。 */
+  table?: DialogTable
+}
+
+export interface DialogTable {
+  headers?: string[]
+  rows: string[][]
 }
 
 const state = reactive({
@@ -15,7 +23,8 @@ const state = reactive({
   message: '',
   confirmLabel: '确定',
   cancelLabel: '取消',
-  warn: false
+  warn: false,
+  table: null as DialogTable | null
 })
 
 let settle: ((confirmed: boolean) => void) | null = null
@@ -68,11 +77,11 @@ export function beginProgress(title: string, total: number): void {
   progressDialog.open = true
 }
 
-/** 一封提交结果归到成功、失败、异常或跳过。对不上邮箱算异常。 */
+/** 一封提交结果归到成功、失败、异常或跳过。对不上邮箱算异常，不用发是仲裁结论算跳过。 */
 export function classifySubmitText(text: string): keyof ProgressCounts {
   if (text.startsWith('已提交')) return 'success'
   if (/对上邮箱|没有商务邮箱|没有客户联系人|没有案件联系人|对上了多个邮箱|没有可用的.+邮箱/.test(text)) return 'abnormal'
-  if (/还在审核里|已经提交过|没有要提交/.test(text)) return 'skipped'
+  if (/还在审核里|已经提交过|没有要提交|不用发，没有创建发文/.test(text)) return 'skipped'
   return 'failed'
 }
 
@@ -126,6 +135,7 @@ export function confirmDialog(options: DialogOptions): Promise<boolean> {
   state.confirmLabel = options.confirmLabel?.trim() || '确定'
   state.cancelLabel = options.cancelLabel === undefined ? '取消' : options.cancelLabel.trim()
   state.warn = options.warn === true
+  state.table = options.table?.rows.length ? options.table : null
   state.open = true
   return new Promise(resolve => {
     settle = resolve
@@ -143,4 +153,37 @@ export function closeDialog(confirmed: boolean): void {
   const done = settle
   settle = null
   done?.(confirmed)
+}
+
+/** 提交完成后整批结果的总结表。可滚动核对，可导出成 xlsx。 */
+export const summaryDialog = reactive({
+  open: false,
+  title: '',
+  headers: [] as string[],
+  rows: [] as string[][],
+  exportName: ''
+})
+
+/** 总结表里的公司名最多 15 个字，再长就省略。 */
+export function clipCompany(name: string | undefined): string {
+  const text = name?.trim() || '表格里没有'
+  return text.length > 15 ? `${text.slice(0, 15)}…` : text
+}
+
+export function openSummary(title: string, headers: string[], rows: string[][], exportName: string): void {
+  summaryDialog.title = title
+  summaryDialog.headers = [...headers]
+  summaryDialog.rows = rows.map(row => [...row])
+  summaryDialog.exportName = exportName
+  summaryDialog.open = true
+}
+
+export function closeSummary(): void {
+  summaryDialog.open = false
+}
+
+export function exportSummary(): void {
+  if (!summaryDialog.rows.length) return
+  const name = summaryDialog.exportName || '提交总结.xlsx'
+  downloadXlsxSheets([{ name: '提交总结', rows: [summaryDialog.headers, ...summaryDialog.rows] }], name)
 }

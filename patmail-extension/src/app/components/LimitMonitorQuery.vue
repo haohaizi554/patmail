@@ -6,11 +6,12 @@ import type { LimitMonitorResult, LimitMonitorRow } from '../../api/limit-monito
 import { isLimitMonitorType, type LimitMonitorQuery } from '../../api/limit-monitor-params'
 import { MAILED_UNFINISHED_REVIEW, SKIP_SEND_REVIEW } from '../../customer/pct-flow-status'
 import { clonePctTask, readWorkflowTask, writeWorkflowTask } from '../../customer/pct-sheet'
-import { limitMailItems, limitMailLetterLabel, limitMailProcIds, limitMailSubmitShouldHalt, runLimitMailSubmit, runMailLetterPool, selectionNeedsAddressChoice } from '../../customer/limit-mail-submit'
-import { beginProgress, classifySubmitText, confirmDialog, endProgress, logProgress, noteProgress, progressSummaryLine, tallyProgress } from '../dialog'
+import { limitMailItems, limitMailLetterLabel, limitMailProcIds, limitMailSubmitShouldHalt, runLimitMailSubmit, runMailLetterPool, selectionNeedsAddressChoice, type LimitMailSubmitResult } from '../../customer/limit-mail-submit'
+import { beginProgress, classifySubmitText, clipCompany, confirmDialog, endProgress, logProgress, noteProgress, openSummary, progressSummaryLine, tallyProgress } from '../dialog'
 import { splitCaseVolumes } from '../../customer/volume-list'
 import { isQueryGuid } from '../../query/query-validator'
 import { flushRecovery, holdRecovery, peekRecovery, recallRecovery, scheduleRecovery, systemScope } from '../../recovery/wal-ledger'
+import { sceneOwnerChanged } from '../../shared/connection'
 import { readLimitTimeout } from '../../api/query-timeout'
 import { MessageType, type MessageBridge } from '../../shared/message'
 import { useMailConcurrency } from '../../settings/use-mail-concurrency'
@@ -61,7 +62,11 @@ const hasIprGap = computed(() => selectionNeedsAddressChoice(
   rows.value,
   props.sheetRows ?? [],
   selected.value,
-  rows.value.filter(row => rowCanConfirm(row.procId)).map(row => row.procId)
+  rows.value.filter(row => rowCanConfirm(row.procId)).map(row => row.procId),
+  props.recipientMode ?? (() => {
+    const stored = readWorkflowTask()
+    return stored?.recipientMode === 'lead' || stored?.recipientMode === 'ipr' ? stored.recipientMode : 'ipr'
+  })()
 ))
 const sheetMerged = ref(false)
 const lastQuery = ref<Omit<LimitMonitorQuery, 'pageIndex' | 'pageSize'> | null>(null)
@@ -122,12 +127,15 @@ function readQueryDesk(): unknown | null {
   }
 }
 
+let sceneOwner = ''
+
 function applyQueryDesk(payload: unknown): void {
   if (!payload || typeof payload !== 'object' || rows.value.length) return
   const desk = payload as Record<string, unknown>
   if (desk.version !== 1 || !Array.isArray(desk.rows) || !desk.rows.length) return
   const owner = typeof desk.operatorId === 'string' ? desk.operatorId.toLowerCase() : ''
   if (isQueryGuid(props.userId) && owner && props.userId.toLowerCase() !== owner) return
+  if (owner) sceneOwner = owner
   rows.value = desk.rows as LimitMonitorRow[]
   gates.value = desk.gates && typeof desk.gates === 'object' ? desk.gates as Record<string, 'open' | 'pending' | 'done'> : {}
   selected.value = Array.isArray(desk.selected) ? desk.selected.filter((item): item is string => typeof item === 'string') : []
@@ -180,6 +188,37 @@ watch(() => connection.value.easyOrigin, (next, previous) => {
       applyQueryDesk(saved)
       pokeQuery()
     }).catch(() => { /* 这个系统还没有账本 */ })
+  }
+})
+
+watch(() => connection.value.operatorId, (next, previous) => {
+  if (next === previous) return
+  if (!next) return
+  const owner = sceneOwner || (isQueryGuid(previous) ? previous.toLowerCase() : '')
+  if (!sceneOwnerChanged(owner, next)) {
+    if (isQueryGuid(next) && !sceneOwner) sceneOwner = next.toLowerCase()
+    return
+  }
+  parkingQuery = true
+  const payload = readQueryDesk()
+  const origin = connection.value.easyOrigin
+  holdRecovery('limit-query', systemScope(origin, `${owner}|workflow`), payload)
+  holdRecovery('limit-query', queryScope, null)
+  clearProcQuery()
+  lastQuery.value = null
+  sceneOwner = next.toLowerCase()
+  queryScope = systemScope(origin, `${sceneOwner}|workflow`)
+  const cached = peekRecovery('limit-query', queryScope)
+  const arriving = queryScope
+  if (cached) applyQueryDesk(cached)
+  parkingQuery = false
+  pokeQuery()
+  if (cached === undefined) {
+    void recallRecovery('limit-query', arriving).then(saved => {
+      if (queryScope !== arriving || rows.value.length) return
+      applyQueryDesk(saved)
+      pokeQuery()
+    }).catch(() => { /* 新账号还没有这份查询 */ })
   }
 })
 
@@ -487,6 +526,13 @@ function onConfirm(ids: string[]): void {
   emit('confirm', procIds)
 }
 
+/** 进度浮窗标题带上这次提交用的模式，方便区分是哪种口径发出去的。 */
+function submitTitle(address?: string): string {
+  if (address === 'all') return '提交到 EASY：不信任仲裁全选'
+  if (address === 'trust') return '提交到 EASY：信任仲裁'
+  return '提交到 EASY：直接提交'
+}
+
 async function onSubmitAsk(address?: string): Promise<void> {
   if (!isWriteSwitchReady()) {
     message.value = '正在读取系统设置里的写开关。'
@@ -514,10 +560,13 @@ async function onSubmitAsk(address?: string): Promise<void> {
   const procIds = live
   const mailedPending = rows.value.filter(row => procIds.includes(row.procId) && flowByProc.value[row.procId] === MAILED_UNFINISHED_REVIEW)
   if (mailedPending.length) {
-    const lines = mailedPending.map(row => `${row.caseVolume}｜${row.ctrlProc}｜${row.customerName}`).join('\n')
     const goOn = await confirmDialog({
       title: `警示：${mailedPending.length} 行已发文、事项未管制完成日`,
-      message: `这些行的发文流程已结束，但事项还没有管制完成日。\n这个状态分不出两种情况：真的发出过邮件，或没发文就把流程手动结束。请逐行确认到底发没发过，再提交会发一封新的：\n${lines}`,
+      message: '这些行的发文流程已结束，但事项还没有管制完成日。\n这个状态分不出两种情况：真的发出过邮件，或没发文就把流程手动结束。请逐行确认到底发没发过，再提交会发一封新的：',
+      table: {
+        headers: ['文号', '事项', '客户'],
+        rows: mailedPending.map(row => [row.caseVolume, row.ctrlProc, row.customerName])
+      },
       confirmLabel: '核对过，继续提交',
       cancelLabel: '再核对',
       warn: true
@@ -536,7 +585,7 @@ async function onSubmitAsk(address?: string): Promise<void> {
     sheetRows: props.sheetRows?.length ? props.sheetRows : (task?.rows ?? []),
     mode: props.recipientMode ?? (task?.recipientMode === 'lead' || task?.recipientMode === 'ipr' ? task.recipientMode : 'ipr'),
     specials: new Set(props.inventorCustomers ?? []),
-    address: address === 'auto' ? 'auto' : address === 'all' ? 'all' : address === 'checked' ? 'checked' : 'named'
+    address: address === 'auto' || address === 'trust' ? 'auto' : address === 'all' ? 'all' : address === 'checked' ? 'checked' : 'named'
   })
   if (!planned.ok) {
     message.value = planned.message
@@ -544,11 +593,12 @@ async function onSubmitAsk(address?: string): Promise<void> {
   }
   message.value = '正在创建发文并提交给当前登录人。'
   const involved = rows.value.filter(row => planned.items.some(item => limitMailProcIds(item).includes(row.procId)))
-  beginProgress('提交到 EASY', planned.items.length + 1)
+  beginProgress(submitTitle(address), planned.items.length + 1)
   const abnormal: Array<{ caseVolume: string; procLabel: string }> = []
   const sent = new Set<string>()
   const width = concurrency.value
   let handedOff = false
+  const summaryRows: string[][] = []
   try {
     if (width > 1 && involved.length) await markSendGates(involved, true)
     let finished = 0
@@ -558,12 +608,22 @@ async function onSubmitAsk(address?: string): Promise<void> {
       logProgress(`正在核对 ${label} 的发文流程。`)
       if (width <= 1 && letterRows.length) await markSendGates(letterRows, true)
       logProgress(`正在处理 ${label}。`)
-      const text = await runLimitMailSubmit(bridge, props.userId, [item], gates.value)
+      const got: LimitMailSubmitResult[] = []
+      const text = await runLimitMailSubmit(bridge, props.userId, [item], gates.value, result => got.push(result))
       const kind = classifySubmitText(text)
       tallyProgress(kind, limitMailProcIds(item).length)
       if (kind !== 'success') noteProgress(kind, label, text)
       if (kind === 'abnormal') {
         for (const row of letterRows) abnormal.push({ caseVolume: row.caseVolume, procLabel: row.ctrlProc })
+      }
+      const volumes = new Map(letterRows.map(row => [row.procId, row.caseVolume]))
+      for (const result of got) {
+        summaryRows.push([
+          volumes.get(result.procId) ?? result.procId,
+          clipCompany(item.customerName),
+          result.to || '',
+          result.cc || ''
+        ])
       }
       finished += 1
       text.split('\n').forEach((line, lineIndex) => logProgress(lineIndex === 0 ? `${label}：${line}` : line, finished))
@@ -599,6 +659,15 @@ async function onSubmitAsk(address?: string): Promise<void> {
     handedOff = true
     message.value = ''
     publish()
+    if (summaryRows.length) {
+      const counts = progressSummaryLine().replace(/^统计：|。$/g, '')
+      openSummary(
+        `${submitTitle(address)} · ${counts}`,
+        ['案号', '公司', '收件人', '抄送人'],
+        summaryRows,
+        `提交总结-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.xlsx`
+      )
+    }
   } catch (error: unknown) {
     logProgress(error instanceof Error ? error.message : '提交中断了。')
     message.value = '提交中断了。进度框里有已经完成的统计。'

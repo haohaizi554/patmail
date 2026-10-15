@@ -12,8 +12,19 @@ export interface EasyConnectionContext {
   sessionStatus: EasySessionStatus
   lastCheckedAt: string
   displayName: string
+  /** 最近一次确认过的姓名。掉线后顶栏会变成未登录，询问切换时还要用这个名字。 */
+  lastDisplayName: string
+  /** 站点上已经是另一位登录人，但还没决定要不要丢掉当前现场。 */
+  accountOffer: AccountOffer | null
   message: string
   connectionVersion: number
+}
+
+/** 检测到的另一位登录人。页面确认后才真正切过去。 */
+export interface AccountOffer {
+  operatorId: string
+  displayName: string
+  tabId: number
 }
 
 /** 一次读取或保存开始时冻结的账号。后续异步不能再改用当时的连接对象。 */
@@ -38,6 +49,10 @@ export interface ConnectionSnapshot {
   easyTabId: number | null
   lastOperatorId: string
   connectionVersion: number
+  /** 登录状态变了也要通知页面。只靠文号和版本，同一位重新登录时页面收不到。 */
+  sessionStatus?: EasySessionStatus
+  lastDisplayName?: string
+  offerOperatorId?: string
 }
 
 export interface BrowserTabRef {
@@ -63,9 +78,42 @@ export function emptyConnection(origin: string = EASY_ORIGIN): EasyConnectionCon
     sessionStatus: 'disconnected',
     lastCheckedAt: '',
     displayName: '',
+    lastDisplayName: '',
+    accountOffer: null,
     message: '尚未连接 EASY。',
     connectionVersion: 0
   }
+}
+
+function isAccountOffer(value: unknown): value is AccountOffer {
+  return isRecord(value) &&
+    typeof value.operatorId === 'string' && value.operatorId.length > 0 && value.operatorId.length <= 80 &&
+    typeof value.displayName === 'string' && value.displayName.length <= 80 &&
+    typeof value.tabId === 'number' && Number.isInteger(value.tabId)
+}
+
+/** 两位登录人是不是同一个 GUID。空的不算同一位。 */
+export function sameOperatorId(left: string, right: string): boolean {
+  const former = left.trim().toLowerCase()
+  const latter = right.trim().toLowerCase()
+  return former.length > 0 && former === latter
+}
+
+/**
+ * 掉线后再检测到登录人时怎么处理。
+ * 没有上一位，或还是同一位，原样接回。换成另一位，先问过再丢掉现场。
+ */
+export function resumeLoginChoice(previousOperatorId: string, nextOperatorId: string): 'resume' | 'ask' {
+  const next = nextOperatorId.trim()
+  if (!next) return 'resume'
+  const previous = previousOperatorId.trim()
+  if (!previous || sameOperatorId(previous, next)) return 'resume'
+  return 'ask'
+}
+
+/** 现场主人变成另一位已登录的人才算切换。掉线变成空账号不算。 */
+export function sceneOwnerChanged(sceneOwner: string, nextOperatorId: string): boolean {
+  return resumeLoginChoice(sceneOwner, nextOperatorId) === 'ask'
 }
 
 export function isEasyConnection(value: unknown): value is EasyConnectionContext {
@@ -77,6 +125,8 @@ export function isEasyConnection(value: unknown): value is EasyConnectionContext
     typeof value.lastOperatorId === 'string' && value.lastOperatorId.length <= 80 &&
     (status === 'disconnected' || status === 'pending' || status === 'authenticated' || status === 'unauthenticated' || status === 'expired' || status === 'error') &&
     typeof value.lastCheckedAt === 'string' && typeof value.displayName === 'string' && typeof value.message === 'string' &&
+    (value.lastDisplayName === undefined || typeof value.lastDisplayName === 'string') &&
+    (value.accountOffer == null || isAccountOffer(value.accountOffer)) &&
     typeof value.connectionVersion === 'number' && Number.isInteger(value.connectionVersion)
 }
 
@@ -124,6 +174,8 @@ export interface SessionObservation {
 /** 身份只来自绑定标签页上的会话检测。 */
 export class EasyConnectionController {
   context: EasyConnectionContext = emptyConnection()
+  /** 用户选择留在当前现场后，同一位登录人不再反复询问。 */
+  declinedOperatorId = ''
   /** 当前客户模式的主站。断开绑定后空连接仍指向这里。 */
   homeOrigin = EASY_ORIGIN
 
@@ -135,6 +187,7 @@ export class EasyConnectionController {
     this.context = {
       ...emptyConnection(origin),
       lastOperatorId: this.context.lastOperatorId,
+      lastDisplayName: this.context.lastDisplayName,
       connectionVersion: this.context.connectionVersion,
       message: this.context.message
     }
@@ -144,6 +197,7 @@ export class EasyConnectionController {
     return {
       ...emptyConnection(this.homeOrigin),
       lastOperatorId: this.context.lastOperatorId,
+      lastDisplayName: this.context.lastDisplayName,
       connectionVersion: this.context.connectionVersion + 1,
       ...patch
     }
@@ -168,6 +222,7 @@ export class EasyConnectionController {
       easyOrigin: origin,
       easyTabId: tab.id,
       lastOperatorId: this.context.lastOperatorId,
+      lastDisplayName: this.context.lastDisplayName,
       connectionVersion,
       sessionStatus: 'pending',
       message: '正在读取该标签页的登录身份。'
@@ -196,6 +251,8 @@ export class EasyConnectionController {
       operatorId: observation.userId,
       lastOperatorId: observation.userId,
       displayName: (observation.displayName ?? '').slice(0, 80),
+      lastDisplayName: (observation.displayName ?? '').trim().slice(0, 80) || this.context.lastDisplayName,
+      accountOffer: null,
       sessionStatus: 'authenticated',
       lastCheckedAt: checkedAt,
       message: ''
@@ -249,12 +306,14 @@ export class EasyConnectionController {
     const tabId = raw.easyTabId
     if (tabId != null && (typeof tabId !== 'number' || !Number.isInteger(tabId))) return
     const lastOperatorId = typeof raw.lastOperatorId === 'string' ? raw.lastOperatorId : ''
+    const lastDisplayName = typeof raw.lastDisplayName === 'string' ? raw.lastDisplayName.slice(0, 80) : ''
     const connectionVersion = typeof raw.connectionVersion === 'number' && Number.isInteger(raw.connectionVersion) ? raw.connectionVersion : 0
     this.context = {
       ...emptyConnection(),
       easyOrigin: raw.easyOrigin,
       easyTabId: tabId ?? null,
       lastOperatorId,
+      lastDisplayName,
       connectionVersion,
       sessionStatus: tabId == null ? 'disconnected' : 'pending',
       message: tabId == null ? '尚未连接 EASY。' : '已恢复候选连接，需要重新检测会话。'
@@ -266,7 +325,10 @@ export class EasyConnectionController {
       easyOrigin: this.context.easyOrigin,
       easyTabId: this.context.easyTabId,
       lastOperatorId: this.context.operatorId || this.context.lastOperatorId,
-      connectionVersion: this.context.connectionVersion
+      connectionVersion: this.context.connectionVersion,
+      sessionStatus: this.context.sessionStatus,
+      lastDisplayName: this.context.lastDisplayName,
+      offerOperatorId: this.context.accountOffer?.operatorId ?? ''
     }
   }
 }
@@ -274,7 +336,10 @@ export class EasyConnectionController {
 export function sameConnectionSnapshot(left: ConnectionSnapshot | null, right: ConnectionSnapshot): boolean {
   if (!left) return false
   return left.easyOrigin === right.easyOrigin && left.easyTabId === right.easyTabId &&
-    left.lastOperatorId === right.lastOperatorId && left.connectionVersion === right.connectionVersion
+    left.lastOperatorId === right.lastOperatorId && left.connectionVersion === right.connectionVersion &&
+    (left.sessionStatus ?? '') === (right.sessionStatus ?? '') &&
+    (left.lastDisplayName ?? '') === (right.lastDisplayName ?? '') &&
+    (left.offerOperatorId ?? '') === (right.offerOperatorId ?? '')
 }
 
 export function freezeAccount(context: EasyConnectionContext): AccountContextSnapshot | null {

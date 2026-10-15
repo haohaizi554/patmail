@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { EasyTransport } from '../src/api/transport'
 import {
-  buildMailSubmit, dropPrefilledNoticeRecipient, limitMailItems, limitMailProcIds, limitMailSubmitShouldHalt, nextLimitMailAttempt, pickMailSubmitNodes, readLimitMailCustomer, readMailSubmit, selectionNeedsAddressChoice, submitLimitMailBatch,
+  buildMailSubmit, dropPrefilledNoticeRecipient, limitMailItems, limitMailProcIds, limitMailSubmitShouldHalt, nextLimitMailAttempt, pickMailSubmitNodes, readLimitMailCustomer, readMailSubmit, selectionNeedsAddressChoice, submitLimitMailBatch, summarizeLimitMailSubmit,
   type LimitMailSubmitItem
 } from '../src/customer/limit-mail-submit'
 import type { WorkflowNode } from '../src/workflow/types'
@@ -213,7 +213,7 @@ describe('limit mail submit', () => {
     expect(calls.some(item => item.startsWith('mailSubmit'))).toBe(false)
   })
 
-  it('does not create a second mail after an unconfirmed submit', async () => {
+  it('一件提交响应未确认只算这一件，同批第二件继续做', async () => {
     const calls: string[] = []
     const result = await submitLimitMailBatch(transport({
       limitMailCustomer: () => ({ ClientInfo: client(), objid: mail }),
@@ -224,11 +224,12 @@ describe('limit mail submit', () => {
       getUrgencyList: () => ({ ClientInfo: client(), UrgencyList: [{ urgency_id: urgency, urgency_code: 'CM', urgency_name: '普通', seq: 1 }] }),
       getFlowLastStatus: () => ({ ClientInfo: client(), last_status: null }),
       mailSubmit: () => ({ nope: true })
-    }, calls), user, [draft(), draft({ procId: proc2 })])
-    expect(result.results[0]?.state).toBe('unknown')
-    expect(result.results).toHaveLength(1)
-    expect(calls.filter(item => item.startsWith('limitMailCustomer'))).toHaveLength(1)
-    expect(calls.filter(item => item.startsWith('mailSubmit'))).toHaveLength(1)
+    }, calls), user, [draft(), draft({ procId: proc2, mailTypeId: 'bbbbbbbb-4bbb-4bbb-8bbb-bbbbbbbbbbbb' })])
+    expect(result.stopped).toBe(false)
+    expect(result.results.every(item => item.state === 'unknown')).toBe(true)
+    expect(result.results).toHaveLength(2)
+    expect(calls.filter(item => item.startsWith('limitMailCustomer'))).toHaveLength(2)
+    expect(calls.filter(item => item.startsWith('mailSubmit'))).toHaveLength(2)
   })
 
   it('stops when the site asks to confirm the agency and does not resubmit', async () => {
@@ -238,6 +239,26 @@ describe('limit mail submit', () => {
     }, calls), user, [draft()])
     expect(result.results[0]?.state).toBe('failed')
     expect(calls).toHaveLength(1)
+  })
+
+  it('不用发是明确结论，同一批后面那件照常提交', async () => {
+    const calls: string[] = []
+    const result = await submitLimitMailBatch(transport({
+      limitMailCustomer: () => ({ ClientInfo: client(), objid: mail }),
+      ...contacts(),
+      saveMailInfo: () => ({ ClientInfo: client({ Result: false, Status: true }) }),
+      getFlowInfo: () => flowInfo(),
+      getFlowSubmit: () => nodes([user]),
+      getUrgencyList: () => ({ ClientInfo: client(), UrgencyList: [{ urgency_id: urgency, urgency_code: 'CM', urgency_name: '普通', seq: 1 }] }),
+      getFlowLastStatus: () => ({ ClientInfo: client(), last_status: null }),
+      mailSubmit: () => ({ ClientInfo: client({ Result: true }) })
+    }, calls), user, [draft({ procId: proc, hold: 'skip' }), draft({ procId: proc2 })])
+    expect(result.stopped).toBe(false)
+    expect(result.results).toHaveLength(2)
+    expect(result.results[0]?.state).toBe('failed')
+    expect(result.results[0]?.message).toBe('客户要求这封提醒不用发，没有创建发文。')
+    expect(result.results[1]?.state).toBe('submitted')
+    expect(result.results[1]?.message).toContain('已提交')
   })
 
   it('writes the technical lead to the recipient and IPR plus sales to CC', async () => {
@@ -289,7 +310,42 @@ describe('limit mail submit', () => {
     expect(calls.some(item => item.startsWith('mailSubmit'))).toBe(false)
   })
 
-  it('同一客户也按勾选逐件创建，不会合成一封', async () => {
+  it('同一批人换顺序或带（仲）（补）仍并成一封，少一个人则分开', () => {
+    const proc3 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaf'
+    const rows = [
+      { procId: proc, caseVolume: 'CPA2510783CN' },
+      { procId: proc2, caseVolume: 'CW1P22538273CN' },
+      { procId: proc3, caseVolume: 'CW1P22518274CN' }
+    ]
+    const customer = '深圳奕易控动力科技有限公司'
+    const planned = limitMailItems({
+      procIds: rows.map(row => row.procId),
+      rows,
+      sheetRows: [
+        { ourVolume: 'CPA2510783CN', mailTypeId: mailType, customerName: customer, iprName: '金超,陈炬峰', mailCc: '商务' },
+        { ourVolume: 'CW1P22538273CN', mailTypeId: mailType, customerName: customer, iprName: '陈炬峰,金超（仲）', mailCc: '商务', iprArbitrated: true as const },
+        { ourVolume: 'CW1P22518274CN', mailTypeId: mailType, customerName: customer, iprName: '陈炬峰,金超（补）', mailCc: '商务' }
+      ],
+      mode: 'ipr',
+      address: 'auto'
+    })
+    expect(planned.ok && planned.items).toHaveLength(1)
+    if (!planned.ok) return
+    expect(planned.items.flatMap(limitMailProcIds).sort()).toEqual(rows.map(row => row.procId).sort())
+    const narrower = limitMailItems({
+      procIds: [proc, proc2],
+      rows,
+      sheetRows: [
+        { ourVolume: 'CPA2510783CN', mailTypeId: mailType, customerName: customer, iprName: '陈炬峰,金超' },
+        { ourVolume: 'CW1P22538273CN', mailTypeId: mailType, customerName: customer, iprName: '陈炬峰' }
+      ],
+      mode: 'ipr',
+      address: 'auto'
+    })
+    expect(narrower.ok && narrower.items).toHaveLength(2)
+  })
+
+  it('同客户同收件人的勾选并成一封，_file_ids 只列勾上的', async () => {
     const planned = limitMailItems({
       procIds: [proc, proc2],
       rows: [{ procId: proc, caseVolume: 'PA1' }, { procId: proc2, caseVolume: 'PA2' }],
@@ -299,9 +355,10 @@ describe('limit mail submit', () => {
       ],
       mode: 'ipr'
     })
-    expect(planned.ok && planned.items).toHaveLength(2)
+    expect(planned.ok && planned.items).toHaveLength(1)
     if (!planned.ok) return
-    expect(planned.items.every(item => item.mailStyle === '2' && limitMailProcIds(item).length === 1)).toBe(true)
+    expect(planned.items[0]?.mailStyle).toBe('1')
+    expect(planned.items.flatMap(limitMailProcIds).sort()).toEqual([proc, proc2].sort())
     const calls: string[] = []
     const fileIds: string[] = []
     const result = await submitLimitMailBatch(transport({
@@ -310,18 +367,25 @@ describe('limit mail submit', () => {
         return { ClientInfo: client(), objid: mail }
       },
       ...contacts(),
-      saveMailInfo: () => ({ ClientInfo: client({ Result: false, Status: true }) }),
+      saveMailInfo: params => {
+        const savedTo = params.get('mail_to')
+        if (savedTo) expect(decodeURIComponent(savedTo)).toBe('雷工(ipr@example.com);')
+        return { ClientInfo: client({ Result: false, Status: true }) }
+      },
       getFlowInfo: () => flowInfo(),
       getFlowSubmit: () => nodes([user]),
       getUrgencyList: () => ({ ClientInfo: client(), UrgencyList: [{ urgency_id: urgency, urgency_code: 'CM', urgency_name: '普通', seq: 1 }] }),
       getFlowLastStatus: () => ({ ClientInfo: client(), last_status: null }),
       mailSubmit: () => ({ ClientInfo: client({ Result: true }) })
     }, calls), user, planned.items)
-    expect(fileIds).toEqual([proc, proc2])
-    expect(calls.filter(item => item.startsWith('limitMailCustomer'))).toHaveLength(2)
-    expect(calls.filter(item => item.startsWith('mailSubmit'))).toHaveLength(2)
+    expect(fileIds).toEqual([`${proc};${proc2}`])
+    expect(calls.filter(item => item.startsWith('limitMailCustomer'))).toHaveLength(1)
+    expect(calls.filter(item => item.startsWith('mailSubmit'))).toHaveLength(1)
     expect(result.results.map(item => item.procId)).toEqual([proc, proc2])
-    expect(result.results.every(item => item.state === 'submitted' && !item.message.includes('合成一封'))).toBe(true)
+    expect(result.results.every(item => item.state === 'submitted')).toBe(true)
+    // 实际写进 EASY 的地址载荷随结果带回，提交总结弹窗靠它核对。
+    expect(result.results.every(item => item.to === '雷工(ipr@example.com);' && item.cc === '商务甲(sales@example.com);')).toBe(true)
+    expect(result.results[0]?.message).toContain('已把 2 件合成一封')
     const split = limitMailItems({
       procIds: [proc, proc2],
       rows: [{ procId: proc, caseVolume: 'PA1' }, { procId: proc2, caseVolume: 'PA2' }],
@@ -339,10 +403,14 @@ describe('limit mail submit', () => {
     const planned = limitMailItems({
       procIds,
       rows: procIds.map((procId, index) => ({ procId, caseVolume: `PA${index + 1}` })),
-      sheetRows: procIds.map((_, index) => ({ ourVolume: `PA${index + 1}`, mailTypeId: mailType, iprName: '雷工' })),
+      sheetRows: procIds.map((_, index) => ({ ourVolume: `PA${index + 1}`, mailTypeId: mailType, customerName: '甲客户', iprName: '雷工' })),
       mode: 'ipr'
     })
-    expect(planned.ok && planned.items).toHaveLength(21)
+    // 同收件人的 21 件并成一封，_file_ids 分号连接。
+    expect(planned.ok && planned.items).toHaveLength(1)
+    if (!planned.ok) return
+    expect(planned.items[0]?.mailStyle).toBe('1')
+    expect(limitMailProcIds(planned.items[0]).sort()).toEqual([...procIds].sort())
   })
 
   it('refuses a volume that has no single mail type', () => {
@@ -415,7 +483,13 @@ describe('limit mail submit', () => {
     }
     expect(limitMailSubmitShouldHalt('没有提交到审核人。EASY 网关异常。再点「提交到 EASY」会沿用这封发文，不会重新创建。')).toBe(false)
     expect(limitMailSubmitShouldHalt('没有提交到审核人。请求超时，请重试。')).toBe(false)
-    expect(limitMailSubmitShouldHalt('没有提交到审核人。创建发文的响应无法确认，没有再次创建。')).toBe(true)
+    expect(limitMailSubmitShouldHalt('没有提交到审核人。创建发文的响应无法确认，没有再次创建。')).toBe(false)
+    expect(limitMailSubmitShouldHalt('客户要求这封提醒不用发，没有创建发文。')).toBe(false)
+    expect(limitMailSubmitShouldHalt('写开关已关闭，没有提交到 EASY。')).toBe(true)
+    expect(limitMailSubmitShouldHalt('EASY 登录已失效，请在原网站重新登录。')).toBe(true)
+    const heldSummary = summarizeLimitMailSubmit([{ procId: proc, mailId: '', state: 'failed', message: '客户要求这封提醒不用发，没有创建发文。' }], true)
+    expect(heldSummary).toBe('客户要求这封提醒不用发，没有创建发文。')
+    expect(summarizeLimitMailSubmit([{ procId: proc, mailId: mail, state: 'submitted', message: '已提交给当前登录人审核。' }], false)).toBe('已提交 1 件给当前登录人审核。')
   })
 
   it('提交按钮跟着当前勾选在一个和两个之间来回变', () => {
@@ -489,27 +563,117 @@ describe('limit mail submit', () => {
     const two = limitMailItems({ procIds: [proc, proc2], rows, sheetRows, mode: 'ipr' })
     expect(two.ok).toBe(true)
     if (!two.ok) return
-    expect(two.items).toHaveLength(2)
-    expect(two.items.every(item => item.mailStyle === '2' && limitMailProcIds(item).length === 1)).toBe(true)
+    expect(two.items).toHaveLength(1)
+    expect(two.items[0]?.mailStyle).toBe('1')
     expect(two.items.flatMap(limitMailProcIds).sort()).toEqual([proc, proc2].sort())
     expect(two.items.flatMap(limitMailProcIds)).not.toContain(proc3)
   })
 
-  it('直接全选不采用仲裁写回的收件人，勾几件发几件', () => {
+  it('直接全选不采用仲裁写回的收件人，原表有名字的行照表格提交', () => {
+    const proc3 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaab1'
     const rows = [
       { procId: proc, caseVolume: 'PA1' },
-      { procId: proc2, caseVolume: 'PA2' }
+      { procId: proc2, caseVolume: 'PA2' },
+      { procId: proc3, caseVolume: 'PA3' }
     ]
     const sheetRows = [
       { ourVolume: 'PA1', mailTypeId: mailType, customerName: '甲客户', iprName: '不用发', iprArbitrated: true as const },
-      { ourVolume: 'PA2', mailTypeId: mailType, customerName: '甲客户', iprName: '雷工', iprArbitrated: true as const }
+      { ourVolume: 'PA2', mailTypeId: mailType, customerName: '甲客户', iprName: '雷工', iprArbitrated: true as const },
+      { ourVolume: 'PA3', mailTypeId: mailType, customerName: '甲客户', iprName: '雷群安' }
     ]
-    const forced = limitMailItems({ procIds: [proc, proc2], rows, sheetRows, mode: 'ipr', address: 'all' })
+    const forced = limitMailItems({ procIds: [proc, proc2, proc3], rows, sheetRows, mode: 'ipr', address: 'all' })
     expect(forced.ok).toBe(true)
     if (!forced.ok) return
+    // 直接全选不执行「不用发」：件 1、2 都清成全选兜底、同键并成一封；原表有值的件 3 独立一封。
     expect(forced.items).toHaveLength(2)
-    expect(forced.items.every(item => item.contacts === 'all' && item.hold === undefined && item.iprName === '' && item.mailStyle === '2')).toBe(true)
-    expect(forced.items.flatMap(limitMailProcIds).sort()).toEqual([proc, proc2].sort())
+    const fallback = forced.items.find(item => limitMailProcIds(item).includes(proc))
+    const plain = forced.items.find(item => limitMailProcIds(item).includes(proc3))
+    expect(fallback && limitMailProcIds(fallback).sort()).toEqual([proc, proc2].sort())
+    expect(fallback?.contacts).toBe('all')
+    expect(fallback?.iprName).toBe('')
+    expect(fallback?.hold).toBeUndefined()
+    expect(fallback?.arbitrated).toBeUndefined()
+    expect(plain && limitMailProcIds(plain)).toEqual([proc3])
+    expect(plain?.contacts).toBeUndefined()
+    expect(plain?.iprName).toBe('雷群安')
+    expect(forced.items.every(item => item.mailStyle === '1')).toBe(true)
+    expect(forced.items.flatMap(limitMailProcIds).sort()).toEqual([proc, proc2, proc3].sort())
+  })
+
+  it('草稿建出来时预填的档案杂值不写进收件人，地址按写回值整列重写', async () => {
+    const savedTo = { value: '' }
+    const savedCc = { value: '' }
+    const dirty = mailInfo()
+    const row = dirty.MailInfo?.[0]
+    if (!row) throw new Error('mailInfo 需要 MailInfo 行')
+    row.mail_to = 'Archiv69@163.com;38199642@qq.com;'
+    row.mail_cc = 'chenjch02@pcl.ac.cn;'
+    const result = await submitLimitMailBatch(transport({
+      limitMailCustomer: () => ({ ClientInfo: client(), objid: mail }),
+      ...contacts(),
+      getMailInfo: () => dirty,
+      saveMailInfo: params => {
+        savedTo.value = params.get('mail_to') ?? ''
+        savedCc.value = params.get('mail_cc') ?? ''
+        return { ClientInfo: client({ Result: false, Status: true }) }
+      },
+      getFlowInfo: () => flowInfo(),
+      getFlowSubmit: () => nodes([user]),
+      getUrgencyList: () => ({ ClientInfo: client(), UrgencyList: [{ urgency_id: urgency, urgency_code: 'CM', urgency_name: '普通', seq: 1 }] }),
+      getFlowLastStatus: () => ({ ClientInfo: client(), last_status: null }),
+      mailSubmit: () => ({ ClientInfo: client({ Result: true }) })
+    }, []), user, [draft()])
+    expect(result.results[0]?.state).toBe('submitted')
+    expect(decodeURIComponent(savedTo.value)).toBe('雷工(ipr@example.com);')
+    expect(decodeURIComponent(savedCc.value)).toBe('商务甲(sales@example.com);')
+  })
+
+  it('同一文号两行按处理事项精确对行，文号去空格比较，客户文号也能对上', () => {
+    const procRemind = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaab2'
+    const procNational = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaab3'
+    const otherType = 'bbbbbbbb-4bbb-4bbb-8bbb-bbbbbbbbbbbb'
+    const rows = [
+      { procId: procRemind, caseVolume: 'PA1', ctrlProc: '提醒申请PCT' },
+      { procId: procNational, caseVolume: ' PA1 ', ctrlProc: '进国家' }
+    ]
+    const sheetRows = [
+      { ourVolume: 'PA1', procLabel: '提醒申请PCT', mailTypeId: mailType, customerName: '甲客户', iprName: '雷工' },
+      { ourVolume: 'PA1', procLabel: '进国家', mailTypeId: otherType, customerName: '甲客户', iprName: '韩玉奎' }
+    ]
+    const planned = limitMailItems({ procIds: [procRemind, procNational], rows, sheetRows, mode: 'ipr' })
+    expect(planned.ok).toBe(true)
+    if (!planned.ok) return
+    const remind = planned.items.find(item => item.procId === procRemind)
+    const national = planned.items.find(item => item.procId === procNational)
+    expect(remind?.iprName).toBe('雷工')
+    expect(remind?.mailTypeId).toBe(mailType)
+    expect(national?.iprName).toBe('韩玉奎')
+    expect(national?.mailTypeId).toBe(otherType)
+
+    const byCustomerVolume = limitMailItems({
+      procIds: [procRemind],
+      rows: [{ procId: procRemind, caseVolume: 'K1' }],
+      sheetRows: [{ ourVolume: 'PA1', customerVolume: 'K1', mailTypeId: mailType, customerName: '甲客户', iprName: '雷工' }],
+      mode: 'ipr'
+    })
+    expect(byCustomerVolume.ok && byCustomerVolume.items[0]?.iprName).toBe('雷工')
+  })
+
+  it('lead 模式按钮分叉看技术负责人，ipr 模式看 IPR', () => {
+    const limit = [
+      { procId: 'p-lead-ok', caseVolume: 'PA1', ctrlProc: '提醒申请PCT' },
+      { procId: 'p-lead-missing', caseVolume: 'PA2', ctrlProc: '提醒申请PCT' }
+    ]
+    const sheet = [
+      { ourVolume: 'PA1', procLabel: '提醒申请PCT', iprName: '', leadName: '王工' },
+      { ourVolume: 'PA2', procLabel: '提醒申请PCT', iprName: '雷群安', leadName: '' }
+    ]
+    expect(selectionNeedsAddressChoice(limit, sheet, [], undefined, 'lead')).toBe(true)
+    expect(selectionNeedsAddressChoice(limit, sheet, ['p-lead-ok'], undefined, 'lead')).toBe(false)
+    expect(selectionNeedsAddressChoice(limit, sheet, ['p-lead-missing'], undefined, 'lead')).toBe(true)
+    expect(selectionNeedsAddressChoice(limit, sheet, [], undefined, 'ipr')).toBe(true)
+    expect(selectionNeedsAddressChoice(limit, sheet, ['p-lead-ok'], undefined, 'ipr')).toBe(true)
+    expect(selectionNeedsAddressChoice(limit, sheet, ['p-lead-missing'], undefined, 'ipr')).toBe(false)
   })
 
   it('合并按钮在技术负责人模式也兜底：没有负责人的行走全选', () => {

@@ -13,7 +13,6 @@ import { paintTaskCheckProgress, resetTaskCheckProgress } from '../check-progres
 import { applyArbitrationReply, arbitrationAllowed, checkedSourceSheets, iprArbitrationWaves, isPctWorkbookSheet, missedSourceSheets, pctRowsFromWorkbook, shouldAutoArbitrate, type ArbitrationDecision } from '../../customer/pct-workbook'
 import { applyPctMailTypes, buildPctTask, clonePctTask, matchSheetCtrlProcs, PCT_WORKFLOW_TASK_KEY, procGapNotes, readWorkflowTask, recarryCustomerContacts, summarizePctTask, volumesOf, writeWorkflowTask } from '../../customer/pct-sheet'
 import type { CustomerQueryProfile, PctTaskRow } from '../../customer/types'
-import { groupWorkflowRows } from '../../customer/workflow-mail'
 import { arbitratedMark, carriedMark, sheetDisplayName, sheetRecipientNames, usesInventorSheet } from '../../customer/pct-recipients'
 import { inventorCustomerNames, isRunnableWorkflow, recipientModeOf } from '../../workflow/catalog'
 import { downloadXlsxSheets, readXlsxSheets } from '../../customer/xlsx-table'
@@ -26,7 +25,7 @@ import { isQueryGuid } from '../../query/query-validator'
 import { flushRecovery, holdRecovery, peekRecovery, recallRecovery, scheduleRecovery, systemScope } from '../../recovery/wal-ledger'
 import { assignColumnWidths } from '../../shell/column-fit'
 import { MessageType, type MessageBridge } from '../../shared/message'
-import { scopeFromConnection } from '../../shared/connection'
+import { sceneOwnerChanged, scopeFromConnection } from '../../shared/connection'
 import { useWorkspace } from '../composables/useWorkspace'
 import { endProgress, logProgress, progressSummaryLine } from '../dialog'
 import { FILE_MANAGE_ID, packagedPctWorkflow, pctRuntimeFrom, workflowSender, type WorkflowCatalog, type WorkflowDefinition } from '../../workflow/catalog'
@@ -497,7 +496,8 @@ watch(() => `${connection.value.easyOrigin}\n${connection.value.operatorId}`, (n
   const prevOrigin = splitAt < 0 ? previous : previous.slice(0, splitAt)
   const prevOperator = splitAt < 0 ? '' : previous.slice(splitAt + 1)
   const originChanged = prevOrigin !== connection.value.easyOrigin
-  const operatorChanged = isQueryGuid(prevOperator) && isQueryGuid(connection.value.operatorId) && prevOperator.toLowerCase() !== connection.value.operatorId.toLowerCase()
+  const sceneOwner = deskOwner || (isQueryGuid(prevOperator) ? prevOperator : '')
+  const operatorChanged = sceneOwnerChanged(sceneOwner, connection.value.operatorId)
   if (!originChanged && !operatorChanged) {
     if (isQueryGuid(connection.value.operatorId)) {
       const hadOwner = Boolean(deskOwner)
@@ -672,8 +672,13 @@ function icKey(volume: string, procLabel: string): string {
   return `${volumeKey(volume)}\n${procLabel.trim()}`
 }
 
+/** 这一行用来对状态的文号：我方文号空着时用客户文号，进国家表里只有客户文号的行也能对上。 */
+function rowVolumeKey(row: PctTaskRow): string {
+  return row.ourVolume.trim() || row.customerVolume
+}
+
 function limitReview(row: PctTaskRow): string {
-  return limitByKey[icKey(row.ourVolume, row.procLabel)] ?? ''
+  return limitByKey[icKey(rowVolumeKey(row), row.procLabel)] ?? ''
 }
 
 function sheetMemo(row: PctTaskRow): string {
@@ -683,7 +688,7 @@ function sheetMemo(row: PctTaskRow): string {
 
 function sheetStatus(row: PctTaskRow): { found: string; review: string } {
   const base = sheetReview(row)
-  if (abnormalKeys.value.has(icKey(row.ourVolume, row.procLabel))) return { found: base.found || '有', review: '异常' }
+  if (abnormalKeys.value.has(icKey(rowVolumeKey(row), row.procLabel))) return { found: base.found || '有', review: '异常' }
   return base
 }
 
@@ -694,7 +699,7 @@ function rowsForArbitration(): PctTaskRow[] {
 function sheetReview(row: PctTaskRow): { found: string; review: string } {
   const published = icEpoch.value
   const fromLimit = limitReview(row)
-  const hit = published >= 0 ? icHits[icKey(row.ourVolume.trim() || row.customerVolume, row.procLabel)] : undefined
+  const hit = published >= 0 ? icHits[icKey(rowVolumeKey(row), row.procLabel)] : undefined
   if (hit) {
     if (hit.unread) return { found: '没查成', review: '—' }
     if (hit.statusUnread) return { found: '有', review: '状态没读到' }
@@ -725,7 +730,7 @@ const flowByKey = computed(() => {
   for (const row of rows.value) {
     const review = sheetStatus(row).review
     if (!review || review === '—' || review === '…') continue
-    out[icKey(row.ourVolume.trim() || row.customerVolume, row.procLabel)] = review
+    out[icKey(rowVolumeKey(row), row.procLabel)] = review
   }
   return out
 })
@@ -1012,7 +1017,7 @@ function onLimitResult(payload: { items: LimitMonitorRow[]; gates: Record<string
       }
       continue
     }
-    const review = gate === 'pending' ? '已提交审核' : '还没提交审核'
+    const review = gate === 'pending' ? '已提交审核' : gate === 'done' ? '已经审核通过' : '还没提交审核'
     if (limitByKey[key] !== review) limitByKey[key] = review
   }
   if (!payload.checking) {
@@ -1079,12 +1084,13 @@ function buildPreview(): void {
   }
   const sender = resolvedSender.value
   const reviewer = reviewerOf()
-  const groups = groupWorkflowRows('1', rows.value, specials.value, recipientMode.value)
+  // 提交是一件一封，预览也按一行一封生成，不再按同客户合并。
+  const groups = rows.value.map(row => [row])
   const built = groups.map(group => {
-    const types = [...new Set(group.map(row => row.mailTypeId).filter((item): item is string => Boolean(item)))]
-    const typeId = types.length === 1 ? types[0] : ''
-    const typeName = types.length === 1 ? (group.find(row => row.mailTypeId === typeId)?.mailTypeLabel ?? '') : ''
-    const current = profileFor(group[0]?.customerName ?? '')
+    const row = group[0] ?? group[0]
+    const typeId = row?.mailTypeId ?? ''
+    const typeName = row?.mailTypeLabel ?? ''
+    const current = profileFor(row?.customerName ?? '')
     const filled = fillFromRules(current, filesOf(group), props.rules, props.operatorId, props.signatureText)
     const to = addresses(group, 'to')
     const cc = addresses(group, 'cc')
@@ -1100,7 +1106,6 @@ function buildPreview(): void {
       reviewer,
       sender
     })
-    if (types.length > 1) mail.gaps.push('这几行对上了不同的发文类型，合不成一封。')
     if ((to || filled.to) && !(to || filled.to).includes('@')) mail.gaps.push('收件人还是表格里的称呼。')
     return {
       mail,
@@ -1148,11 +1153,16 @@ async function startSheetQuery(): Promise<void> {
   }
   queryProcs.value = ids.map((id, index) => ({
     id,
-    volumes: joinCaseVolumes(rows.value.filter(row => row.procLabel.trim() === (resolved.names[index] ?? '')).map(row => row.ourVolume.trim()).filter(Boolean))
+    // 我方文号空着的行用客户文号查，进国家表只有客户文号的行才进得来。
+    volumes: joinCaseVolumes(rows.value.filter(row => row.procLabel.trim() === (resolved.names[index] ?? '')).map(row => row.ourVolume.trim() || row.customerVolume.trim()).filter(Boolean))
   }))
   queryCaseVolume.value = ''
   querySeed.value = { ctrl_proc: ids.join(',') }
-  if (ids.length > 1) limitNote.value = `表格里有 ${ids.length} 种处理事项。查询一次带上这些事项和全部文号，一行只会命中其中一项。`
+  const notes: string[] = []
+  if (ids.length > 1) notes.push(`表格里有 ${ids.length} 种处理事项。查询一次带上这些事项和全部文号，一行只会命中其中一项。`)
+  const customerOnly = rows.value.filter(row => !row.ourVolume.trim() && row.customerVolume.trim()).length
+  if (customerOnly) notes.push(`${customerOnly} 行只有客户文号，期限监控按客户文号这栏带查。`)
+  if (notes.length) limitNote.value = notes.join('')
   queryToken.value += 1
   queryOpen.value = true
   void lookupCases(token)
@@ -1721,7 +1731,7 @@ function definitionHint(item: WorkflowDefinition | null): string {
         </colgroup>
         <thead><tr><th>我方文号</th><th>客户</th><th>客户文号</th><th>处理事项</th><th>发文类型</th><th>收件人</th><th>抄送</th><th>查询结果</th><th>审核状态</th></tr></thead>
         <tbody>
-          <tr v-for="row in rowsOnSheetPage(n)" :key="row.ourVolume + '\n' + row.procLabel" v-memo="[row, sheetMemo(row)]" :class="{ 'is-pending': sheetStatus(row).review === MAILED_UNFINISHED_REVIEW }">
+          <tr v-for="row in rowsOnSheetPage(n)" :key="row.ourVolume + '\n' + row.customerVolume + '\n' + row.procLabel" v-memo="[row, sheetMemo(row)]" :class="{ 'is-pending': sheetStatus(row).review === MAILED_UNFINISHED_REVIEW }">
             <td :class="{ 'volume-corrected': row.ourVolumeCorrected }"><span class="clip" v-hint.clip="row.ourVolume">{{ row.ourVolume }}</span></td>
             <td><span class="clip" v-hint.clip="row.customerName || '表格里没有'">{{ row.customerName || '表格里没有' }}</span></td>
             <td :class="{ 'volume-corrected': row.customerVolumeCorrected }"><span class="clip" v-hint.clip="row.customerVolume || '无'">{{ row.customerVolume || '无' }}</span></td>

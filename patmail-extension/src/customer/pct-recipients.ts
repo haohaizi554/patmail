@@ -172,6 +172,11 @@ function listedNames(raw: string): string[] {
   return [...new Set(raw.split(/[、,，;；]/).map(item => item.trim()).filter(item => item && !/^(无|空|没有|不抄送|拿不准|不用发|只发业务)$/.test(item)))]
 }
 
+/** 仲裁写回「发明人」指这一行表格里的第一客户联系人，只有人名能拿来对发文联系人。 */
+function wantedNames(row: PctTaskRow): string[] {
+  return listedNames(row.iprName).map(name => name === '发明人' ? row.contactName.trim() : name).filter(Boolean)
+}
+
 function addSales(
   contacts: MailContactRow[],
   bucket: Array<{ name: string; email: string }>,
@@ -214,7 +219,7 @@ export function planPctRecipients(
       if (found.note) notes.push(found.note)
       pushPerson(toAdded, seenTo, found.person)
     }
-    for (const name of [...new Set(rows.map(row => row.iprName.trim()).filter(Boolean))]) {
+    for (const name of [...new Set(rows.flatMap(row => listedNames(row.iprName).filter(item => item !== '发明人')))]) {
       const found = iprOf(contacts, name)
       if (found.note) notes.push(found.note)
       pushPerson(ccAdded, seenCc, found.person)
@@ -231,7 +236,7 @@ export function planPctRecipients(
     if (arbitrated.length !== rows.length) {
       return { to: existing.to, cc: existing.cc, notes: ['这几行里有的按仲裁、有的按原表，没有改。请拆开。'] }
     }
-    for (const name of [...new Set(rows.flatMap(row => listedNames(row.iprName)))]) {
+    for (const name of [...new Set(rows.flatMap(row => wantedNames(row)))]) {
       const found = personByName(contacts, name, '收件人')
       if (found.note) notes.push(found.note)
       pushPerson(toAdded, seenTo, found.person)

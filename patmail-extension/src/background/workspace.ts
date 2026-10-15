@@ -7,7 +7,7 @@ import type { CustomerQueryProfile } from '../customer/types'
 import { readMailRules } from '../mail/repository'
 import type { MailRuleBundle } from '../mail/types'
 import type { QueryTemplate } from '../query/query-types'
-import { chooseAppTab, EasyConnectionController, emptyConnection, accountScopeMatches, freezeAccount, sameAccountContext, tabOrigin, type AccountContextSnapshot, type BrowserTabRef, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope, type SessionObservation } from '../shared/connection'
+import { chooseAppTab, EasyConnectionController, emptyConnection, accountScopeMatches, freezeAccount, resumeLoginChoice, sameAccountContext, sameOperatorId, tabOrigin, type AccountContextSnapshot, type BrowserTabRef, type EasyConnectionContext, type EasyTabCandidate, type ExpectedAccountScope, type SessionObservation } from '../shared/connection'
 import { caseContactExportBlock } from '../customer/skills'
 import { appendFileManageRun, enqueueFileManageWrite, fileManageRunKey, parseFileManageRuns } from '../customer/file-manage-runs'
 import { isMessage, workspaceForwardBlock, MessageType, type AppMessage, type BackgroundResponse, type CreatedTaskResult, type FileManageRun } from '../shared/message'
@@ -230,8 +230,9 @@ export async function recheckBoundSession(host: WorkspaceHost): Promise<'same' |
   const version = host.connection.context.connectionVersion
   const operator = host.connection.context.operatorId
   await readBoundSession(host)
+  if (host.connection.context.accountOffer) return 'changed'
   if (host.connection.context.connectionVersion !== version) return 'changed'
-  if (operator && host.connection.context.operatorId !== operator) return 'changed'
+  if (operator && !sameOperatorId(operator, host.connection.context.operatorId)) return 'changed'
   if (host.connection.context.sessionStatus !== 'authenticated') return 'invalid'
   return 'same'
 }
@@ -288,6 +289,20 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
       ...account
     })
   }
+  if (action.action === 'declineAccountSwitch') {
+    const offered = host.connection.context.accountOffer?.operatorId ?? ''
+    if (offered) host.connection.declinedOperatorId = offered
+    host.connection.context = {
+      ...host.connection.context,
+      operatorId: '',
+      displayName: '',
+      accountOffer: null,
+      sessionStatus: host.connection.context.sessionStatus === 'authenticated' ? 'unauthenticated' : host.connection.context.sessionStatus,
+      message: '仍留在上一位登录人的现场。换回原来的账号即可继续。'
+    }
+    remember(host)
+    return workspaceResult({ ok: true, message: host.connection.context.message, connection: host.connection.context })
+  }
   if (action.action === 'bind') {
     const tabs = await modeTabs(host)
     const chosen = tabs.find(tab => tab.id === action.tabId)
@@ -296,7 +311,8 @@ export async function handleWorkspaceMessage(message: AppMessage, host: Workspac
     }
     const begun = host.connection.beginBind(chosen)
     if (!begun.ok) return workspaceResult({ ok: false, message: begun.message, connection: host.connection.context, tabs })
-    await readBoundSession(host)
+    await readBoundSession(host, 0, true)
+    if (host.connection.context.sessionStatus === 'authenticated') host.connection.declinedOperatorId = ''
     const account = await readAccount(host)
     if (!account) return staleResult(host)
     return workspaceResult({ ok: host.connection.context.sessionStatus === 'authenticated', message: host.connection.context.message, connection: host.connection.context, tabs, ...account })
@@ -610,9 +626,62 @@ function stillUnbound(host: WorkspaceHost, version: number): boolean {
   return host.connection.context.easyTabId == null && host.connection.context.connectionVersion === version
 }
 
+const SESSION_READ_MS = 12_000
+
+/** 内容脚本没回话时不能一直等，否则后面的登录检测全部排在这一次后面。 */
+function readTabSession(host: WorkspaceHost, tabId: number): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('登录检测超时。')), SESSION_READ_MS)
+    host.sendToTab(tabId, { type: MessageType.CheckSession }).then(
+      value => { clearTimeout(timer); resolve(value) },
+      error => { clearTimeout(timer); reject(error) }
+    )
+  })
+}
+
+/**
+ * 登录人和现场主人不是同一位时先挂起，不写入新身份。
+ * 返回 true 表示这一次没有接上，调用方不要再 beginBind。
+ */
+function holdForeignLogin(host: WorkspaceHost, tabId: number, userId: string, displayName: string): boolean {
+  const previous = host.connection.context.operatorId || host.connection.context.lastOperatorId
+  if (resumeLoginChoice(previous, userId) !== 'ask') return false
+  if (sameOperatorId(host.connection.declinedOperatorId, userId)) {
+    if (host.connection.context.sessionStatus === 'authenticated' || host.connection.context.accountOffer) {
+      host.connection.context = {
+        ...host.connection.context,
+        operatorId: '',
+        displayName: '',
+        accountOffer: null,
+        sessionStatus: 'unauthenticated',
+        message: '仍留在上一位登录人的现场。换回原来的账号即可继续。'
+      }
+      remember(host)
+    }
+    return true
+  }
+  const offer = host.connection.context.accountOffer
+  if (offer && sameOperatorId(offer.operatorId, userId) && offer.tabId === tabId) return true
+  host.connection.context = {
+    ...host.connection.context,
+    operatorId: '',
+    displayName: '',
+    accountOffer: {
+      operatorId: userId,
+      displayName: displayName.trim().slice(0, 80),
+      tabId
+    },
+    sessionStatus: 'unauthenticated',
+    lastCheckedAt: new Date().toISOString(),
+    message: '登录人和现场不是同一位。'
+  }
+  remember(host)
+  return true
+}
+
 async function observeTab(host: WorkspaceHost, tabId: number): Promise<SessionObservation | null> {
   try {
-    const response = await host.sendToTab(tabId, { type: MessageType.CheckSession })
+    const response = await readTabSession(host, tabId)
     console.log('[patmail-bg] observeTab response', tabId, response)
     if (!isMessage(response) || response.type !== MessageType.SessionResult) {
       return { ok: false, message: '无法读取该标签页的登录状态。' }
@@ -654,9 +723,8 @@ async function ensureEasySession(host: WorkspaceHost): Promise<EasyTabCandidate[
       console.log('[patmail-bg] bound tab found, reading session', boundId)
       await readBoundSession(host)
       console.log('[patmail-bg] after readBoundSession', host.connection.context.sessionStatus, host.connection.context.operatorId)
-      const status = host.connection.context.sessionStatus
-      if (status === 'authenticated') return tabs
-      if (status !== 'expired' && status !== 'unauthenticated') return tabs
+      if (host.connection.context.sessionStatus === 'authenticated' || host.connection.context.accountOffer) return tabs
+      // 超时、失效、读失败都不要停在旧绑定上。接着看现在到底是谁登录。
       host.connection.detach(boundId)
       remember(host)
     } else {
@@ -678,9 +746,13 @@ async function ensureEasySession(host: WorkspaceHost): Promise<EasyTabCandidate[
   console.log('[patmail-bg] loggedIn count', loggedIn.length)
   const operators = new Set(loggedIn.map(item => item.observation.userId))
   if (operators.size === 1 && loggedIn[0]) {
-    const begun = host.connection.beginBind(loggedIn[0].tab)
+    const found = loggedIn[0]
+    const userId = found.observation.userId ?? ''
+    if (holdForeignLogin(host, found.tab.id, userId, found.observation.displayName ?? '')) return tabs
+    const begun = host.connection.beginBind(found.tab)
     if (begun.ok) {
-      host.connection.applySession(loggedIn[0].observation, host.connection.context.connectionVersion)
+      host.connection.applySession(found.observation, host.connection.context.connectionVersion)
+      host.connection.declinedOperatorId = ''
       if (loggedIn.length > 1) host.connection.context = { ...host.connection.context, message: '已连接到当前登录账号。' }
       remember(host)
     }
@@ -724,7 +796,7 @@ export async function resumeEasySession(host: WorkspaceHost): Promise<void> {
   host.persist?.(host.connection.context)
 }
 
-async function readBoundSession(host: WorkspaceHost, attempt = 0): Promise<void> {
+async function readBoundSession(host: WorkspaceHost, attempt = 0, adoptForeign = false): Promise<void> {
   const target = await boundTab(host)
   if (!target.ok) return
   const version = host.connection.context.connectionVersion
@@ -734,10 +806,10 @@ async function readBoundSession(host: WorkspaceHost, attempt = 0): Promise<void>
     if (attempt >= 2 || host.connection.context.easyTabId !== tabId) return
     await new Promise(resolve => setTimeout(resolve, 250))
     if (host.connection.context.easyTabId !== tabId) return
-    await readBoundSession(host, attempt + 1)
+    await readBoundSession(host, attempt + 1, adoptForeign)
   }
   try {
-    const response = await host.sendToTab(tabId, { type: MessageType.CheckSession })
+    const response = await readTabSession(host, tabId)
     console.log('[patmail-bg] readBoundSession response', tabId, response)
     if (host.connection.context.easyTabId !== tabId) return
     if (host.connection.context.connectionVersion !== version) {
@@ -759,15 +831,18 @@ async function readBoundSession(host: WorkspaceHost, attempt = 0): Promise<void>
       remember(host)
       return
     }
+    const data = response.payload.data
+    if (!adoptForeign && data.status === 'authenticated' && data.userId && holdForeignLogin(host, tabId, data.userId, data.displayName ?? '')) return
     host.connection.applySession({
       ok: true,
-      status: response.payload.data.status,
-      userId: response.payload.data.userId,
-      displayName: response.payload.data.displayName,
-      checkedAt: response.payload.data.checkedAt,
-      message: response.payload.data.message
+      status: data.status,
+      userId: data.userId,
+      displayName: data.displayName,
+      checkedAt: data.checkedAt,
+      message: data.message
     }, version)
-    if (previous && host.connection.context.operatorId && previous !== host.connection.context.operatorId) {
+    if (host.connection.context.sessionStatus === 'authenticated') host.connection.declinedOperatorId = ''
+    if (previous && host.connection.context.operatorId && !sameOperatorId(previous, host.connection.context.operatorId)) {
       host.connection.context = { ...host.connection.context, message: '已切换到当前标签页的登录用户。' }
     }
     remember(host)

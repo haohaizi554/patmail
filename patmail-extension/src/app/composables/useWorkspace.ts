@@ -88,7 +88,10 @@ function snapshotOf(current: EasyConnectionContext): ConnectionSnapshot {
     easyOrigin: current.easyOrigin,
     easyTabId: current.easyTabId,
     lastOperatorId: current.operatorId || current.lastOperatorId,
-    connectionVersion: current.connectionVersion
+    connectionVersion: current.connectionVersion,
+    sessionStatus: current.sessionStatus,
+    lastDisplayName: current.lastDisplayName,
+    offerOperatorId: current.accountOffer?.operatorId ?? ''
   }
 }
 
