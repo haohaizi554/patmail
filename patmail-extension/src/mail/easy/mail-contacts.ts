@@ -152,7 +152,10 @@ export async function loadMailContactText(
   const loaded = await Promise.all(jobs.map(async spec => {
     const params = mailContactParams(spec, input)
     if (!params) return { spec, result: apiError('INVALID_QUERY', `${spec.label}缺少编号。`) }
-    return { spec, result: await post(spec.operation, params, signal) }
+    let result = await post(spec.operation, params, signal)
+    // 案件联系人曾在 60 秒被掐掉，整封就停在「没有写明原因」。读请求再试一次，不会多建一封。
+    if (!result.ok && result.error.code === 'REQUEST_TIMEOUT') result = await post(spec.operation, params, signal)
+    return { spec, result }
   }))
   for (const { spec, result } of loaded) {
     if (!result.ok) {

@@ -490,6 +490,7 @@ describe('limit mail submit', () => {
     const heldSummary = summarizeLimitMailSubmit([{ procId: proc, mailId: '', state: 'failed', message: '客户要求这封提醒不用发，没有创建发文。' }], true)
     expect(heldSummary).toBe('客户要求这封提醒不用发，没有创建发文。')
     expect(summarizeLimitMailSubmit([{ procId: proc, mailId: mail, state: 'submitted', message: '已提交给当前登录人审核。' }], false)).toBe('已提交 1 件给当前登录人审核。')
+    expect(summarizeLimitMailSubmit([{ procId: proc, mailId: mail, state: 'created', message: '请求超时，请重试。再点「提交到 EASY」会沿用这封发文，不会重新创建。' }], false)).toBe('没有提交到审核人。请求超时，请重试。再点「提交到 EASY」会沿用这封发文，不会重新创建。')
   })
 
   it('提交按钮跟着当前勾选在一个和两个之间来回变', () => {

@@ -1,6 +1,11 @@
 import { reactive } from 'vue'
 
-export type TaskCheckStatus = 'idle' | 'run' | 'done' | 'fail'
+export type TaskCheckStatus = 'idle' | 'run' | 'hold' | 'done' | 'fail'
+
+/** 登录掉线或会话还没接上。这种失败先停住整表，等同一位接回再继续，不要把这一批记成没查成。 */
+export function sessionInterrupted(message: string): boolean {
+  return /登录|会话已变化|尚未确认|尚未连接|标签页已失效/.test(message)
+}
 
 export const taskCheckProgress = reactive({
   visible: false,

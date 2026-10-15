@@ -86,6 +86,11 @@ const pageIds = computed(() => shown.value.filter(row => !blocked(row)).map(row 
 const pageAll = computed(() => pageIds.value.length > 0 && pageIds.value.every(id => props.selected.includes(id)))
 const everyIds = computed(() => pickableIds())
 const plainIds = computed(() => pickableIds(new Set(props.plainProcIds)))
+/** 取消全选清的是所有页里已勾的可选项，数字要跟这次会清掉的数量一致，不能只写本页。 */
+const clearCount = computed(() => {
+  const clearing = new Set(everyIds.value)
+  return props.selected.filter(id => clearing.has(id)).length
+})
 
 function toggleRow(id) {
   const row = shown.value.find(item => item.procId === id)
@@ -280,7 +285,7 @@ function reset() {
   <section class="card" style="margin-top: 14px">
     <div class="toolbar limit-bar">
       <span class="count">期限共 {{ totalText }} 条</span>
-      <button v-if="selectable" class="ghost tiny" type="button" :disabled="checking || !pageIds.length" @click="togglePage">{{ pageAll ? '取消全选' : '全选本页' }} {{ pageIds.length }}</button>
+      <button v-if="selectable" class="ghost tiny" type="button" :disabled="checking || !pageIds.length" @click="togglePage">{{ pageAll ? '取消全选' : '全选本页' }} {{ pageAll ? clearCount : pageIds.length }}</button>
       <button v-if="selectable && cachePages" class="ghost tiny" type="button" :disabled="checking || !everyIds.length" @click="selectEvery">全选所有 {{ everyIds.length }}</button>
       <button v-if="selectable && cachePages" class="ghost tiny" type="button" :disabled="checking || !plainIds.length" @click="selectPlain">全选所有（非补非仲） {{ plainIds.length }}</button>
       <div v-if="live && totalPages > 1" class="pagination">

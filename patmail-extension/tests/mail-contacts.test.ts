@@ -66,6 +66,25 @@ describe('发文页联系人', () => {
     expect(partial.data.message).toContain('IP联系人')
   })
 
+  it('联系人读取超时后再试一次', async () => {
+    const calls: MailContactOperation[] = []
+    const loaded = await loadMailContactText({ mailId, customerId }, async operation => {
+      calls.push(operation)
+      if (operation === 'getCaseContact' && calls.filter(item => item === 'getCaseContact').length === 1) {
+        return apiError('REQUEST_TIMEOUT', '请求超时，请重试。')
+      }
+      const key = operation === 'getRecentContact' ? 'RecentContact'
+        : operation === 'getCustomerContact' ? 'CustomerContact'
+          : operation === 'getCaseContact' ? 'CaseContact'
+            : operation === 'getSalesContact' ? 'SalesContact'
+              : operation === 'getPicsContact' ? 'PicsContact'
+                : 'CaseAgentContact'
+      return ok({ ClientInfo: { IsLogin: true }, [key]: key === 'CustomerContact' ? [{ contact_name: '张三', email: 'a@example.com', contact_type_zh_cn: 'IP联系人' }] : [] })
+    })
+    expect(calls.filter(item => item === 'getCaseContact')).toEqual(['getCaseContact', 'getCaseContact'])
+    expect(loaded.ok && loaded.data.complete).toBe(true)
+  })
+
   it('几组联系人同时网关异常时，原因只写一次', async () => {
     const loaded = await loadMailContactText({ mailId, customerId }, async () => apiError('HTTP_ERROR', 'EASY 网关异常。', 502))
     expect(loaded.ok).toBe(true)

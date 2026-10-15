@@ -791,6 +791,11 @@ export function summarizeLimitMailSubmit(results: LimitMailSubmitResult[], stopp
   if (!last) return head
   /** 整批只有不用发时，这是仲裁的明确结论，不说成「没有提交到审核人」的失败。 */
   if (!submitted.length && /客户要求这封提醒不用发，没有创建发文/.test(last.message)) return last.message
+  /** 没停批时也要把这一封自己的原因带上。只回「没有提交到审核人。」会被进度条抹成「没有写明原因」。 */
+  if (!submitted.length) {
+    const reason = last.message.replace(/^没有提交到审核人。/, '')
+    return reason ? `没有提交到审核人。${reason}` : head
+  }
   return stopped ? `${head}${last.message}` : head
 }
 

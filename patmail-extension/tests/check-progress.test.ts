@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { taskCheckSnapshot } from '../src/app/check-progress'
+import { sessionInterrupted, taskCheckSnapshot } from '../src/app/check-progress'
 
 describe('发文核对进度', () => {
   it('还没对上时只给百分比，不写结束时间', () => {
@@ -24,5 +24,22 @@ describe('发文核对进度', () => {
     const view = taskCheckSnapshot(80, 80, 1_000, 9_000, 'done')
     expect(view.percent).toBe(100)
     expect(view.eta).toBe('')
+  })
+
+  it('登录中断时保留进度，不估结束时间', () => {
+    const view = taskCheckSnapshot(48, 179, 1_000, 9_000, 'hold')
+    expect(view.done).toBe(48)
+    expect(view.total).toBe(179)
+    expect(view.percent).toBe(26.8)
+    expect(view.eta).toBe('')
+  })
+
+  it('登录和会话中断要整表停住等接回', () => {
+    expect(sessionInterrupted('登录已失效。')).toBe(true)
+    expect(sessionInterrupted('登录检测超时。')).toBe(true)
+    expect(sessionInterrupted('会话已变化，请重新检测后再继续。')).toBe(true)
+    expect(sessionInterrupted('尚未连接 EASY。')).toBe(true)
+    expect(sessionInterrupted('绑定的 EASY 标签页已失效。')).toBe(true)
+    expect(sessionInterrupted('原网站查询太慢，没有在 1 分钟内返回。')).toBe(false)
   })
 })

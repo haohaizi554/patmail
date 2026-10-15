@@ -8,6 +8,7 @@ const caption = computed(() => {
   const progress = taskCheckProgress
   const percent = Number.isInteger(progress.percent) ? String(progress.percent) : progress.percent.toFixed(1)
   const head = `已核对 ${percent}%（${progress.done}/${progress.total}）`
+  if (progress.status === 'hold') return `${head} 登录中断，接回后继续`
   if (progress.status === 'done') return `${head} 核对结束`
   if (progress.status === 'fail') return `${head} 核对停了`
   if (progress.eta) return `${head} 预计 ${progress.eta} 结束`

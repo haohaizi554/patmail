@@ -9,7 +9,7 @@ import { PCT_RESUME_KEY, PENDING_CUSTOMER_KEY } from '../../customer/mail-flow'
 import { fillSheetEmails } from '../../customer/customer-page'
 import { IC_LOOKUP_WIDTH } from '../../customer/ic-flow-lookup'
 import { MAILED_UNFINISHED_REVIEW, SKIP_SEND_REVIEW, reviewNeedsArbitration, type IcFlowHit } from '../../customer/pct-flow-status'
-import { paintTaskCheckProgress, resetTaskCheckProgress } from '../check-progress'
+import { paintTaskCheckProgress, resetTaskCheckProgress, sessionInterrupted } from '../check-progress'
 import { applyArbitrationReply, arbitrationAllowed, checkedSourceSheets, iprArbitrationWaves, isPctWorkbookSheet, missedSourceSheets, pctRowsFromWorkbook, shouldAutoArbitrate, type ArbitrationDecision } from '../../customer/pct-workbook'
 import { applyPctMailTypes, buildPctTask, clonePctTask, matchSheetCtrlProcs, PCT_WORKFLOW_TASK_KEY, procGapNotes, readWorkflowTask, recarryCustomerContacts, summarizePctTask, volumesOf, writeWorkflowTask } from '../../customer/pct-sheet'
 import type { CustomerQueryProfile, PctTaskRow } from '../../customer/types'
@@ -102,6 +102,11 @@ let sheetQueryToken = 0
 let sheetImportToken = 0
 let liveAsked: Array<FlowAsk & { tries: number }> | null = null
 let liveMeter: { total: number; startedAt: number; finished: Set<string> } | null = null
+let holdCheck = false
+let holdLimit = false
+let resumingCheck = false
+let holdSpin = 0
+let holdTimer = 0
 const SHEET_PAGE_SIZE = 100
 
 const definition = computed(() => props.catalog.workflows.find(item => item.id === workflowId.value) ?? null)
@@ -583,11 +588,15 @@ function applyDesk(payload: unknown): void {
   if (typeof desk.status === 'string') status.value = desk.status
   rows.value = next
   const ic = phaseOf(desk.icPhase)
-  icPhase.value = ic === 'run' ? 'fail' : ic
-  icNote.value = ic === 'run' ? '登录中断时核对还在进行。已经对上的行还在，可以继续查剩下的。' : (typeof desk.icNote === 'string' ? desk.icNote : '')
+  const icNoteText = typeof desk.icNote === 'string' ? desk.icNote : ''
+  holdCheck = ic === 'run' || (ic === 'fail' && sessionInterrupted(icNoteText))
+  icPhase.value = holdCheck ? 'run' : ic
+  icNote.value = holdCheck ? '登录中断时核对还在进行。同一位登录人接回后会接着查剩下的。' : icNoteText
   const limit = phaseOf(desk.limitPhase)
-  limitPhase.value = limit === 'run' ? 'fail' : limit
-  limitNote.value = limit === 'run' ? '登录中断时查询还在进行。已经查到的结果还在。' : (typeof desk.limitNote === 'string' ? desk.limitNote : '')
+  const limitNoteText = typeof desk.limitNote === 'string' ? desk.limitNote : ''
+  holdLimit = limit === 'run' || (limit === 'fail' && sessionInterrupted(limitNoteText))
+  limitPhase.value = holdLimit ? 'run' : limit
+  limitNote.value = holdLimit ? '登录中断时查询还在进行。同一位登录人接回后会接着查。' : limitNoteText
   progress.value = Array.isArray(desk.progress)
     ? desk.progress.flatMap(item => {
       if (!item || typeof item !== 'object') return []
@@ -619,6 +628,15 @@ function applyDesk(payload: unknown): void {
   deskOwner = owner
   if (!sheetNotice.value) sheetNotice.value = '已从本机恢复账本找回这个系统上次留下的工作。'
   gapWaves.value = iprArbitrationWaves(rowsForArbitration(), {}, {}, { iprOnly: arbitrateIprOnly.value })
+  if (holdCheck) {
+    const done = settledKeys()
+    const left = pendingCheckJobs()
+    paintTaskCheckProgress(done.size, done.size + left.length, Date.now(), left.length ? 'hold' : 'done')
+  }
+  if (connection.value.sessionStatus === 'authenticated') {
+    resumeHeldLimit()
+    resumeHeldCheck()
+  }
 }
 
 function pokeDesk(): void {
@@ -641,8 +659,22 @@ function resetLimit(): void {
   icNote.value = ''
   clearHits()
   liveMeter = null
+  holdCheck = false
+  holdLimit = false
+  holdSpin = 0
+  if (holdTimer) window.clearTimeout(holdTimer)
+  holdTimer = 0
   resetTaskCheckProgress()
 }
+
+watch(() => connection.value.sessionStatus, (next, previous) => {
+  if (next !== 'authenticated' || next === previous) return
+  holdSpin = 0
+  if (holdTimer) window.clearTimeout(holdTimer)
+  holdTimer = 0
+  resumeHeldLimit()
+  resumeHeldCheck()
+})
 
 function volumeKey(value: string): string {
   return value.replace(/\s/g, '').toUpperCase()
@@ -777,15 +809,112 @@ function hitFromItem(item: IcFlowHit): IcHit {
   }
 }
 
-async function lookupCases(token: number, only?: FlowAsk[], kind: 'unread' | 'missing' = 'unread'): Promise<void> {
-  const again = Boolean(only)
-  releasePublish()
-  if (!bridge || connection.value.sessionStatus !== 'authenticated') {
+function rowAsk(row: PctTaskRow): FlowAsk | null {
+  return flowAsk(row.ourVolume, row.procLabel, row.customerVolume, !row.iprName.trim())
+}
+
+function settledKeys(): Set<string> {
+  const keys = new Set<string>()
+  for (const row of rows.value) {
+    const ask = rowAsk(row)
+    if (!ask) continue
+    const hit = icHits[icKey(ask.caseVolume, ask.procLabel)]
+    if (hit && !hit.unread) keys.add(icKey(ask.caseVolume, ask.procLabel))
+  }
+  return keys
+}
+
+function pendingCheckJobs(): FlowAsk[] {
+  const jobs: FlowAsk[] = []
+  const seen = new Set<string>()
+  const done = settledKeys()
+  for (const row of rows.value) {
+    const ask = rowAsk(row)
+    if (!ask) continue
+    const key = icKey(ask.caseVolume, ask.procLabel)
+    if (seen.has(key) || done.has(key)) continue
+    seen.add(key)
+    jobs.push(ask)
+  }
+  return jobs
+}
+
+function finishInterruptedCheck(): void {
+  icPhase.value = 'done'
+  gapWaves.value = iprArbitrationWaves(rowsForArbitration(), {}, {}, { iprOnly: arbitrateIprOnly.value })
+  const done = settledKeys().size
+  paintTaskCheckProgress(done, done || 1, Date.now(), 'done')
+  if (shouldAutoArbitrate({ fullCheck: true, phase: 'done', enabled: autoArbitrate.value, gaps: gapWaves.value.length, asking: askingGap.value })) {
+    void askGaps()
+  }
+}
+
+function giveUpHeldWork(): void {
+  if (holdTimer) window.clearTimeout(holdTimer)
+  holdTimer = 0
+  if (holdCheck) {
+    holdCheck = false
     icPhase.value = 'fail'
-    icNote.value = '还没连上 EASY，库里有没有还没查。'
-    resetTaskCheckProgress()
+    icNote.value = '接回来之后核对还是被登录打断。可以点「整表再查」。'
+    const done = settledKeys()
+    const left = pendingCheckJobs()
+    paintTaskCheckProgress(done.size, done.size + left.length, Date.now(), 'fail')
+  }
+  if (holdLimit) {
+    holdLimit = false
+    limitPhase.value = 'fail'
+    limitNote.value = '接回来之后期限查询还是被登录打断。'
+  }
+}
+
+/** 已经显示为登录中，就等会话重新变成已登录再继续。若会话一直没掉，也再试两次，避免接回和这次失败挤在同一刻。 */
+function scheduleHeldResume(): void {
+  if (holdTimer) return
+  if (connection.value.sessionStatus !== 'authenticated') {
+    holdSpin = 0
     return
   }
+  holdSpin += 1
+  if (holdSpin > 2) {
+    giveUpHeldWork()
+    return
+  }
+  holdTimer = window.setTimeout(() => {
+    holdTimer = 0
+    resumeHeldLimit()
+    resumeHeldCheck()
+  }, 400)
+}
+
+function resumeHeldLimit(): void {
+  if (!holdLimit || connection.value.sessionStatus !== 'authenticated') return
+  const procs = queryProcs.value.filter(item => isQueryGuid(item.id) && item.volumes.trim())
+  if (!procs.length && !querySeed.value) {
+    holdLimit = false
+    return
+  }
+  holdLimit = false
+  limitPhase.value = 'run'
+  limitNote.value = '接回来了，继续查期限监控。'
+  queryToken.value += 1
+}
+
+function resumeHeldCheck(): void {
+  if (!holdCheck || resumingCheck || connection.value.sessionStatus !== 'authenticated' || !bridge) return
+  const jobs = pendingCheckJobs()
+  holdCheck = false
+  if (!jobs.length) {
+    if (rows.value.length) finishInterruptedCheck()
+    return
+  }
+  resumingCheck = true
+  void lookupCases(++sheetQueryToken, jobs, 'unread', true).finally(() => { resumingCheck = false })
+}
+
+async function lookupCases(token: number, only?: FlowAsk[], kind: 'unread' | 'missing' = 'unread', resume = false): Promise<void> {
+  const again = Boolean(only)
+  releasePublish()
+  if (!resume) holdCheck = false
   const page = bridge
   const seen = new Set<string>()
   const source = only ?? rows.value.map(row => flowAsk(row.ourVolume, row.procLabel, row.customerVolume, !row.iprName.trim())).filter((row): row is FlowAsk => Boolean(row))
@@ -801,13 +930,30 @@ async function lookupCases(token: number, only?: FlowAsk[], kind: 'unread' | 'mi
     seen.add(key)
     asked.push({ ...ask, tries: 0 })
   }
-  const meter = { total: asked.length, startedAt: Date.now(), finished: new Set<string>() }
+  const prior = resume ? settledKeys() : new Set<string>()
+  const meter = { total: prior.size + asked.length, startedAt: Date.now(), finished: new Set(prior) }
   liveMeter = meter
-  paintTaskCheckProgress(0, meter.total, meter.startedAt, 'run')
+  if (!page || connection.value.sessionStatus !== 'authenticated') {
+    holdCheck = true
+    liveMeter = null
+    liveAsked = null
+    if (rows.value.length) icPhase.value = 'run'
+    icNote.value = '还没连上 EASY。同一位登录人接回后会接着核对。'
+    const done = settledKeys()
+    const left = pendingCheckJobs()
+    paintTaskCheckProgress(done.size, Math.max(done.size + left.length, meter.total), Date.now(), left.length ? 'hold' : 'done')
+    return
+  }
+  const bound = page
+  paintTaskCheckProgress(meter.finished.size, meter.total, meter.startedAt, 'run')
   await new Promise(resolve => window.setTimeout(resolve, 50))
   if (token !== sheetQueryToken) return
   icPhase.value = 'run'
-  icNote.value = !again ? '正在用案件查询核对文号和流程状态…' : kind === 'missing' ? '正在把库里没有的放回队尾…' : '正在把没查成的重新入队…'
+  icNote.value = !again
+    ? '正在用案件查询核对文号和流程状态…'
+    : resume
+      ? '接回来了，继续核对剩下的…'
+      : kind === 'missing' ? '正在把库里没有的放回队尾…' : '正在把没查成的重新入队…'
   if (!again) {
     icHits = Object.create(null)
     recordByVolume = Object.create(null)
@@ -825,6 +971,7 @@ async function lookupCases(token: number, only?: FlowAsk[], kind: 'unread' | 'mi
     icNote.value = `正在核对 ${meter.finished.size}/${meter.total}…`
     icEpoch.value += 1
     paintTaskCheckProgress(meter.finished.size, meter.total, meter.startedAt, 'run')
+    pokeDesk()
   }
 
   function schedulePublish(): void {
@@ -882,7 +1029,7 @@ async function lookupCases(token: number, only?: FlowAsk[], kind: 'unread' | 'mi
     while (token === sheetQueryToken && !stopped) {
       const jobs = asked.splice(0, batchSize)
       if (!jobs.length) return
-      const response = await page.request({
+      const response = await bound.request({
         type: MessageType.LookupIcFlow,
         payload: { rows: jobs.map(job => ({ caseVolume: job.caseVolume, procLabel: job.procLabel, ...(job.customerVolume ? { customerVolume: job.customerVolume } : {}), ...(job.withRecord ? { withRecord: true as const } : {}) })) }
       })
@@ -893,7 +1040,7 @@ async function lookupCases(token: number, only?: FlowAsk[], kind: 'unread' | 'mi
           : response.type === MessageType.Error
             ? response.payload.message
             : '案件查询没有完成。'
-        if (/登录/.test(message)) {
+        if (sessionInterrupted(message)) {
           stopped = message
           return
         }
@@ -927,15 +1074,25 @@ async function lookupCases(token: number, only?: FlowAsk[], kind: 'unread' | 'mi
   }
   if (token !== sheetQueryToken) return
   icEpoch.value += 1
-  paintTaskCheckProgress(meter.finished.size, meter.total, meter.startedAt, stopped ? 'fail' : 'done')
+  const held = Boolean(stopped && sessionInterrupted(stopped))
+  paintTaskCheckProgress(meter.finished.size, meter.total, meter.startedAt, held ? 'hold' : stopped ? 'fail' : 'done')
   if (stopped) {
+    if (held) {
+      holdCheck = true
+      icPhase.value = 'run'
+      icNote.value = '登录中断，核对先停在这里。同一位登录人接回后会接着查剩下的。'
+      pokeDesk()
+      scheduleHeldResume()
+      return
+    }
+    holdSpin = 0
     icPhase.value = 'fail'
     icNote.value = stopped
     return
   }
   icPhase.value = 'done'
   gapWaves.value = iprArbitrationWaves(rowsForArbitration(), {}, {}, { iprOnly: arbitrateIprOnly.value })
-  if (shouldAutoArbitrate({ fullCheck: !again, phase: 'done', enabled: autoArbitrate.value, gaps: gapWaves.value.length, asking: askingGap.value })) {
+  if (shouldAutoArbitrate({ fullCheck: resume || !again, phase: 'done', enabled: autoArbitrate.value, gaps: gapWaves.value.length, asking: askingGap.value })) {
     void askGaps()
   }
   let found = 0
@@ -948,9 +1105,10 @@ async function lookupCases(token: number, only?: FlowAsk[], kind: 'unread' | 'mi
   }
   const missed = unreadCount ? `${unreadCount} 件没查成，其余已经对过。` : ''
   const againLabel = kind === 'missing' ? '库里没有' : '没查成'
-  icNote.value = again
+  icNote.value = again && !resume
     ? `${againLabel}的 ${meter.total} 行又对过，这次对上 ${found} 件。${missed}`
     : `案件查询对上 ${found} 件。${missed}结束的事项也会留在结果里。`
+  holdSpin = 0
 }
 
 function jobsByFound(found: string): FlowAsk[] {
@@ -1031,7 +1189,15 @@ function onLimitResult(payload: { items: LimitMonitorRow[]; gates: Record<string
     limitPhase.value = 'run'
     return
   }
-  const failed = !payload.items.length && /失败|尚未连接|登录|中断|意外|还不能/.test(payload.message)
+  if (sessionInterrupted(payload.message)) {
+    holdLimit = true
+    limitPhase.value = 'run'
+    limitNote.value = '登录中断，期限查询先停住。同一位登录人接回后会接着查。'
+    scheduleHeldResume()
+    return
+  }
+  holdLimit = false
+  const failed = !payload.items.length && /失败|中断|意外|还不能/.test(payload.message)
   limitPhase.value = failed ? 'fail' : 'done'
 }
 
@@ -1137,8 +1303,9 @@ async function startSheetQuery(): Promise<void> {
   limitNote.value = '正在查期限监控…'
   if (!rows.value.length) return
   if (!bridge || connection.value.sessionStatus !== 'authenticated') {
-    limitPhase.value = 'fail'
-    limitNote.value = '还没连上 EASY，库里有没有还没查。'
+    holdLimit = true
+    limitPhase.value = 'run'
+    limitNote.value = '还没连上 EASY。同一位登录人接回后会接着查期限。'
     void lookupCases(token)
     return
   }
@@ -1564,6 +1731,7 @@ onUnmounted(() => {
   window.removeEventListener('pagehide', hideDesk)
   void flushRecovery('workflow-desk', deskScope(), readDesk)
   sheetObserver?.disconnect()
+  if (holdTimer) window.clearTimeout(holdTimer)
   sheetRuler?.remove()
   sheetRuler = null
   sheetObserved = null
